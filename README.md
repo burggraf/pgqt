@@ -10,6 +10,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Type Preservation**: Original PostgreSQL types (SERIAL, VARCHAR, TIMESTAMPTZ, etc.) are stored in a shadow catalog for reversible migrations
 - **SQL Transpilation**: PostgreSQL-specific syntax is automatically rewritten for SQLite compatibility
 - **ORM Support**: Works with Prisma, TypeORM, Drizzle, and other modern ORMs
+- **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
 
 ## Quick Start
 
@@ -100,6 +101,126 @@ SELECT * FROM public.users; -- → SELECT * FROM users
 
 -- Operators
 WHERE name ~~ 'alice%';    -- → WHERE name LIKE 'alice%'
+```
+
+### Role-Based Access Control (RBAC)
+
+PGlite Proxy implements PostgreSQL-compatible role-based access control, allowing you to manage users, roles, and permissions:
+
+#### Creating Roles
+
+```sql
+-- Create a basic role
+CREATE ROLE app_user WITH LOGIN;
+
+-- Create a superuser role
+CREATE ROLE admin WITH SUPERUSER CREATEDB CREATEROLE;
+
+-- Create a role with password
+CREATE ROLE readonly WITH LOGIN PASSWORD 'secure_password';
+```
+
+#### Granting Privileges
+
+```sql
+-- Grant table-level privileges
+GRANT SELECT ON users TO readonly;
+GRANT SELECT, INSERT, UPDATE ON orders TO app_user;
+GRANT ALL PRIVILEGES ON products TO admin;
+
+-- Grant role membership (role inheritance)
+GRANT app_user TO readonly;
+GRANT admin TO app_user;
+```
+
+#### Revoking Privileges
+
+```sql
+-- Revoke specific privileges
+REVOKE DELETE ON orders FROM app_user;
+REVOKE INSERT ON users FROM readonly;
+
+-- Revoke role membership
+REVOKE admin FROM app_user;
+```
+
+#### Using SET ROLE
+
+```sql
+-- Switch to a different role (if you have membership)
+SET ROLE app_user;
+
+-- View current role
+SELECT current_user;
+
+-- Reset to original login role
+SET ROLE NONE;
+```
+
+#### Permission Enforcement
+
+The proxy enforces permissions on all DML operations:
+
+- **SELECT**: Requires `SELECT` privilege on table
+- **INSERT**: Requires `INSERT` privilege on table
+- **UPDATE**: Requires `UPDATE` privilege on table
+- **DELETE**: Requires `DELETE` privilege on table
+- **DDL**: Requires superuser or table ownership
+
+**Permission Resolution:**
+1. Superusers bypass all permission checks
+2. Table owners have implicit all privileges
+3. Privileges are inherited through role membership
+4. PUBLIC grants apply to all roles
+
+#### System Catalog Views
+
+Query PostgreSQL-compatible system catalogs:
+
+```sql
+-- List all roles
+SELECT * FROM pg_roles;
+
+-- View role memberships
+SELECT * FROM pg_auth_members;
+
+-- Check table permissions
+SELECT * FROM has_table_privilege('app_user', 'users', 'SELECT');
+
+-- View table ownership
+SELECT relname, rolname as owner 
+FROM pg_class c 
+JOIN pg_roles r ON c.relowner = r.oid;
+```
+
+#### Example: Multi-User Setup
+
+```sql
+-- 1. Create roles
+CREATE ROLE admin WITH SUPERUSER;
+CREATE ROLE app_user WITH LOGIN;
+CREATE ROLE readonly WITH LOGIN;
+
+-- 2. Create tables (admin owns them)
+CREATE TABLE users (id SERIAL, name TEXT);
+CREATE TABLE orders (id SERIAL, user_id INT, total REAL);
+
+-- 3. Grant permissions
+GRANT SELECT ON users TO readonly;
+GRANT SELECT, INSERT, UPDATE ON orders TO app_user;
+GRANT ALL ON users TO app_user;
+
+-- 4. Test permissions
+-- As readonly: SELECT works, INSERT fails
+SET ROLE readonly;
+SELECT * FROM users;           -- ✅ Success
+INSERT INTO users VALUES (1);  -- ❌ Permission denied
+
+-- As app_user: Can modify users and orders
+SET ROLE app_user;
+INSERT INTO users VALUES (1, 'Alice');  -- ✅ Success
+INSERT INTO orders VALUES (1, 1, 99.99); -- ✅ Success
+DELETE FROM users WHERE id = 1;         -- ❌ Permission denied
 ```
 
 ### Shadow Catalog
@@ -288,6 +409,7 @@ src/
 ## Roadmap
 
 ### Phase 3 (In Progress)
+- [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [ ] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [ ] Row-Level Security (RLS) emulation
