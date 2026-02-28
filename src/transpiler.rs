@@ -2,8 +2,7 @@ use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
-    JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt, VariableSetStmt,
-    ObjectType, RoleSpecType
+    JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
 };
 
 /// Metadata for a column extracted from a CREATE TABLE statement

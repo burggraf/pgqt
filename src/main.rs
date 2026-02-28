@@ -42,6 +42,7 @@ use transpiler::transpile_with_metadata;
 /// Session context for each client connection
 #[derive(Debug, Clone)]
 struct SessionContext {
+    #[allow(dead_code)]
     authenticated_user: String,
     current_user: String,
 }
