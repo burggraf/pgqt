@@ -15,7 +15,7 @@ pub struct ColumnMetadata {
     pub constraints: Option<String>,
 }
 
-/// Ensures the `__pg_meta__` shadow catalog table exists
+/// Ensures the `__pg_meta__` and RBAC tables exist
 pub fn init_catalog(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_meta__ (
@@ -35,6 +35,59 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
         [],
     )
     .context("Failed to create index on __pg_meta__")?;
+
+    // --- RBAC Tables ---
+
+    // __pg_authid__: stores roles
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_authid__ (
+            oid INTEGER PRIMARY KEY,
+            rolname TEXT UNIQUE NOT NULL,
+            rolsuper BOOLEAN DEFAULT FALSE,
+            rolinherit BOOLEAN DEFAULT TRUE,
+            rolcreaterole BOOLEAN DEFAULT FALSE,
+            rolcreatedb BOOLEAN DEFAULT FALSE,
+            rolcanlogin BOOLEAN DEFAULT FALSE,
+            rolpassword TEXT
+        )",
+        [],
+    )
+    .context("Failed to create __pg_authid__ table")?;
+
+    // __pg_auth_members__: role membership
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_auth_members__ (
+            roleid INTEGER NOT NULL,
+            member INTEGER NOT NULL,
+            grantor INTEGER NOT NULL,
+            admin_option BOOLEAN DEFAULT FALSE,
+            PRIMARY KEY (roleid, member)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_auth_members__ table")?;
+
+    // __pg_acl__: access control lists for relations
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_acl__ (
+            object_id INTEGER NOT NULL,
+            object_type TEXT NOT NULL, -- 'relation', 'database', 'schema'
+            grantee_id INTEGER NOT NULL, -- role OID or 0 for PUBLIC
+            privilege TEXT NOT NULL, -- 'SELECT', 'INSERT', etc.
+            grantable BOOLEAN DEFAULT FALSE,
+            grantor_id INTEGER NOT NULL,
+            PRIMARY KEY (object_id, object_type, grantee_id, privilege)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_acl__ table")?;
+
+    // Bootstrap: Create default 'postgres' superuser (OID 10)
+    conn.execute(
+        "INSERT OR IGNORE INTO __pg_authid__ (oid, rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin)
+         VALUES (10, 'postgres', 1, 1, 1, 1, 1)",
+        [],
+    )?;
 
     Ok(())
 }
@@ -347,14 +400,34 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
     // pg_roles
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_roles AS
-         SELECT 10 as oid, 'postgres' as rolname, true as rolsuper, true as rolinherit, true as rolcreaterole, true as rolcreatedb, true as rolcanlogin, -1 as rolconnlimit, NULL as rolvaliduntil, false as rolreplication, false as rolbypassrls, NULL as rolconfig",
+         SELECT
+            oid,
+            rolname,
+            rolsuper,
+            rolinherit,
+            rolcreaterole,
+            rolcreatedb,
+            rolcanlogin,
+            -1 as rolconnlimit,
+            NULL as rolvaliduntil,
+            false as rolreplication,
+            false as rolbypassrls,
+            NULL as rolconfig
+         FROM __pg_authid__",
+        [],
+    )?;
+
+    // pg_authid
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS pg_authid AS
+         SELECT * FROM __pg_authid__",
         [],
     )?;
 
     // pg_auth_members
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_auth_members AS
-         SELECT 10 as roleid, 10 as member, 10 as grantor, false as admin_option",
+         SELECT roleid, member, grantor, admin_option FROM __pg_auth_members__",
         [],
     )?;
 
