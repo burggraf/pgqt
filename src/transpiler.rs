@@ -1097,9 +1097,11 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
         // System catalog functions - strip schema and return as-is for now
         "pg_get_userbyid" => "pg_get_userbyid",
         "pg_table_is_visible" => "pg_table_is_visible",
-        // UUID generation - SQLite doesn't have built-in, use randomblob
-        "gen_random_uuid" => "lower(hex(randomblob(16)))",
-        "uuid_generate_v4" => "lower(hex(randomblob(16)))",
+        // UUID generation - SQLite doesn't have built-in, use randomblob with UUIDv4 format
+        // UUIDv4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx where y is 8, 9, a, or b
+        // Note: parentheses are added by DEFAULT constraint handling, so we don't include them here
+        "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
+        "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         _ => {
             // For unknown functions, return the full name if schema-qualified
             if func_parts.len() > 1 {
@@ -1114,7 +1116,7 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
         || sqlite_func == "date('now')" 
         || sqlite_func == "time('now')" 
         || sqlite_func == "random()"
-        || sqlite_func == "lower(hex(randomblob(16)))" {
+        || sqlite_func.starts_with("lower(hex(randomblob(4)))") {
         return sqlite_func.to_string();
     }
 
