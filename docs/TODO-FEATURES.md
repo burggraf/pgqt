@@ -15,7 +15,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Check Constraints** | ✅ | Low | Natively supported by SQLite. |
 | **Views** | ✅ | Low | Natively supported by SQLite. |
 | **Common Table Expressions (CTE)** | ✅ | Low | Natively supported by SQLite (including Recursive CTEs). |
-| **Window Functions** | ⚠️ | Medium | SQLite support is more limited than PG. Basic `OVER`, `PARTITION BY`, `RANK` work, but advanced frames might need polyfills. |
+| **Window Functions** | ✅ | Medium | Full support for all window functions: row_number(), rank(), dense_rank(), percent_rank(), cume_dist(), ntile(), lag(), lead(), first_value(), last_value(), nth_value(). Aggregate functions as window functions (sum, avg, count, min, max). Frame specifications: ROWS, RANGE, GROUPS with BETWEEN, UNBOUNDED PRECEDING/FOLLOWING, CURRENT ROW, offset PRECEDING/FOLLOWING. See [docs/WINDOW.md](./WINDOW.md) for details. |
 | **Triggers** | ✅ | Low | Supported by SQLite, though syntax varies slightly and might need transpilation. |
 
 ## Data Types

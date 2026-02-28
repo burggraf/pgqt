@@ -15,6 +15,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Row-Level Security (RLS)**: Fine-grained access control at the row level
 - **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
+- **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 
 ## Quick Start
 
@@ -613,11 +614,56 @@ LIMIT 5;
 
 For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
+### Window Functions
+
+PGlite Proxy provides full PostgreSQL-compatible window function support:
+
+```sql
+-- Ranking within groups
+SELECT department, name, salary,
+       rank() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank
+FROM employees;
+
+-- Running total
+SELECT order_date, amount,
+       sum(amount) OVER (ORDER BY order_date 
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_total
+FROM orders;
+
+-- Comparing with previous row
+SELECT date, revenue,
+       revenue - lag(revenue) OVER (ORDER BY date) as daily_change
+FROM daily_stats;
+
+-- Moving average
+SELECT date, price,
+       avg(price) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) as moving_avg
+FROM stocks;
+```
+
+**Supported Window Functions:**
+- `row_number()`, `rank()`, `dense_rank()`, `percent_rank()`, `cume_dist()`, `ntile(n)`
+- `lag(value [, offset [, default]])`, `lead(value [, offset [, default]])`
+- `first_value(value)`, `last_value(value)`, `nth_value(value, n)`
+
+**Aggregate Functions as Window Functions:**
+- `sum()`, `avg()`, `count()`, `min()`, `max()`, and all other aggregate functions
+
+**Frame Specifications:**
+- `ROWS`, `RANGE`, `GROUPS` frame modes
+- `UNBOUNDED PRECEDING/FOLLOWING`, `CURRENT ROW`, `offset PRECEDING/FOLLOWING` bounds
+- Full `BETWEEN ... AND ...` syntax
+
+For complete documentation, see [docs/WINDOW.md](./docs/WINDOW.md).
+
+For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
+
 ## Roadmap
 
 ### Phase 3 (In Progress)
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [x] **Schemas (Namespaces)** - Full schema support using SQLite ATTACH DATABASE
+- [x] **Window Functions** - Full support for all PostgreSQL window functions with frame specifications
 - [ ] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [x] Row-Level Security (RLS) emulation

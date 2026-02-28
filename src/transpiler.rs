@@ -3,7 +3,7 @@ use pg_query::protobuf::{
     AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
-    AlterTableStmt,
+    AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr,
 };
 
 // RLS-related imports
@@ -874,6 +874,9 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
         match inner {
             NodeEnum::ResTarget(ref res_target) => reconstruct_res_target(res_target, ctx),
             NodeEnum::RangeVar(ref range_var) => reconstruct_range_var(range_var, ctx),
+            NodeEnum::RangeSubselect(ref range_subselect) => {
+                reconstruct_range_subselect(range_subselect, ctx)
+            }
             NodeEnum::AStar(_) => "*".to_string(),
             NodeEnum::ColumnRef(ref col_ref) => reconstruct_column_ref(col_ref, ctx),
             NodeEnum::String(s) => s.sval.clone(),
@@ -887,6 +890,10 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
             NodeEnum::SubLink(ref sub_link) => reconstruct_sub_link(sub_link, ctx),
             NodeEnum::NullTest(ref null_test) => reconstruct_null_test(null_test, ctx),
             NodeEnum::CaseExpr(ref case_expr) => reconstruct_case_expr(case_expr, ctx),
+            NodeEnum::CoalesceExpr(ref coalesce_expr) => {
+                reconstruct_coalesce_expr(coalesce_expr, ctx)
+            }
+            NodeEnum::SortBy(_) => reconstruct_sort_by(node, ctx),
             NodeEnum::List(ref list) => {
                 let items: Vec<String> = list.items.iter().map(|n| reconstruct_node(n, ctx)).collect();
                 items.join(", ")
@@ -1184,6 +1191,37 @@ fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileContext) -> St
     }
 }
 
+/// Reconstruct a RangeSubselect node (subquery in FROM clause)
+fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut TranspileContext) -> String {
+    let subquery = range_subselect
+        .subquery
+        .as_ref()
+        .map(|n| reconstruct_node(n, ctx))
+        .unwrap_or_default();
+    
+    let alias = range_subselect
+        .alias
+        .as_ref()
+        .map(|a| a.aliasname.to_lowercase());
+    
+    if let Some(a) = alias {
+        format!("({}) as {}", subquery, a)
+    } else {
+        format!("({})", subquery)
+    }
+}
+
+/// Reconstruct a CoalesceExpr node
+fn reconstruct_coalesce_expr(coalesce_expr: &CoalesceExpr, ctx: &mut TranspileContext) -> String {
+    let args: Vec<String> = coalesce_expr
+        .args
+        .iter()
+        .map(|n| reconstruct_node(n, ctx))
+        .collect();
+    
+    format!("coalesce({})", args.join(", "))
+}
+
 /// Reconstruct a ColumnRef node
 fn reconstruct_column_ref(col_ref: &ColumnRef, _ctx: &mut TranspileContext) -> String {
     let fields: Vec<String> = col_ref
@@ -1239,11 +1277,17 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
 
-    let args: Vec<String> = func_call
-        .args
-        .iter()
-        .map(|n| reconstruct_node(n, ctx))
-        .collect();
+    // Build args string - handle agg_star (count(*)) case
+    let args_str = if func_call.agg_star {
+        "*".to_string()
+    } else {
+        let args: Vec<String> = func_call
+            .args
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        args.join(", ")
+    };
 
     // Map PostgreSQL functions to SQLite equivalents
     let sqlite_func = match func_name {
@@ -1316,9 +1360,11 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
             // but strip 'pg_catalog' if present as SQLite doesn't have it
             if func_parts.len() > 1 {
                 if func_parts[0] == "pg_catalog" {
-                    return format!("{}({})", func_name, args.join(", "));
+                    let base = format!("{}({})", func_name, args_str);
+                    return add_window_clause(&base, func_call, ctx);
                 }
-                return format!("{}({})", full_func_name, args.join(", "));
+                let base = format!("{}({})", full_func_name, args_str);
+                return add_window_clause(&base, func_call, ctx);
             }
             func_name
         }
@@ -1333,7 +1379,18 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
         return sqlite_func.to_string();
     }
 
-    format!("{}({})", sqlite_func, args.join(", "))
+    let base = format!("{}({})", sqlite_func, args_str);
+    add_window_clause(&base, func_call, ctx)
+}
+
+/// Add OVER clause to a function call if present
+fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut TranspileContext) -> String {
+    if let Some(ref over) = func_call.over {
+        let window_sql = reconstruct_window_def(over, ctx);
+        // Always add OVER clause if the function has one, even if empty
+        return format!("{} over ({})", base, window_sql);
+    }
+    base.to_string()
 }
 
 /// Reconstruct a CREATE ROLE statement as an INSERT into __pg_authid__
@@ -2405,6 +2462,158 @@ fn reconstruct_delete_stmt_with_rls(
             .collect();
         parts.push(using_items.join(", "));
     }
+    
+    parts.join(" ")
+}
+
+// ============================================================================
+// Window Function Support
+// ============================================================================
+
+/// Frame option bitmasks from PostgreSQL (parsenodes.h)
+pub mod frame_options {
+    pub const NONDEFAULT: i32 = 0x00001;
+    pub const RANGE: i32 = 0x00002;
+    pub const ROWS: i32 = 0x00004;
+    pub const GROUPS: i32 = 0x00008;
+    pub const BETWEEN: i32 = 0x00010;
+    pub const START_UNBOUNDED_PRECEDING: i32 = 0x00020;
+    pub const END_UNBOUNDED_PRECEDING: i32 = 0x00040; // disallowed
+    pub const START_UNBOUNDED_FOLLOWING: i32 = 0x00080; // disallowed
+    pub const END_UNBOUNDED_FOLLOWING: i32 = 0x00100;
+    pub const START_CURRENT_ROW: i32 = 0x00200;
+    pub const END_CURRENT_ROW: i32 = 0x00400;
+    pub const START_OFFSET_PRECEDING: i32 = 0x00800;
+    pub const END_OFFSET_PRECEDING: i32 = 0x01000;
+    pub const START_OFFSET_FOLLOWING: i32 = 0x02000;
+    pub const END_OFFSET_FOLLOWING: i32 = 0x04000;
+    pub const EXCLUDE_CURRENT_ROW: i32 = 0x08000;
+    pub const EXCLUDE_GROUP: i32 = 0x10000;
+    pub const EXCLUDE_TIES: i32 = 0x20000;
+    pub const EXCLUSION: i32 = EXCLUDE_CURRENT_ROW | EXCLUDE_GROUP | EXCLUDE_TIES;
+}
+
+/// Reconstruct a WindowDef (OVER clause) into SQLite syntax
+fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> String {
+    let mut parts = Vec::new();
+    
+    // Handle named window reference (e.g., OVER w)
+    if !win_def.refname.is_empty() {
+        return win_def.refname.to_lowercase();
+    }
+    
+    // PARTITION BY clause
+    if !win_def.partition_clause.is_empty() {
+        let partition_cols: Vec<String> = win_def
+            .partition_clause
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(format!("partition by {}", partition_cols.join(", ")));
+    }
+    
+    // ORDER BY clause
+    if !win_def.order_clause.is_empty() {
+        let order_cols: Vec<String> = win_def
+            .order_clause
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(format!("order by {}", order_cols.join(", ")));
+    }
+    
+    // Frame specification
+    let frame_opts = win_def.frame_options;
+    
+    // Only add frame if NONDEFAULT is set (explicit frame specified)
+    if frame_opts & frame_options::NONDEFAULT != 0 {
+        let frame_str = reconstruct_frame_specification(win_def, ctx);
+        if !frame_str.is_empty() {
+            parts.push(frame_str);
+        }
+    }
+    
+    parts.join(" ")
+}
+
+/// Reconstruct frame specification (ROWS/RANGE/GROUPS BETWEEN ... AND ...)
+fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileContext) -> String {
+    let frame_opts = win_def.frame_options;
+    let mut parts = Vec::new();
+    
+    // Determine frame mode: ROWS, RANGE, or GROUPS
+    let mode = if frame_opts & frame_options::ROWS != 0 {
+        "rows"
+    } else if frame_opts & frame_options::GROUPS != 0 {
+        "groups"
+    } else {
+        "range" // default
+    };
+    
+    // Check for BETWEEN
+    let has_between = frame_opts & frame_options::BETWEEN != 0;
+    
+    // Build start bound
+    let start_bound = if frame_opts & frame_options::START_UNBOUNDED_PRECEDING != 0 {
+        "unbounded preceding".to_string()
+    } else if frame_opts & frame_options::START_CURRENT_ROW != 0 {
+        "current row".to_string()
+    } else if frame_opts & frame_options::START_OFFSET_PRECEDING != 0 {
+        if let Some(ref offset) = win_def.start_offset {
+            format!("{} preceding", reconstruct_node(offset, ctx))
+        } else {
+            "unbounded preceding".to_string()
+        }
+    } else if frame_opts & frame_options::START_OFFSET_FOLLOWING != 0 {
+        if let Some(ref offset) = win_def.start_offset {
+            format!("{} following", reconstruct_node(offset, ctx))
+        } else {
+            "current row".to_string()
+        }
+    } else {
+        // Default start
+        "unbounded preceding".to_string()
+    };
+    
+    // Build end bound
+    let end_bound = if frame_opts & frame_options::END_UNBOUNDED_FOLLOWING != 0 {
+        "unbounded following".to_string()
+    } else if frame_opts & frame_options::END_CURRENT_ROW != 0 {
+        "current row".to_string()
+    } else if frame_opts & frame_options::END_OFFSET_PRECEDING != 0 {
+        if let Some(ref offset) = win_def.end_offset {
+            format!("{} preceding", reconstruct_node(offset, ctx))
+        } else {
+            "current row".to_string()
+        }
+    } else if frame_opts & frame_options::END_OFFSET_FOLLOWING != 0 {
+        if let Some(ref offset) = win_def.end_offset {
+            format!("{} following", reconstruct_node(offset, ctx))
+        } else {
+            "current row".to_string()
+        }
+    } else {
+        // Default end
+        "current row".to_string()
+    };
+    
+    // Build frame string
+    if has_between {
+        parts.push(format!("{} between {} and {}", mode, start_bound, end_bound));
+    } else {
+        // Short form (e.g., ROWS UNBOUNDED PRECEDING)
+        parts.push(format!("{} {}", mode, start_bound));
+    }
+    
+    // Handle EXCLUDE clause
+    if frame_opts & frame_options::EXCLUDE_CURRENT_ROW != 0 {
+        parts.push("exclude current row".to_string());
+    } else if frame_opts & frame_options::EXCLUDE_GROUP != 0 {
+        parts.push("exclude group".to_string());
+    } else if frame_opts & frame_options::EXCLUDE_TIES != 0 {
+        parts.push("exclude ties".to_string());
+    }
+    // EXCLUDE NO OTHERS is the default, so we don't emit it
     
     parts.join(" ")
 }

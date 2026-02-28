@@ -1021,6 +1021,8 @@ impl SqliteHandler {
                 // Try to get value as different types and convert to string
                 let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
                     .map(|v| v.map(|x| x.to_string()))
+                    .or_else(|| row.get::<_, Option<f64>>(i).ok()
+                        .map(|v| v.map(|x| x.to_string())))
                     .or_else(|| row.get::<_, Option<String>>(i).ok())
                     .flatten();
                 match value {
