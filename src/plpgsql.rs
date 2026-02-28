@@ -3,7 +3,7 @@
 //! This module provides a Lua-based runtime for executing PostgreSQL
 //! procedural code (functions, triggers, DO blocks) within the proxy.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{Connection, types::Value};
 use std::collections::HashMap;
 
@@ -53,7 +53,7 @@ impl PlPgSqlRuntime {
 }
 
 /// Parse PL/pgSQL function and extract metadata
-pub fn parse_function(sql: &str) -> Result<FunctionMetadata> {
+pub fn parse_function(_sql: &str) -> Result<FunctionMetadata> {
     // TODO: Use pg_query to parse CREATE FUNCTION
     // Extract: name, arguments, return type, body
     

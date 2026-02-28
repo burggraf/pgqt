@@ -35,7 +35,7 @@ impl SqliteHandler {
     }
 
     /// Execute a SQL query and return the results
-    fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
+    fn execute_query(&self, sql: &str) -> Result<Vec<Response<'_>>> {
         let transpile_result = transpile_with_metadata(sql);
         let sqlite_sql = &transpile_result.sql;
 
@@ -69,7 +69,7 @@ impl SqliteHandler {
         }
     }
 
-    fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
+    fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response<'_>>> {
         let mut stmt = conn.prepare(sql)?;
         let col_count = stmt.column_count();
 
@@ -108,7 +108,7 @@ impl SqliteHandler {
         ))])
     }
 
-    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
+    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response<'_>>> {
         println!("Executing statement: {}", sql);
         let changes = conn.execute(sql, [])?;
 

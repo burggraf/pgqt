@@ -74,6 +74,7 @@ pub fn store_table_metadata(
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Retrieve all column metadata for a specific table
 pub fn get_table_metadata(conn: &Connection, table_name: &str) -> Result<Vec<ColumnMetadata>> {
     let mut stmt = conn.prepare(
@@ -100,6 +101,7 @@ pub fn get_table_metadata(conn: &Connection, table_name: &str) -> Result<Vec<Col
     Ok(result)
 }
 
+#[allow(dead_code)]
 /// Retrieve metadata for a specific column
 pub fn get_column_metadata(
     conn: &Connection,
@@ -128,6 +130,7 @@ pub fn get_column_metadata(
     }
 }
 
+#[allow(dead_code)]
 /// Delete all metadata for a table (e.g., when table is dropped)
 pub fn delete_table_metadata(conn: &Connection, table_name: &str) -> Result<()> {
     conn.execute(

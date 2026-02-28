@@ -1,8 +1,8 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    AConst, AExpr, BoolExpr, CaseWhen, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
+    AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
-    JoinExpr, NullTest, SubLink, CaseExpr, List
+    JoinExpr, NullTest, SubLink, CaseExpr
 };
 
 /// Metadata for a column extracted from a CREATE TABLE statement
@@ -53,6 +53,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
     }
 }
 
+#[allow(dead_code)]
 /// Transpile PostgreSQL SQL to SQLite SQL (backward compatible)
 pub fn transpile(sql: &str) -> String {
     transpile_with_metadata(sql).sql
@@ -1040,6 +1041,7 @@ fn reconstruct_column_ref(col_ref: &ColumnRef) -> String {
     fields.join(".")
 }
 
+#[allow(dead_code)]
 /// Check if a node represents LIMIT ALL
 fn is_limit_all(node: &Node) -> bool {
     if let Some(ref inner) = node.node {
@@ -1180,7 +1182,7 @@ fn debug_node(node: &Node, indent: usize) {
             NodeEnum::RangeVar(range_var) => {
                 println!("{}RangeVar: {}.{}", prefix, range_var.schemaname, range_var.relname);
             }
-            NodeEnum::ColumnRef(col_ref) => {
+            NodeEnum::ColumnRef(_col_ref) => {
                 println!("{}ColumnRef:", prefix);
             }
             NodeEnum::String(s) => {
