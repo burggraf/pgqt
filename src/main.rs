@@ -19,6 +19,7 @@ mod rls;
 mod rls_inject;
 mod transpiler;
 mod fts;
+mod vector;
 
 /// PostgreSQL-to-SQLite proxy server
 #[derive(Parser, Debug)]
@@ -438,6 +439,120 @@ impl SqliteHandler {
                 }
                 None => Ok(String::new()),
             }
+        })?;
+
+        // =====================================================
+        // Vector Search Functions (pgvector compatibility)
+        // =====================================================
+
+        // vector_l2_distance(vector, vector) - L2 (Euclidean) distance
+        conn.create_scalar_function("vector_l2_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::l2_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_cosine_distance(vector, vector) - Cosine distance
+        conn.create_scalar_function("vector_cosine_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::cosine_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_inner_product(vector, vector) - Inner product (dot product)
+        conn.create_scalar_function("vector_inner_product", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::inner_product(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_l1_distance(vector, vector) - L1 (Manhattan) distance
+        conn.create_scalar_function("vector_l1_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::l1_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // l2_distance - alias for vector_l2_distance (pgvector function name)
+        conn.create_scalar_function("l2_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::l2_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // cosine_distance - alias for vector_cosine_distance (pgvector function name)
+        conn.create_scalar_function("cosine_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::cosine_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // inner_product - alias for vector_inner_product (pgvector function name)
+        conn.create_scalar_function("inner_product", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::inner_product(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // l1_distance - alias for vector_l1_distance (pgvector function name)
+        conn.create_scalar_function("l1_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::l1_distance(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_dims(vector) - returns number of dimensions
+        conn.create_scalar_function("vector_dims", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let v: String = ctx.get(0)?;
+            crate::vector::vector_dims(&v)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // l2_norm(vector) - returns L2 norm (magnitude)
+        conn.create_scalar_function("l2_norm", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let v: String = ctx.get(0)?;
+            crate::vector::l2_norm(&v)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // l2_normalize(vector) - returns normalized vector
+        conn.create_scalar_function("l2_normalize", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let v: String = ctx.get(0)?;
+            crate::vector::l2_normalize(&v)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // subvector(vector, start, length) - extracts subvector
+        conn.create_scalar_function("subvector", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let v: String = ctx.get(0)?;
+            let start: i32 = ctx.get(1)?;
+            let length: i32 = ctx.get(2)?;
+            crate::vector::subvector(&v, start, length)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_add(vector, vector) - adds two vectors
+        conn.create_scalar_function("vector_add", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::vector_add(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // vector_sub(vector, vector) - subtracts two vectors
+        conn.create_scalar_function("vector_sub", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::vector::vector_sub(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
         Ok(Self {

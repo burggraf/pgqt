@@ -12,6 +12,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **ORM Support**: Works with Prisma, TypeORM, Drizzle, and other modern ORMs
 - **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
 - **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
+- **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
 
 ## Quick Start
 
@@ -79,6 +80,8 @@ postgresql://postgres@127.0.0.1:5432/test.db
 | INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE | TEXT | ✅ |
 | **Full-Text Search** |||
 | TSVECTOR, TSQUERY | TEXT | ✅ |
+| **Vector Search** |||
+| VECTOR(N) | TEXT (JSON) | ✅ |
 | **Other** |||
 | UUID | TEXT | ✅ |
 | BIT, VARBIT | TEXT | ✅ |
@@ -510,6 +513,51 @@ FROM articles;
 
 For complete documentation, see [docs/FTS.md](./docs/FTS.md).
 
+### Vector Search (pgvector Compatible)
+
+PGlite Proxy provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:
+
+```sql
+-- Create table with vector column
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    embedding VECTOR(1536)
+);
+
+-- Insert with embedding
+INSERT INTO documents (content, embedding)
+VALUES ('Hello world', '[0.1, 0.2, 0.3, ...]');
+
+-- Find similar documents using cosine distance
+SELECT id, content, cosine_distance(embedding, '[0.12, 0.22, ...]') AS distance
+FROM documents
+ORDER BY distance
+LIMIT 5;
+```
+
+**Supported Distance Functions:**
+- `l2_distance(a, b)` / `vector_l2_distance(a, b)` - L2 (Euclidean) distance
+- `cosine_distance(a, b)` / `vector_cosine_distance(a, b)` - Cosine distance
+- `inner_product(a, b)` / `vector_inner_product(a, b)` - Inner product
+- `l1_distance(a, b)` / `vector_l1_distance(a, b)` - L1 (Manhattan) distance
+
+**Supported Operators:**
+- `<->` - L2 distance
+- `<=>` - Cosine distance
+- `<#>` - Inner product
+- `<+>` - L1 distance
+
+**Utility Functions:**
+- `vector_dims(vector)` - Get number of dimensions
+- `l2_norm(vector)` - Calculate L2 norm
+- `l2_normalize(vector)` - Normalize to unit vector
+- `subvector(vector, start, len)` - Extract subvector
+- `vector_add(a, b)` - Add vectors element-wise
+- `vector_sub(a, b)` - Subtract vectors element-wise
+
+For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
+
 ## Roadmap
 
 ### Phase 3 (In Progress)
@@ -519,8 +567,8 @@ For complete documentation, see [docs/FTS.md](./docs/FTS.md).
 - [x] Row-Level Security (RLS) emulation
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
 
-### Phase 4 (Planned)
-- [ ] Vector search (sqlite-vec integration)
+### Phase 4 (In Progress)
+- [x] **Vector Search** - pgvector-compatible vector search for embeddings
 - [ ] Connection pooling and load balancing
 
 ## License

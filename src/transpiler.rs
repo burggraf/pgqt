@@ -441,6 +441,11 @@ fn rewrite_type_for_sqlite(pg_type: &str) -> String {
         return "blob".to_string();
     }
 
+    // VECTOR type (pgvector compatibility) - stored as TEXT (JSON format)
+    if upper.starts_with("VECTOR") {
+        return "text".to_string();
+    }
+
     // Money type - store as REAL (or TEXT for precision)
     if upper == "MONEY" {
         return "real".to_string();
@@ -1095,6 +1100,11 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@>@" => format!("fts_contains({}, {})", lexpr_sql, rexpr_sql),  // tsquery contains
         "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
         "||" => format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql), // tsvector concat
+        // Vector distance operators (pgvector compatibility)
+        "<->" => format!("vector_l2_distance({}, {})", lexpr_sql, rexpr_sql),     // L2 distance
+        "<=>" => format!("vector_cosine_distance({}, {})", lexpr_sql, rexpr_sql), // Cosine distance
+        "<#>" => format!("vector_inner_product({}, {})", lexpr_sql, rexpr_sql),   // Inner product
+        "<+>" => format!("vector_l1_distance({}, {})", lexpr_sql, rexpr_sql),     // L1 distance
         _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
     }
 }

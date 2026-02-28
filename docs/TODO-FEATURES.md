@@ -62,7 +62,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Stored Procedures (PL/pgSQL)** | ❌ | High | Phase 3 Roadmap: Considering a Lua-based runtime to emulate procedural blocks. |
 | **Logical Replication** | ❌ | High | Not applicable to single-file SQLite databases. |
 | **Users & Permissions (RBAC)** | ✅ | Medium | Implemented via custom auth tables (`__pg_users__`, `__pg_roles__`, `__pg_permissions__`) with AST-based permission checks. Supports CREATE/ALTER/DROP USER, GRANT/REVOKE, and role-based access control for SELECT/INSERT/UPDATE/DELETE operations. |
-| **Vector Search** | ❌ | Medium | Phase 4 Roadmap: Integrate `sqlite-vec`. |
+| **Vector Search** | ✅ | Medium | pgvector-compatible vector search implemented in Rust. Supports VECTOR type, distance functions (L2, cosine, inner product, L1), operators (<->, <=>, <#>, <+>), and utility functions. See [docs/VECTOR.md](./VECTOR.md). |
 
 ## Key for Difficulty
 - **Low**: Standard SQL or direct SQLite equivalent exists.
