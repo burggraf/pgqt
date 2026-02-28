@@ -29,7 +29,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Enums** | ✅ | Low | Emulated via TEXT with CHECK constraints in SQLite. |
 | **Ranges** | ❌ | Medium | Could be emulated via two columns (start, end) or JSON. |
 | **Geometric Types** | ❌ | Medium | Possible via SpatiaLite extension or custom BLOB formats. |
-| **Full-Text Search (TSVECTOR)** | ⚠️ | Medium | Types `TSVECTOR` and `TSQUERY` are transpiled to `TEXT`. Roadmap: Full FTS5 integration for search operations. |
+| **Full-Text Search (TSVECTOR)** | ✅ | Medium | Types `TSVECTOR` and `TSQUERY` are mapped to TEXT with full FTS function emulation: to_tsvector, to_tsquery, plainto_tsquery, phraseto_tsquery, websearch_to_tsquery, ts_rank, ts_headline, setweight, strip. Operators: @@, &, |, !, <->, ||. See [docs/FTS.md](./FTS.md) for details. |
 
 ## PostgreSQL Specific Syntax
 

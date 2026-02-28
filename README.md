@@ -11,7 +11,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **SQL Transpilation**: PostgreSQL-specific syntax is automatically rewritten for SQLite compatibility
 - **ORM Support**: Works with Prisma, TypeORM, Drizzle, and other modern ORMs
 - **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
-- **Row-Level Security (RLS)**: Fine-grained row-level filtering based on user identity and roles
+- **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
 
 ## Quick Start
 
@@ -459,6 +459,57 @@ src/
 - **Advanced indexing**: GIN, GiST indexes (use FTS5, R-Tree instead)
 - **Replication**: Logical/physical replication (single-file database)
 
+### Full-Text Search (FTS)
+
+PGlite Proxy provides PostgreSQL-compatible full-text search functionality using SQLite's FTS5 extension:
+
+```sql
+-- Create a table with tsvector column
+CREATE TABLE articles (
+    id SERIAL PRIMARY KEY,
+    title TEXT,
+    body TEXT,
+    search_vector TSVECTOR
+);
+
+-- Search using @@ operator
+SELECT * FROM articles 
+WHERE search_vector @@ to_tsquery('postgresql & database');
+
+-- Search with ranking
+SELECT title, ts_rank(search_vector, to_tsquery('postgresql')) as rank
+FROM articles
+WHERE search_vector @@ to_tsquery('postgresql')
+ORDER BY rank DESC;
+
+-- Web-style search (Google-like syntax)
+SELECT * FROM articles
+WHERE search_vector @@ websearch_to_tsquery('postgresql OR mysql -oracle');
+
+-- Highlight matching terms
+SELECT ts_headline('english', body, to_tsquery('postgresql')) as highlighted
+FROM articles;
+```
+
+**Supported FTS Functions:**
+- `to_tsvector([config,] text)` - Convert text to tsvector
+- `to_tsquery([config,] text)` - Convert text to tsquery
+- `plainto_tsquery([config,] text)` - Plain text to tsquery
+- `phraseto_tsquery([config,] text)` - Phrase to tsquery
+- `websearch_to_tsquery([config,] text)` - Web-style query
+- `ts_rank(tsvector, tsquery)` - Rank results
+- `ts_headline([config,] text, tsquery [, options])` - Highlight matches
+- `setweight(tsvector, char)` - Set weight on vector
+- `strip(tsvector)` - Remove positions
+
+**Supported Operators:**
+- `@@` - Match operator
+- `&`, `|`, `!` - Boolean operators in tsquery
+- `<->` - Phrase search
+- `||` - Concatenate tsvectors
+
+For complete documentation, see [docs/FTS.md](./docs/FTS.md).
+
 ## Roadmap
 
 ### Phase 3 (In Progress)
@@ -466,9 +517,9 @@ src/
 - [ ] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [x] Row-Level Security (RLS) emulation
+- [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
 
 ### Phase 4 (Planned)
-- [ ] Full-text search (FTS5 integration)
 - [ ] Vector search (sqlite-vec integration)
 - [ ] Connection pooling and load balancing
 

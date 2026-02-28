@@ -18,6 +18,7 @@ mod catalog;
 mod rls;
 mod rls_inject;
 mod transpiler;
+mod fts;
 
 /// PostgreSQL-to-SQLite proxy server
 #[derive(Parser, Debug)]
@@ -258,6 +259,185 @@ impl SqliteHandler {
                 .build()
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
             Ok(re.is_match(&text))
+        })?;
+
+        // ========== Full-Text Search Functions ==========
+        
+        // to_tsvector([config,] text) - converts text to tsvector
+        conn.create_scalar_function("to_tsvector", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            Ok(crate::fts::to_tsvector_impl("english", &text))
+        })?;
+
+        conn.create_scalar_function("to_tsvector", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            Ok(crate::fts::to_tsvector_impl(&config, &text))
+        })?;
+
+        // to_tsquery([config,] text) - converts text to tsquery
+        conn.create_scalar_function("to_tsquery", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let query: String = ctx.get(0)?;
+            Ok(crate::fts::to_tsquery_impl("english", &query))
+        })?;
+
+        conn.create_scalar_function("to_tsquery", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let query: String = ctx.get(1)?;
+            Ok(crate::fts::to_tsquery_impl(&config, &query))
+        })?;
+
+        // plainto_tsquery([config,] text) - converts plain text to tsquery
+        conn.create_scalar_function("plainto_tsquery", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let query: String = ctx.get(0)?;
+            Ok(crate::fts::plainto_tsquery_impl("english", &query))
+        })?;
+
+        conn.create_scalar_function("plainto_tsquery", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let query: String = ctx.get(1)?;
+            Ok(crate::fts::plainto_tsquery_impl(&config, &query))
+        })?;
+
+        // phraseto_tsquery([config,] text) - converts phrase to tsquery
+        conn.create_scalar_function("phraseto_tsquery", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let query: String = ctx.get(0)?;
+            Ok(crate::fts::phraseto_tsquery_impl("english", &query))
+        })?;
+
+        conn.create_scalar_function("phraseto_tsquery", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let query: String = ctx.get(1)?;
+            Ok(crate::fts::phraseto_tsquery_impl(&config, &query))
+        })?;
+
+        // websearch_to_tsquery([config,] text) - converts web search query to tsquery
+        conn.create_scalar_function("websearch_to_tsquery", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let query: String = ctx.get(0)?;
+            Ok(crate::fts::websearch_to_tsquery_impl("english", &query))
+        })?;
+
+        conn.create_scalar_function("websearch_to_tsquery", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let query: String = ctx.get(1)?;
+            Ok(crate::fts::websearch_to_tsquery_impl(&config, &query))
+        })?;
+
+        // ts_rank(tsvector, tsquery) - returns rank of match
+        conn.create_scalar_function("ts_rank", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsvector: String = ctx.get(0)?;
+            let tsquery: String = ctx.get(1)?;
+            Ok(crate::fts::ts_rank_impl(&tsvector, &tsquery))
+        })?;
+
+        // ts_rank_cd(tsvector, tsquery) - cover density ranking (same as ts_rank for now)
+        conn.create_scalar_function("ts_rank_cd", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsvector: String = ctx.get(0)?;
+            let tsquery: String = ctx.get(1)?;
+            Ok(crate::fts::ts_rank_impl(&tsvector, &tsquery))
+        })?;
+
+        // ts_headline([config,] text, tsquery [, options]) - returns highlighted text
+        conn.create_scalar_function("ts_headline", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let tsquery: String = ctx.get(1)?;
+            Ok(crate::fts::ts_headline_impl("english", &text, &tsquery, None))
+        })?;
+
+        conn.create_scalar_function("ts_headline", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            let tsquery: String = ctx.get(2)?;
+            Ok(crate::fts::ts_headline_impl(&config, &text, &tsquery, None))
+        })?;
+
+        conn.create_scalar_function("ts_headline", 4, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let config: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            let tsquery: String = ctx.get(2)?;
+            let options: String = ctx.get(3)?;
+            Ok(crate::fts::ts_headline_impl(&config, &text, &tsquery, Some(&options)))
+        })?;
+
+        // setweight(tsvector, char) - sets weight on tsvector
+        conn.create_scalar_function("setweight", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsvector: String = ctx.get(0)?;
+            let weight: String = ctx.get(1)?;
+            let weight_char = weight.chars().next().unwrap_or('D');
+            Ok(crate::fts::setweight_impl(&tsvector, weight_char))
+        })?;
+
+        // strip(tsvector) - removes positions and weights from tsvector
+        conn.create_scalar_function("strip", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsvector: String = ctx.get(0)?;
+            Ok(crate::fts::strip_impl(&tsvector))
+        })?;
+
+        // numnode(tsquery) - returns number of nodes in tsquery
+        conn.create_scalar_function("numnode", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsquery: String = ctx.get(0)?;
+            Ok(crate::fts::numnode_impl(&tsquery))
+        })?;
+
+        // querytree(tsquery) - returns query tree representation
+        conn.create_scalar_function("querytree", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsquery: String = ctx.get(0)?;
+            Ok(crate::fts::querytree_impl(&tsquery))
+        })?;
+
+        // tsvector_concat(tsvector, tsvector) - concatenates two tsvectors
+        conn.create_scalar_function("tsvector_concat", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            Ok(crate::fts::tsvector_concat(&left, &right))
+        })?;
+
+        // fts_match(tsvector, tsquery) - implements @@ operator
+        conn.create_scalar_function("fts_match", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let tsvector: String = ctx.get(0)?;
+            let tsquery: String = ctx.get(1)?;
+            Ok(crate::fts::tsvector_matches_tsquery(&tsvector, &tsquery))
+        })?;
+
+        // fts_contains(tsquery, tsquery) - implements @> operator
+        conn.create_scalar_function("fts_contains", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            // Simplified: check if all terms in right are in left
+            let left_terms = crate::fts::extract_tsquery_terms(&left);
+            let right_terms = crate::fts::extract_tsquery_terms(&right);
+            let all_contained = right_terms.positive.iter().all(|t| left_terms.positive.contains(t));
+            Ok(all_contained)
+        })?;
+
+        // fts_contained(tsquery, tsquery) - implements <@ operator
+        conn.create_scalar_function("fts_contained", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            // Simplified: check if all terms in left are in right
+            let left_terms = crate::fts::extract_tsquery_terms(&left);
+            let right_terms = crate::fts::extract_tsquery_terms(&right);
+            let all_contained = left_terms.positive.iter().all(|t| right_terms.positive.contains(t));
+            Ok(all_contained)
+        })?;
+
+        // array_to_tsvector(text[]) - converts array to tsvector
+        conn.create_scalar_function("array_to_tsvector", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: Option<String> = ctx.get(0)?;
+            match arr {
+                Some(arr_str) => {
+                    // Parse array format {elem1,elem2,...}
+                    let cleaned = arr_str.trim_matches(|c| c == '{' || c == '}');
+                    let elements: Vec<&str> = cleaned.split(',').filter(|s| !s.is_empty()).collect();
+                    let mut entries: Vec<String> = Vec::new();
+                    for (pos, elem) in elements.iter().enumerate() {
+                        entries.push(format!("'{}':{}", elem.trim().trim_matches('"'), pos + 1));
+                    }
+                    entries.sort();
+                    Ok(entries.join(" "))
+                }
+                None => Ok(String::new()),
+            }
         })?;
 
         Ok(Self {

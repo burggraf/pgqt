@@ -1091,6 +1091,10 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "~*" => format!("regexpi({}, {})", rexpr_sql, lexpr_sql),
         "!~" => format!("NOT regexp({}, {})", rexpr_sql, lexpr_sql),
         "!~*" => format!("NOT regexpi({}, {})", rexpr_sql, lexpr_sql),
+        "@@" => format!("fts_match({}, {})", lexpr_sql, rexpr_sql),
+        "@>@" => format!("fts_contains({}, {})", lexpr_sql, rexpr_sql),  // tsquery contains
+        "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
+        "||" => format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql), // tsvector concat
         _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
     }
 }
@@ -1262,6 +1266,27 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
         // UUID generation
         "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
+        
+        // Full-Text Search functions
+        "to_tsvector" => "to_tsvector",
+        "to_tsquery" => "to_tsquery",
+        "plainto_tsquery" => "plainto_tsquery",
+        "phraseto_tsquery" => "phraseto_tsquery",
+        "websearch_to_tsquery" => "websearch_to_tsquery",
+        "ts_rank" => "ts_rank",
+        "ts_rank_cd" => "ts_rank_cd",
+        "ts_headline" => "ts_headline",
+        "setweight" => "setweight",
+        "strip" => "strip",
+        "numnode" => "numnode",
+        "querytree" => "querytree",
+        "ts_rewrite" => "ts_rewrite",
+        "ts_lexize" => "ts_lexize",
+        "ts_debug" => "ts_debug",
+        "ts_stat" => "ts_stat",
+        "array_to_tsvector" => "array_to_tsvector",
+        "jsonb_to_tsvector" => "jsonb_to_tsvector",
+        
         _ => {
             // For unknown functions, return the full name if schema-qualified
             // but strip 'pg_catalog' if present as SQLite doesn't have it
