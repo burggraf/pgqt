@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use clap::Parser;
 use futures::stream;
 use pgwire::api::auth::noop::NoopStartupHandler;
 use pgwire::api::query::{PlaceholderExtendedQueryHandler, SimpleQueryHandler};
@@ -14,6 +15,25 @@ use tokio::net::TcpListener;
 
 mod catalog;
 mod transpiler;
+
+/// PostgreSQL-to-SQLite proxy server
+#[derive(Parser, Debug)]
+#[command(name = "postgresqlite")]
+#[command(about = "A PostgreSQL wire protocol proxy for SQLite")]
+#[command(version)]
+struct Cli {
+    /// Host address to listen on
+    #[arg(short = 'H', long, env = "PG_LITE_HOST", default_value = "127.0.0.1")]
+    host: String,
+
+    /// Port to listen on
+    #[arg(short, long, env = "PG_LITE_PORT", default_value = "5432")]
+    port: u16,
+
+    /// Path to the SQLite database file
+    #[arg(short, long, env = "PG_LITE_DB", default_value = "test.db")]
+    database: String,
+}
 
 use catalog::{init_catalog, store_table_metadata};
 use transpiler::transpile_with_metadata;
@@ -154,14 +174,15 @@ impl SimpleQueryHandler for SqliteHandler {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let db_path = std::env::var("PG_LITE_DB").unwrap_or_else(|_| "test.db".to_string());
-    let port = std::env::var("PG_LITE_PORT").unwrap_or_else(|_| "5432".to_string());
-    let addr = format!("127.0.0.1:{}", port);
+    let cli = Cli::parse();
+
+    let addr = format!("{}:{}", cli.host, cli.port);
 
     let listener = TcpListener::bind(&addr).await?;
     println!("Server listening on {}", addr);
+    println!("Using database: {}", cli.database);
 
-    let handler = Arc::new(SqliteHandler::new(&db_path)?);
+    let handler = Arc::new(SqliteHandler::new(&cli.database)?);
     let startup_handler = Arc::new(NoopStartupHandler);
     let extended_handler = Arc::new(PlaceholderExtendedQueryHandler);
 
