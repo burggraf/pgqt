@@ -1,1 +1,7 @@
 /target
+test.db
+*.txt
+*.log
+test_pg_lite*.db
+test_pg_lite_meta*.db
+/venv

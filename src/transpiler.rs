@@ -82,6 +82,14 @@ fn reconstruct_sql_with_metadata(node: &Node) -> TranspileResult {
                 sql: reconstruct_delete_stmt(delete_stmt),
                 create_table_metadata: None,
             },
+            NodeEnum::VariableSetStmt(ref _set_stmt) => TranspileResult {
+                sql: "select 1".to_string(), // Safely ignore SET for now
+                create_table_metadata: None,
+            },
+            NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
+                sql: format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name),
+                create_table_metadata: None,
+            },
             _ => TranspileResult {
                 sql: node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
                 create_table_metadata: None,
@@ -860,7 +868,9 @@ fn reconstruct_case_expr(case_expr: &CaseExpr) -> String {
     parts.push("case".to_string());
     
     // CASE expression (if present) - this is the simple CASE form: CASE expr WHEN ...
-    let case_arg = case_expr.arg.as_ref().map(|n| reconstruct_node(n));
+    if let Some(ref arg) = case_expr.arg {
+        parts.push(reconstruct_node(arg));
+    }
     
     // WHEN clauses
     for when in &case_expr.args {
@@ -869,13 +879,7 @@ fn reconstruct_case_expr(case_expr: &CaseExpr) -> String {
                 let when_expr = case_when.expr.as_ref().map(|n| reconstruct_node(n)).unwrap_or_default();
                 let when_result = case_when.result.as_ref().map(|n| reconstruct_node(n)).unwrap_or_default();
                 
-                // If we have a CASE arg, it's simple CASE: WHEN value THEN result
-                // Otherwise it's searched CASE: WHEN condition THEN result
-                if case_arg.is_some() {
-                    parts.push(format!("when {} then {}", when_expr, when_result));
-                } else {
-                    parts.push(format!("when {} then {}", when_expr, when_result));
-                }
+                parts.push(format!("when {} then {}", when_expr, when_result));
             }
         }
     }
@@ -945,19 +949,15 @@ fn reconstruct_a_expr(a_expr: &AExpr) -> String {
     }
 
     // Handle PostgreSQL-specific operators
-    let sqlite_op = match op_name.as_str() {
-        "~~" => "like",
-        "~~*" => "like", // Case-insensitive like (SQLite LIKE is case-insensitive by default)
-        "!~~" => "not like",
-        "!~~*" => "not like",
-        "~" => "regexp", // Regex match (requires SQLite regex extension)
-        "~*" => "regexp",
-        "!~" => "not regexp",
-        "!~*" => "not regexp",
-        _ => &op_name,
-    };
-
-    format!("{} {} {}", lexpr_sql, sqlite_op, rexpr_sql)
+    match op_name.as_str() {
+        "~~" | "~~*" => format!("{} like {}", lexpr_sql, rexpr_sql),
+        "!~~" | "!~~*" => format!("{} not like {}", lexpr_sql, rexpr_sql),
+        "~" => format!("regexp({}, {})", rexpr_sql, lexpr_sql),
+        "~*" => format!("regexpi({}, {})", rexpr_sql, lexpr_sql),
+        "!~" => format!("NOT regexp({}, {})", rexpr_sql, lexpr_sql),
+        "!~*" => format!("NOT regexpi({}, {})", rexpr_sql, lexpr_sql),
+        _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
+    }
 }
 
 /// Reconstruct a BoolExpr node (AND, OR, NOT)
@@ -986,10 +986,10 @@ fn reconstruct_res_target(target: &ResTarget) -> String {
         if name.is_empty() {
             val_sql
         } else {
-            format!("{} as {}", val_sql, name.to_lowercase())
+            format!("{} as \"{}\"", val_sql, name.to_lowercase())
         }
     } else if !name.is_empty() {
-        name.to_lowercase()
+        format!("\"{}\"", name.to_lowercase())
     } else {
         String::new()
     }
@@ -1001,17 +1001,17 @@ fn reconstruct_range_var(range_var: &RangeVar) -> String {
     let schema_name = range_var.schemaname.to_lowercase();
     let alias = range_var.alias.as_ref().map(|a| a.aliasname.to_lowercase());
 
-    // Map 'public' schema to no prefix (SQLite doesn't have schemas)
+    // Map 'public' and 'pg_catalog' schema to no prefix (SQLite doesn't have schemas)
     // Other schemas are treated as attached databases
-    let full_table = if schema_name.is_empty() || schema_name == "public" {
-        table_name
+    let full_table = if schema_name.is_empty() || schema_name == "public" || schema_name == "pg_catalog" {
+        format!("\"{}\"", table_name)
     } else {
-        format!("{}.{}", schema_name, table_name)
+        format!("\"{}\".\"{}\"", schema_name, table_name)
     };
 
     if let Some(a) = alias {
-        if a != full_table {
-            format!("{} as {}", full_table, a)
+        if a != table_name && a != format!("{}.{}", schema_name, table_name) {
+            format!("{} as \"{}\"", full_table, a)
         } else {
             full_table
         }
@@ -1028,7 +1028,7 @@ fn reconstruct_column_ref(col_ref: &ColumnRef) -> String {
         .filter_map(|f| {
             if let Some(ref inner) = f.node {
                 match inner {
-                    NodeEnum::String(s) => Some(s.sval.to_lowercase()),
+                    NodeEnum::String(s) => Some(format!("\"{}\"", s.sval.to_lowercase())),
                     NodeEnum::AStar(_) => Some("*".to_string()),
                     _ => None,
                 }
@@ -1075,6 +1075,12 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
 
+    let args: Vec<String> = func_call
+        .args
+        .iter()
+        .map(reconstruct_node)
+        .collect();
+
     // Map PostgreSQL functions to SQLite equivalents
     let sqlite_func = match func_name {
         "now" => "datetime('now')",
@@ -1099,15 +1105,35 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
         // System catalog functions - strip schema and return as-is for now
         "pg_get_userbyid" => "pg_get_userbyid",
         "pg_table_is_visible" => "pg_table_is_visible",
-        // UUID generation - SQLite doesn't have built-in, use randomblob with UUIDv4 format
-        // UUIDv4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx where y is 8, 9, a, or b
-        // Note: parentheses are added by DEFAULT constraint handling, so we don't include them here
+        "pg_type_is_visible" => "pg_type_is_visible",
+        "pg_function_is_visible" => "pg_function_is_visible",
+        "format_type" => "format_type",
+        "current_schema" => "current_schema",
+        "current_schemas" => "current_schemas",
+        "current_database" => "current_database",
+        "current_setting" => "current_setting",
+        "pg_my_temp_schema" => "pg_my_temp_schema",
+        "pg_get_expr" => "pg_get_expr",
+        "pg_get_indexdef" => "pg_get_indexdef",
+        "obj_description" => "obj_description",
+        "pg_get_constraintdef" => "pg_get_constraintdef",
+        "pg_encoding_to_char" => "pg_encoding_to_char",
+        "array_to_string" => "array_to_string",
+        "array_length" => "array_length",
+        "pg_table_size" => "pg_table_size",
+        "pg_total_relation_size" => "pg_total_relation_size",
+        "pg_size_pretty" => "pg_size_pretty",
+        // UUID generation
         "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         _ => {
             // For unknown functions, return the full name if schema-qualified
+            // but strip 'pg_catalog' if present as SQLite doesn't have it
             if func_parts.len() > 1 {
-                return format!("{}()", full_func_name);
+                if func_parts[0] == "pg_catalog" {
+                    return format!("{}({})", func_name, args.join(", "));
+                }
+                return format!("{}({})", full_func_name, args.join(", "));
             }
             func_name
         }
@@ -1121,12 +1147,6 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
         || sqlite_func.starts_with("lower(hex(randomblob(4)))") {
         return sqlite_func.to_string();
     }
-
-    let args: Vec<String> = func_call
-        .args
-        .iter()
-        .map(reconstruct_node)
-        .collect();
 
     format!("{}({})", sqlite_func, args.join(", "))
 }
@@ -1305,9 +1325,8 @@ ORDER BY 1,2"#;
         debug_ast(input);
         let result = transpile(input);
         println!("\\dt query result: {}", result);
-        // Should not error and should contain key parts
-        assert!(result.contains("select"));
-        assert!(result.contains("from"));
+        // Should use NOT regexp function call (with quotes)
+        assert!(result.contains("NOT regexp('^pg_toast', \"n\".\"nspname\")"));
     }
 
     #[test]

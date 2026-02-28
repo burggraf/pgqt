@@ -35,7 +35,7 @@ struct Cli {
     database: String,
 }
 
-use catalog::{init_catalog, store_table_metadata};
+use catalog::{init_catalog, init_system_views, store_table_metadata};
 use transpiler::transpile_with_metadata;
 
 /// PostgreSQL-to-SQLite proxy handler
@@ -48,6 +48,194 @@ impl SqliteHandler {
         let conn = Connection::open(db_path)?;
 
         init_catalog(&conn)?;
+        init_system_views(&conn)?;
+
+        // Register PostgreSQL compatibility functions
+        conn.create_scalar_function("pg_get_userbyid", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok("postgres".to_string())
+        })?;
+
+        conn.create_scalar_function("pg_table_is_visible", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("pg_type_is_visible", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("pg_function_is_visible", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("format_type", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let type_oid: i64 = ctx.get(0)?;
+            let _typemod: Option<i64> = ctx.get(1)?;
+            
+            // Map common OIDs back to type names
+            let type_name = match type_oid {
+                16 => "boolean",
+                20 => "bigint",
+                21 => "smallint",
+                23 => "integer",
+                25 => "text",
+                700 => "real",
+                701 => "double precision",
+                1043 => "character varying",
+                1114 => "timestamp without time zone",
+                1184 => "timestamp with time zone",
+                _ => "text",
+            };
+            Ok(type_name.to_string())
+        })?;
+
+        conn.create_scalar_function("version", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("PostgreSQL 15.0 (PostgresLite)".to_string())
+        })?;
+
+        conn.create_scalar_function("current_schema", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("public".to_string())
+        })?;
+
+        conn.create_scalar_function("current_schemas", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("{public}".to_string())
+        })?;
+
+        conn.create_scalar_function("current_setting", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let name: String = ctx.get(0)?;
+            match name.as_str() {
+                "server_version_num" => Ok("150000".to_string()),
+                "server_version" => Ok("15.0".to_string()),
+                "standard_conforming_strings" => Ok("on".to_string()),
+                "client_encoding" => Ok("UTF8".to_string()),
+                _ => Ok("".to_string()),
+            }
+        })?;
+
+        conn.create_scalar_function("pg_get_expr", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let expr: String = ctx.get(0)?;
+            Ok(expr)
+        })?;
+
+        conn.create_scalar_function("pg_get_indexdef", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok("".to_string())
+        })?;
+
+        conn.create_scalar_function("obj_description", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(None::<String>)
+        })?;
+
+        conn.create_scalar_function("pg_encoding_to_char", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let encoding: i64 = ctx.get(0)?;
+            match encoding {
+                6 => Ok("UTF8".to_string()),
+                _ => Ok("UTF8".to_string()),
+            }
+        })?;
+
+        conn.create_scalar_function("array_to_string", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: Option<String> = ctx.get(0)?;
+            let sep: String = ctx.get(1)?;
+            match arr {
+                Some(s) => Ok(s.replace('{', "").replace('}', "").replace(',', &sep)),
+                None => Ok("".to_string()),
+            }
+        })?;
+
+        conn.create_scalar_function("array_length", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: Option<String> = ctx.get(0)?;
+            let _dim: i64 = ctx.get(1)?;
+            match arr {
+                Some(s) => {
+                    let cleaned = s.replace('{', "").replace('}', "").trim().to_string();
+                    if cleaned.is_empty() {
+                        Ok(0i64)
+                    } else {
+                        Ok(cleaned.split(',').count() as i64)
+                    }
+                }
+                None => Ok(0i64),
+            }
+        })?;
+
+        conn.create_scalar_function("pg_table_size", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(0i64)
+        })?;
+
+        conn.create_scalar_function("pg_total_relation_size", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(0i64)
+        })?;
+
+        conn.create_scalar_function("pg_size_pretty", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let size: i64 = ctx.get(0)?;
+            Ok(format!("{} bytes", size))
+        })?;
+
+        conn.create_scalar_function("current_database", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("postgres".to_string())
+        })?;
+
+        conn.create_scalar_function("pg_my_temp_schema", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(0i64)
+        })?;
+
+        // Privilege checks
+        conn.create_scalar_function("has_table_privilege", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("has_table_privilege", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("has_database_privilege", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("has_database_privilege", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("has_schema_privilege", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("has_schema_privilege", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("pg_has_role", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        conn.create_scalar_function("pg_has_role", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok(true)
+        })?;
+
+        // REGEXP support (needed for \dt)
+        conn.create_scalar_function("regexp", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            
+            let re = regex::Regex::new(&pattern).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
+            Ok(re.is_match(&text))
+        })?;
+
+        // REGEXPI support (case-insensitive regex)
+        conn.create_scalar_function("regexpi", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            
+            let re = regex::RegexBuilder::new(&pattern)
+                .case_insensitive(true)
+                .build()
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
+            Ok(re.is_match(&text))
+        })?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

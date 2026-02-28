@@ -977,6 +977,7 @@ dependencies = [
  "futures",
  "pg_query",
  "pgwire",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
