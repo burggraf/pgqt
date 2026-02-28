@@ -15,6 +15,8 @@ use rusqlite::Connection;
 use tokio::net::TcpListener;
 
 mod catalog;
+mod rls;
+mod rls_inject;
 mod transpiler;
 
 /// PostgreSQL-to-SQLite proxy server
@@ -193,6 +195,17 @@ impl SqliteHandler {
             Ok(0i64)
         })?;
 
+        // RLS-related functions: current_user() and session_user()
+        // Note: These return a default value; actual RLS uses session context directly
+        conn.create_scalar_function("current_user", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, |_ctx| {
+            // This is a fallback; the actual user is handled via session context
+            Ok("postgres".to_string())
+        })?;
+
+        conn.create_scalar_function("session_user", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, |_ctx| {
+            Ok("postgres".to_string())
+        })?;
+
         // Privilege checks
         conn.create_scalar_function("has_table_privilege", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
             Ok(true)
@@ -331,6 +344,94 @@ impl SqliteHandler {
         Ok(true)
     }
 
+    /// Apply RLS (Row-Level Security) to a transpiled query
+    fn apply_rls_to_query(&self, sql: String, operation_type: transpiler::OperationType, tables: &[String]) -> String {
+        use rls_inject::{inject_rls_into_select_sql, inject_rls_into_update_sql, inject_rls_into_delete_sql};
+        
+        // Get current user from session
+        let session = self.sessions.get(&0);
+        let current_user = session.map(|s| s.current_user.clone()).unwrap_or_else(|| "postgres".to_string());
+        
+        let conn = self.conn.lock().unwrap();
+        
+        // Check each table for RLS
+        for table_name in tables {
+            // Check if RLS is enabled for this table
+            if let Ok(true) = catalog::is_rls_enabled(&conn, table_name) {
+                // Check if user can bypass RLS
+                let can_bypass = conn.query_row(
+                    "SELECT rls_forced FROM __pg_rls_enabled__ WHERE relname = ?1",
+                    [table_name],
+                    |row| {
+                        let forced: bool = row.get(0)?;
+                        if forced {
+                            return Ok(false); // Cannot bypass if forced
+                        }
+                        // Check if user is table owner
+                        let owner_oid: Result<i64, _> = conn.query_row(
+                            "SELECT relowner FROM __pg_relation_meta__ WHERE relname = ?1",
+                            [table_name],
+                            |row| row.get(0),
+                        );
+                        if let Ok(owner) = owner_oid {
+                            let user_oid: Result<i64, _> = conn.query_row(
+                                "SELECT oid FROM __pg_authid__ WHERE rolname = ?1",
+                                [&current_user],
+                                |row| row.get(0),
+                            );
+                            if let Ok(user) = user_oid {
+                                if owner == user {
+                                    return Ok(true); // Owner can bypass
+                                }
+                            }
+                        }
+                        // Check if user is superuser
+                        let is_superuser: bool = conn.query_row(
+                            "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
+                            [&current_user],
+                            |row| row.get(0),
+                        ).unwrap_or(false);
+                        Ok(is_superuser)
+                    },
+                );
+                
+                if can_bypass.unwrap_or(false) {
+                    continue; // Skip RLS for this table
+                }
+                
+                // Get applicable RLS policies for this table and operation
+                let command = match operation_type {
+                    transpiler::OperationType::SELECT => "SELECT",
+                    transpiler::OperationType::INSERT => "INSERT",
+                    transpiler::OperationType::UPDATE => "UPDATE",
+                    transpiler::OperationType::DELETE => "DELETE",
+                    _ => continue,
+                };
+                
+                if let Ok(policies) = catalog::get_applicable_policies(&conn, table_name, command, &["PUBLIC".to_string(), current_user.clone()]) {
+                    if !policies.is_empty() {
+                        // Build RLS expression from policies
+                        let rls_expr = rls::build_rls_expression(&policies, true);
+                        if let Some(expr) = rls_expr {
+                            // Rewrite current_user in expression
+                            let rewritten_expr = rls_inject::rewrite_rls_expression(&expr, &current_user, &current_user);
+                            
+                            // Inject RLS into the query based on operation type
+                            return match operation_type {
+                                transpiler::OperationType::SELECT => inject_rls_into_select_sql(&sql, &rewritten_expr),
+                                transpiler::OperationType::UPDATE => inject_rls_into_update_sql(&sql, &rewritten_expr),
+                                transpiler::OperationType::DELETE => inject_rls_into_delete_sql(&sql, &rewritten_expr),
+                                _ => sql,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        
+        sql
+    }
+
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response<'_>>> {
         let transpile_result = transpile_with_metadata(sql);
@@ -358,7 +459,8 @@ impl SqliteHandler {
             return Err(anyhow::anyhow!("permission denied for table(s)"));
         }
 
-        let sqlite_sql = &transpile_result.sql;
+        // Apply RLS (Row-Level Security) to the query
+        let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
 
         let conn = self.conn.lock().unwrap();
 
@@ -369,7 +471,7 @@ impl SqliteHandler {
             // For CREATE TABLE, we need to execute the DDL first, then store metadata
             // This avoids the "cannot start a transaction within a transaction" error
             // because SQLite starts an implicit transaction for CREATE TABLE
-            let result = self.execute_statement(&conn, sqlite_sql)?;
+            let result = self.execute_statement(&conn, &sqlite_sql)?;
 
             // Store metadata after CREATE TABLE completes
             if let Some(metadata) = transpile_result.create_table_metadata {
@@ -401,9 +503,9 @@ impl SqliteHandler {
 
             Ok(result)
         } else if is_select {
-            self.execute_select(&conn, sqlite_sql)
+            self.execute_select(&conn, &sqlite_sql)
         } else {
-            self.execute_statement(&conn, sqlite_sql)
+            self.execute_statement(&conn, &sqlite_sql)
         }
     }
 

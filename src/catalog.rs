@@ -92,6 +92,34 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_relation_meta__ table")?;
 
+    // __pg_rls_policies__: Row-Level Security policies
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_rls_policies__ (
+            polname TEXT NOT NULL,
+            polrelid TEXT NOT NULL,  -- table name (simplified, in PG this is oid)
+            polcmd TEXT DEFAULT 'ALL', -- ALL, SELECT, INSERT, UPDATE, DELETE
+            polpermissive BOOLEAN DEFAULT TRUE, -- TRUE = PERMISSIVE, FALSE = RESTRICTIVE
+            polroles TEXT, -- comma-separated role names, empty = PUBLIC
+            polqual TEXT, -- USING expression (for SELECT, UPDATE, DELETE)
+            polwithcheck TEXT, -- WITH CHECK expression (for INSERT, UPDATE)
+            polenabled BOOLEAN DEFAULT TRUE,
+            PRIMARY KEY (polname, polrelid)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_rls_policies__ table")?;
+
+    // __pg_rls_enabled__: Track which tables have RLS enabled
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_rls_enabled__ (
+            relname TEXT PRIMARY KEY,
+            rls_enabled BOOLEAN DEFAULT FALSE,
+            rls_forced BOOLEAN DEFAULT FALSE
+        )",
+        [],
+    )
+    .context("Failed to create __pg_rls_enabled__ table")?;
+
     // Bootstrap: Create default 'postgres' superuser (OID 10)
     conn.execute(
         "INSERT OR IGNORE INTO __pg_authid__ (oid, rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin)
@@ -205,6 +233,186 @@ pub fn get_column_metadata(
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// RLS Policy metadata
+#[derive(Debug, Clone)]
+pub struct RlsPolicy {
+    pub name: String,
+    pub table_name: String,
+    pub command: String, // ALL, SELECT, INSERT, UPDATE, DELETE
+    pub permissive: bool,
+    pub roles: Vec<String>,
+    pub using_expr: Option<String>,
+    pub with_check_expr: Option<String>,
+    pub enabled: bool,
+}
+
+/// Enable RLS on a table
+pub fn enable_rls(conn: &Connection, table_name: &str, force: bool) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO __pg_rls_enabled__ (relname, rls_enabled, rls_forced) VALUES (?1, TRUE, ?2)",
+        (table_name, force),
+    )
+    .context("Failed to enable RLS on table")?;
+    Ok(())
+}
+
+/// Disable RLS on a table
+pub fn disable_rls(conn: &Connection, table_name: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO __pg_rls_enabled__ (relname, rls_enabled, rls_forced) VALUES (?1, FALSE, FALSE)",
+        [table_name],
+    )
+    .context("Failed to disable RLS on table")?;
+    Ok(())
+}
+
+/// Check if RLS is enabled on a table
+pub fn is_rls_enabled(conn: &Connection, table_name: &str) -> Result<bool> {
+    let result: Result<bool, _> = conn.query_row(
+        "SELECT rls_enabled FROM __pg_rls_enabled__ WHERE relname = ?1",
+        [table_name],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(enabled) => Ok(enabled),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Check if RLS is forced on a table (bypass for table owner)
+pub fn is_rls_forced(conn: &Connection, table_name: &str) -> Result<bool> {
+    let result: Result<bool, _> = conn.query_row(
+        "SELECT rls_forced FROM __pg_rls_enabled__ WHERE relname = ?1",
+        [table_name],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(forced) => Ok(forced),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Store an RLS policy
+pub fn store_rls_policy(conn: &Connection, policy: &RlsPolicy) -> Result<()> {
+    let roles_str = if policy.roles.is_empty() {
+        None
+    } else {
+        Some(policy.roles.join(","))
+    };
+
+    conn.execute(
+        "INSERT OR REPLACE INTO __pg_rls_policies__ 
+         (polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        (
+            &policy.name,
+            &policy.table_name,
+            &policy.command,
+            policy.permissive,
+            roles_str,
+            &policy.using_expr,
+            &policy.with_check_expr,
+            policy.enabled,
+        ),
+    )
+    .context("Failed to store RLS policy")?;
+    Ok(())
+}
+
+/// Get all policies for a table applicable to a specific command and roles
+pub fn get_applicable_policies(
+    conn: &Connection,
+    table_name: &str,
+    command: &str, // SELECT, INSERT, UPDATE, DELETE
+    user_roles: &[String],
+) -> Result<Vec<RlsPolicy>> {
+    let mut stmt = conn.prepare(
+        "SELECT polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled
+         FROM __pg_rls_policies__
+         WHERE polrelid = ?1 
+         AND polenabled = TRUE
+         AND (polcmd = 'ALL' OR polcmd = ?2)"
+    )?;
+
+    let rows = stmt.query_map([table_name, command], |row| {
+        let roles_str: Option<String> = row.get(4)?;
+        let roles = roles_str
+            .map(|s| s.split(',').map(|r| r.to_string()).collect())
+            .unwrap_or_default();
+
+        Ok(RlsPolicy {
+            name: row.get(0)?,
+            table_name: row.get(1)?,
+            command: row.get(2)?,
+            permissive: row.get(3)?,
+            roles,
+            using_expr: row.get(5)?,
+            with_check_expr: row.get(6)?,
+            enabled: row.get(7)?,
+        })
+    })?;
+
+    let mut policies = Vec::new();
+    for row in rows {
+        let policy = row?;
+        // Check if policy applies to current user roles
+        // Empty roles means PUBLIC (applies to all)
+        if policy.roles.is_empty() 
+            || policy.roles.contains(&"PUBLIC".to_string())
+            || user_roles.iter().any(|r| policy.roles.contains(r)) {
+            policies.push(policy);
+        }
+    }
+
+    Ok(policies)
+}
+
+/// Drop an RLS policy
+pub fn drop_rls_policy(conn: &Connection, policy_name: &str, table_name: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM __pg_rls_policies__ WHERE polname = ?1 AND polrelid = ?2",
+        (policy_name, table_name),
+    )
+    .context("Failed to drop RLS policy")?;
+    Ok(())
+}
+
+/// Get all policies for a table (for admin/inspection)
+pub fn get_table_policies(conn: &Connection, table_name: &str) -> Result<Vec<RlsPolicy>> {
+    let mut stmt = conn.prepare(
+        "SELECT polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled
+         FROM __pg_rls_policies__
+         WHERE polrelid = ?1"
+    )?;
+
+    let rows = stmt.query_map([table_name], |row| {
+        let roles_str: Option<String> = row.get(4)?;
+        let roles = roles_str
+            .map(|s| s.split(',').map(|r| r.to_string()).collect())
+            .unwrap_or_default();
+
+        Ok(RlsPolicy {
+            name: row.get(0)?,
+            table_name: row.get(1)?,
+            command: row.get(2)?,
+            permissive: row.get(3)?,
+            roles,
+            using_expr: row.get(5)?,
+            with_check_expr: row.get(6)?,
+            enabled: row.get(7)?,
+        })
+    })?;
+
+    let mut policies = Vec::new();
+    for row in rows {
+        policies.push(row?);
+    }
+
+    Ok(policies)
 }
 
 /// Initialize system catalog views to support psql commands like \dt, \d, etc.

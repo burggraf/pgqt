@@ -11,6 +11,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **SQL Transpilation**: PostgreSQL-specific syntax is automatically rewritten for SQLite compatibility
 - **ORM Support**: Works with Prisma, TypeORM, Drizzle, and other modern ORMs
 - **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
+- **Row-Level Security (RLS)**: Fine-grained row-level filtering based on user identity and roles
 
 ## Quick Start
 
@@ -223,6 +224,58 @@ INSERT INTO orders VALUES (1, 1, 99.99); -- ✅ Success
 DELETE FROM users WHERE id = 1;         -- ❌ Permission denied
 ```
 
+### Row-Level Security (RLS)
+
+PGlite Proxy implements PostgreSQL-compatible Row-Level Security (RLS), enabling fine-grained access control at the row level based on the current user or session context.
+
+#### Enabling RLS
+
+```sql
+-- Enable RLS on a table
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+
+-- Force RLS for table owners too
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+```
+
+#### Creating Policies
+
+```sql
+-- Users can only see their own documents
+CREATE POLICY user_select ON documents
+  FOR SELECT
+  USING (owner = current_user());
+
+-- Users can only insert documents they own
+CREATE POLICY user_insert ON documents
+  FOR INSERT
+  WITH CHECK (owner = current_user());
+
+-- Admin role can see all documents
+CREATE POLICY admin_full ON documents
+  TO admin
+  USING (true);
+```
+
+#### Policy Modes
+
+- **PERMISSIVE** (default): Multiple policies are combined with OR logic
+- **RESTRICTIVE**: Multiple policies are combined with AND logic (for mandatory filters)
+
+```sql
+-- PERMISSIVE: User sees rows matching either condition
+CREATE POLICY policy1 ON table1 AS PERMISSIVE FOR SELECT USING (col1 = 'a');
+CREATE POLICY policy2 ON table1 AS PERMISSIVE FOR SELECT USING (col2 = 'b');
+-- Result: (col1 = 'a') OR (col2 = 'b')
+
+-- RESTRICTIVE: User must satisfy ALL conditions
+CREATE POLICY policy3 ON table2 AS RESTRICTIVE FOR SELECT USING (status = 'active');
+CREATE POLICY policy4 ON table2 AS RESTRICTIVE FOR SELECT USING (dept = 'sales');
+-- Result: (status = 'active') AND (dept = 'sales')
+```
+
+For complete documentation, see [docs/RLS.md](./docs/RLS.md).
+
 ### Shadow Catalog
 
 All original PostgreSQL type information is stored in the `__pg_meta__` table:
@@ -412,7 +465,7 @@ src/
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [ ] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
-- [ ] Row-Level Security (RLS) emulation
+- [x] Row-Level Security (RLS) emulation
 
 ### Phase 4 (Planned)
 - [ ] Full-text search (FTS5 integration)
