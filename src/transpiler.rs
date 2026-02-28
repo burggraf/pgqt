@@ -398,7 +398,14 @@ fn reconstruct_constraint(constraint: &Constraint) -> Option<String> {
         pg_query::protobuf::ConstrType::ConstrDefault => {
             if let Some(ref expr) = constraint.raw_expr {
                 let expr_sql = reconstruct_node(expr);
-                Some(format!("DEFAULT {}", expr_sql))
+                // SQLite requires parentheses around function calls in DEFAULT
+                // Check if the expression contains parentheses (indicating a function call)
+                let is_func_call = expr_sql.contains('(') && expr_sql.contains(')');
+                if is_func_call {
+                    Some(format!("DEFAULT ({})", expr_sql))
+                } else {
+                    Some(format!("DEFAULT {}", expr_sql))
+                }
             } else {
                 None
             }
@@ -1090,6 +1097,9 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
         // System catalog functions - strip schema and return as-is for now
         "pg_get_userbyid" => "pg_get_userbyid",
         "pg_table_is_visible" => "pg_table_is_visible",
+        // UUID generation - SQLite doesn't have built-in, use randomblob
+        "gen_random_uuid" => "lower(hex(randomblob(16)))",
+        "uuid_generate_v4" => "lower(hex(randomblob(16)))",
         _ => {
             // For unknown functions, return the full name if schema-qualified
             if func_parts.len() > 1 {
@@ -1103,7 +1113,8 @@ fn reconstruct_func_call(func_call: &FuncCall) -> String {
     if sqlite_func == "datetime('now')" 
         || sqlite_func == "date('now')" 
         || sqlite_func == "time('now')" 
-        || sqlite_func == "random()" {
+        || sqlite_func == "random()"
+        || sqlite_func == "lower(hex(randomblob(16)))" {
         return sqlite_func.to_string();
     }
 
