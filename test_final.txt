@@ -1,0 +1,42 @@
+
+running 25 tests
+test plpgsql::tests::test_runtime_creation ... ok
+test distinct_on::tests::test_regular_distinct_not_detected ... ok
+test distinct_on::tests::test_distinct_on_detection ... FAILED
+test transpiler::debug_tests::test_debug_cast ... ok
+test catalog::tests::test_get_nonexistent_column ... ok
+test transpiler::debug_tests::test_debug_distinct ... ok
+test catalog::tests::test_delete_table_metadata ... ok
+test transpiler::tests::test_create_table_timestamp ... ok
+test transpiler::operator_tests::test_transpile_cast ... ok
+test catalog::tests::test_store_table_metadata ... ok
+test transpiler::operator_tests::test_transpile_operators ... ok
+test rls::tests::test_enable_rls ... ok
+test transpiler::tests::test_rewrite_types ... ok
+test catalog::tests::test_store_and_retrieve_column_metadata ... ok
+test transpiler::tests::test_create_table_transpile ... ok
+test transpiler::tests::test_debug_select_star ... ok
+test transpiler::tests::test_transpile_limit_all ... ok
+test transpiler::tests::test_transpile_now ... ok
+test catalog::tests::test_init_catalog_creates_table ... ok
+test transpiler::tests::test_transpile_select_columns ... ok
+test transpiler::tests::test_transpile_schema_mapping_attached_db ... ok
+test transpiler::tests::test_transpile_schema_mapping_public ... ok
+test transpiler::tests::test_transpile_select_star ... ok
+test rls::tests::test_create_policy ... ok
+test transpiler::tests::test_transpile_unqualified_table ... ok
+
+failures:
+
+---- distinct_on::tests::test_distinct_on_detection stdout ----
+
+thread 'distinct_on::tests::test_distinct_on_detection' (19917840) panicked at src/distinct_on.rs:234:13:
+assertion failed: is_distinct_on(select)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    distinct_on::tests::test_distinct_on_detection
+
+test result: FAILED. 24 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

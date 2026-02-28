@@ -1,0 +1,30 @@
+
+running 25 tests
+test plpgsql::tests::test_runtime_creation ... ok
+test distinct_on::tests::test_distinct_on_detection ... ok
+test distinct_on::tests::test_regular_distinct_not_detected ... ok
+test transpiler::debug_tests::test_debug_cast ... ok
+test transpiler::debug_tests::test_debug_distinct ... ok
+test transpiler::operator_tests::test_transpile_cast ... ok
+test transpiler::operator_tests::test_transpile_operators ... ok
+test transpiler::tests::test_create_table_timestamp ... ok
+test transpiler::tests::test_create_table_transpile ... ok
+test catalog::tests::test_init_catalog_creates_table ... ok
+test catalog::tests::test_store_and_retrieve_column_metadata ... ok
+test transpiler::tests::test_rewrite_types ... ok
+test transpiler::tests::test_debug_select_star ... ok
+test transpiler::tests::test_transpile_limit_all ... ok
+test catalog::tests::test_delete_table_metadata ... ok
+test transpiler::tests::test_transpile_now ... ok
+test transpiler::tests::test_transpile_schema_mapping_public ... ok
+test transpiler::tests::test_transpile_schema_mapping_attached_db ... ok
+test catalog::tests::test_store_table_metadata ... ok
+test catalog::tests::test_get_nonexistent_column ... ok
+test transpiler::tests::test_transpile_select_columns ... ok
+test transpiler::tests::test_transpile_unqualified_table ... ok
+test transpiler::tests::test_transpile_select_star ... ok
+test rls::tests::test_create_policy ... ok
+test rls::tests::test_enable_rls ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
