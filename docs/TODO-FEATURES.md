@@ -61,6 +61,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Row-Level Security (RLS)** | ❌ | Medium | Phase 3 Roadmap: Emulate by injecting `WHERE` clauses into the AST based on session user. |
 | **Stored Procedures (PL/pgSQL)** | ❌ | High | Phase 3 Roadmap: Considering a Lua-based runtime to emulate procedural blocks. |
 | **Logical Replication** | ❌ | High | Not applicable to single-file SQLite databases. |
+| **Users & Permissions (RBAC)** | ❌ | Medium | SQLite has no native users. Emulation would require custom auth tables and AST-based permission checks. |
 | **Vector Search** | ❌ | Medium | Phase 4 Roadmap: Integrate `sqlite-vec`. |
 
 ## Key for Difficulty
