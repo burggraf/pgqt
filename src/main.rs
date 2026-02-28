@@ -116,7 +116,9 @@ impl SqliteHandler {
         let tag = if upper_sql.starts_with("CREATE TABLE") {
             Tag::new("CREATE TABLE")
         } else if upper_sql.starts_with("INSERT") {
-            Tag::new("INSERT").with_oid(0).with_rows(changes)
+            // PostgreSQL format: INSERT oid rows
+            // oid is 0 for tables without OIDs (most modern tables)
+            Tag::new("INSERT 0").with_rows(changes)
         } else if upper_sql.starts_with("UPDATE") {
             Tag::new("UPDATE").with_rows(changes)
         } else if upper_sql.starts_with("DELETE") {
