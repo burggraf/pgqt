@@ -428,7 +428,11 @@ impl SqliteHandler {
             let mut encoder = DataRowEncoder::new(fields.clone());
 
             for i in 0..col_count {
-                let value: Option<String> = row.get(i).ok();
+                // Try to get value as different types and convert to string
+                let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
+                    .map(|v| v.map(|x| x.to_string()))
+                    .or_else(|| row.get::<_, Option<String>>(i).ok())
+                    .flatten();
                 match value {
                     Some(v) => encoder.encode_field(&Some(v))?,
                     None => encoder.encode_field(&None::<String>)?,
@@ -471,10 +475,20 @@ impl SqliteHandler {
 
 #[async_trait]
 impl SimpleQueryHandler for SqliteHandler {
-    async fn do_query<'a, 'b: 'a, C>(&'b self, _client: &mut C, query: &'a str) -> PgWireResult<Vec<Response<'a>>>
+    async fn do_query<'a, 'b: 'a, C>(&'b self, client: &mut C, query: &'a str) -> PgWireResult<Vec<Response<'a>>>
     where
         C: ClientInfo + Unpin + Send + Sync,
     {
+        // Initialize session from client metadata if not already set
+        if self.sessions.is_empty() {
+            let metadata = client.metadata();
+            let user = metadata.get("user").map(|s| s.to_string()).unwrap_or_else(|| "postgres".to_string());
+            self.sessions.insert(0, SessionContext {
+                authenticated_user: user.clone(),
+                current_user: user,
+            });
+        }
+        
         println!("Received query: {}", query);
         match self.execute_query(query) {
             Ok(responses) => Ok(responses),

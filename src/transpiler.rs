@@ -515,7 +515,10 @@ fn reconstruct_constraint(constraint: &Constraint, ctx: &mut TranspileContext) -
                 None
             }
         }
-        pg_query::protobuf::ConstrType::ConstrPrimary => Some("PRIMARY KEY".to_string()),
+        pg_query::protobuf::ConstrType::ConstrPrimary => {
+            // Skip PRIMARY KEY if type already includes it (e.g., SERIAL -> integer primary key autoincrement)
+            return None;
+        }
         pg_query::protobuf::ConstrType::ConstrUnique => Some("UNIQUE".to_string()),
         pg_query::protobuf::ConstrType::ConstrCheck => {
             if let Some(ref expr) = constraint.raw_expr {
@@ -1285,75 +1288,59 @@ fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileConte
             if let NodeEnum::DefElem(ref def) = node {
                 match def.defname.as_str() {
                     "superuser" => {
-                        if let Some(ref arg) = def.arg {
-                            if let Some(ref val) = arg.node {
-                                if let NodeEnum::AConst(ref aconst) = val {
-                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                        superuser = i.ival != 0;
-                                    }
+                        superuser = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
                                 }
-                            } else {
-                                superuser = true;
+                                _ => true,
                             }
-                        } else {
-                            superuser = true;
-                        }
+                            None => true,
+                        };
                     }
                     "inherit" => {
-                        if let Some(ref arg) = def.arg {
-                            if let Some(ref val) = arg.node {
-                                if let NodeEnum::AConst(ref aconst) = val {
-                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                        inherit = i.ival != 0;
-                                    }
+                        inherit = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
                                 }
+                                _ => true,
                             }
-                        }
+                            None => true,
+                        };
                     }
                     "createrole" => {
-                        if let Some(ref arg) = def.arg {
-                            if let Some(ref val) = arg.node {
-                                if let NodeEnum::AConst(ref aconst) = val {
-                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                        createrole = i.ival != 0;
-                                    }
+                        createrole = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
                                 }
-                            } else {
-                                createrole = true;
+                                _ => true,
                             }
-                        } else {
-                            createrole = true;
-                        }
+                            None => true,
+                        };
                     }
                     "createdb" => {
-                        if let Some(ref arg) = def.arg {
-                            if let Some(ref val) = arg.node {
-                                if let NodeEnum::AConst(ref aconst) = val {
-                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                        createdb = i.ival != 0;
-                                    }
+                        createdb = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
                                 }
-                            } else {
-                                createdb = true;
+                                _ => true,
                             }
-                        } else {
-                            createdb = true;
-                        }
+                            None => true,
+                        };
                     }
                     "canlogin" => {
-                        if let Some(ref arg) = def.arg {
-                            if let Some(ref val) = arg.node {
-                                if let NodeEnum::AConst(ref aconst) = val {
-                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                        canlogin = i.ival != 0;
-                                    }
+                        canlogin = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
                                 }
-                            } else {
-                                canlogin = true;
+                                _ => true,
                             }
-                        } else {
-                            canlogin = true;
-                        }
+                            None => true,
+                        };
                     }
                     "password" => {
                         if let Some(ref arg) = def.arg {

@@ -41,7 +41,7 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     // __pg_authid__: stores roles
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_authid__ (
-            oid INTEGER PRIMARY KEY,
+            oid INTEGER PRIMARY KEY AUTOINCREMENT,
             rolname TEXT UNIQUE NOT NULL,
             rolsuper BOOLEAN DEFAULT FALSE,
             rolinherit BOOLEAN DEFAULT TRUE,
