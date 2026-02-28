@@ -218,6 +218,20 @@ fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileC
         .map(|r| r.relname.clone())
         .unwrap_or_default();
     
+    // Get schema name from relation
+    let schema_name = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.schemaname.to_lowercase())
+        .unwrap_or_default();
+    
+    // Build full table name with schema prefix (if not public/pg_catalog)
+    let full_table_name = if schema_name.is_empty() || schema_name == "public" || schema_name == "pg_catalog" {
+        table_name.to_lowercase()
+    } else {
+        format!("{}.{}", schema_name, table_name.to_lowercase())
+    };
+    
     ctx.referenced_tables.push(table_name.to_lowercase());
 
     let mut columns: Vec<ColumnTypeInfo> = Vec::new();
@@ -237,7 +251,7 @@ fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileC
 
     let sql = format!(
         "create table {} ({})",
-        table_name.to_lowercase(),
+        full_table_name,
         column_defs.join(", ")
     );
 

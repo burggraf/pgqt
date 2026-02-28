@@ -9,7 +9,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **ACID Compliance** | ✅ | - | SQLite provides atomic, consistent, isolated, and durable transactions natively. |
 | **Multi-Version Concurrency Control (MVCC)** | ❌ | High | SQLite uses a single-writer model. Implementing full MVCC would require a custom storage engine or complex snapshotting. |
 | **SQL Transpilation** | ✅ | Medium | Currently using `pg_query` (PostgreSQL 17 parser) to rewrite queries for SQLite compatibility. |
-| **Schemas (Namespaces)** | ⚠️ | Medium | PostgreSQL `public.table` is currently rewritten to `table`. Multiple schemas could be emulated using separate SQLite database files (ATTACH) or table prefixes. |
+| **Schemas (Namespaces)** | ✅ | Medium | Implemented using SQLite ATTACH DATABASE. Each non-public schema maps to a separate SQLite file. Supports CREATE SCHEMA, DROP SCHEMA, search_path, and pg_namespace catalog. |
 | **Savepoints / Nested Transactions** | ✅ | Low | SQLite supports `SAVEPOINT`, `RELEASE`, and `ROLLBACK TO`. |
 | **Foreign Keys** | ✅ | Low | Supported by SQLite; needs to ensure `PRAGMA foreign_keys = ON` is set. |
 | **Check Constraints** | ✅ | Low | Natively supported by SQLite. |

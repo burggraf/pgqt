@@ -10,7 +10,9 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Type Preservation**: Original PostgreSQL types (SERIAL, VARCHAR, TIMESTAMPTZ, etc.) are stored in a shadow catalog for reversible migrations
 - **SQL Transpilation**: PostgreSQL-specific syntax is automatically rewritten for SQLite compatibility
 - **ORM Support**: Works with Prisma, TypeORM, Drizzle, and other modern ORMs
+- **Schema Support**: Full namespace support using SQLite ATTACH DATABASE
 - **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
+- **Row-Level Security (RLS)**: Fine-grained access control at the row level
 - **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
 
@@ -100,12 +102,65 @@ SELECT '1'::int;           -- → SELECT CAST('1' AS INTEGER)
 -- Functions
 SELECT now();              -- → SELECT datetime('now')
 
--- Schema references
-SELECT * FROM public.users; -- → SELECT * FROM users
+-- Schema references (public stripped, others preserved)
+SELECT * FROM public.users;      -- → SELECT * FROM users
+SELECT * FROM inventory.products; -- → SELECT * FROM inventory.products
 
 -- Operators
 WHERE name ~~ 'alice%';    -- → WHERE name LIKE 'alice%'
 ```
+
+### Schemas (Namespaces)
+
+PGlite Proxy implements PostgreSQL schema support using SQLite's ATTACH DATABASE feature. Each schema maps to a separate SQLite database file.
+
+#### Creating Schemas
+
+```sql
+-- Create a new schema
+CREATE SCHEMA inventory;
+
+-- Create schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS analytics;
+```
+
+#### Using Schemas
+
+```sql
+-- Create table in a specific schema
+CREATE TABLE inventory.products (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    price REAL
+);
+
+-- Query with schema prefix
+SELECT * FROM inventory.products;
+
+-- Cross-schema joins
+SELECT p.name, u.email
+FROM inventory.products p
+JOIN public.users u ON p.user_id = u.id;
+```
+
+#### Search Path
+
+```sql
+-- Show current search path
+SHOW search_path;
+
+-- Set search path
+SET search_path TO inventory, public;
+```
+
+#### System Catalog
+
+```sql
+-- List all schemas
+SELECT nspname FROM pg_namespace;
+```
+
+For complete documentation, see [docs/SCHEMAS.md](./docs/SCHEMAS.md).
 
 ### Role-Based Access Control (RBAC)
 
@@ -562,6 +617,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
 ### Phase 3 (In Progress)
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
+- [x] **Schemas (Namespaces)** - Full schema support using SQLite ATTACH DATABASE
 - [ ] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [x] Row-Level Security (RLS) emulation

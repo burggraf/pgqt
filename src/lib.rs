@@ -4,5 +4,6 @@ pub mod fts;
 pub mod plpgsql;
 pub mod rls;
 pub mod rls_inject;
+pub mod schema;
 pub mod transpiler;
 pub mod vector;

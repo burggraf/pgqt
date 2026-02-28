@@ -20,6 +20,7 @@ mod rls_inject;
 mod transpiler;
 mod fts;
 mod vector;
+mod schema;
 
 /// PostgreSQL-to-SQLite proxy server
 #[derive(Parser, Debug)]
@@ -42,6 +43,7 @@ struct Cli {
 
 use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
 use transpiler::transpile_with_metadata;
+use schema::{SchemaManager, SearchPath};
 
 /// Session context for each client connection
 #[derive(Debug, Clone)]
@@ -49,12 +51,14 @@ struct SessionContext {
     #[allow(dead_code)]
     authenticated_user: String,
     current_user: String,
+    search_path: SearchPath,
 }
 
 /// PostgreSQL-to-SQLite proxy handler
 struct SqliteHandler {
     conn: Arc<Mutex<Connection>>,
     sessions: Arc<DashMap<u32, SessionContext>>,
+    schema_manager: SchemaManager,
 }
 
 impl SqliteHandler {
@@ -558,6 +562,7 @@ impl SqliteHandler {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             sessions: Arc::new(DashMap::new()),
+            schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
         })
     }
 
@@ -568,6 +573,7 @@ impl SqliteHandler {
             self.sessions.insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
                 current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
             });
             self.sessions.get(&0).unwrap()
         });
@@ -727,8 +733,193 @@ impl SqliteHandler {
         sql
     }
 
+    /// Handle CREATE SCHEMA statement
+    fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+        // Parse schema name from CREATE SCHEMA [IF NOT EXISTS] name [AUTHORIZATION user]
+        let upper_sql = sql.to_uppercase();
+        let if_not_exists = upper_sql.contains("IF NOT EXISTS");
+
+        // Extract schema name (simplified parsing)
+        let schema_name = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w == "create" || *w == "schema" || *w == "if" || *w == "not" || *w == "exists")
+            .next()
+            .map(|s| s.trim_matches('"').to_string())
+            .ok_or_else(|| anyhow::anyhow!("invalid CREATE SCHEMA syntax"))?;
+
+        // Check for reserved names
+        if schema_name.starts_with("pg_") {
+            return Err(anyhow::anyhow!(
+                "unacceptable schema name \"{}\": system schemas must start with pg_",
+                schema_name
+            ));
+        }
+
+        let conn = self.conn.lock().unwrap();
+
+        // Check if schema already exists
+        if schema::schema_exists(&conn, &schema_name)? {
+            if if_not_exists {
+                return Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))]);
+            }
+            return Err(anyhow::anyhow!("schema \"{}\" already exists", schema_name));
+        }
+
+        // Create schema in catalog
+        schema::create_schema(&conn, &schema_name, None)?;
+
+        // Attach the schema database
+        self.schema_manager.attach_schema(&conn, &schema_name)?;
+
+        Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))])
+    }
+
+    /// Handle DROP SCHEMA statement
+    fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+        // Parse schema name from DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]
+        let upper_sql = sql.to_uppercase();
+        let if_exists = upper_sql.contains("IF EXISTS");
+        let cascade = upper_sql.ends_with("CASCADE") || (!upper_sql.ends_with("RESTRICT") && upper_sql.contains(" CASCADE"));
+
+        // Extract schema name
+        let schema_name = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w == "drop" || *w == "schema" || *w == "if" || *w == "exists")
+            .next()
+            .map(|s| s.trim_matches('"').to_string())
+            .ok_or_else(|| anyhow::anyhow!("invalid DROP SCHEMA syntax"))?;
+
+        // Cannot drop system schemas
+        if schema_name == "public" {
+            return Err(anyhow::anyhow!("cannot drop schema \"public\""));
+        }
+        if schema_name == "pg_catalog" || schema_name == "information_schema" {
+            return Err(anyhow::anyhow!("cannot drop system schema \"{}\"", schema_name));
+        }
+
+        let conn = self.conn.lock().unwrap();
+
+        // Check if schema exists
+        if !schema::schema_exists(&conn, &schema_name)? {
+            if if_exists {
+                return Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))]);
+            }
+            return Err(anyhow::anyhow!("schema \"{}\" does not exist", schema_name));
+        }
+
+        // Check if schema is empty (unless CASCADE)
+        if !cascade && !schema::schema_is_empty(&conn, &schema_name, &self.schema_manager)? {
+            return Err(anyhow::anyhow!(
+                "schema \"{}\" cannot be dropped without CASCADE because it contains objects",
+                schema_name
+            ));
+        }
+
+        // Drop all objects in the schema (if CASCADE)
+        if cascade {
+            schema::drop_schema_objects(&conn, &schema_name, &self.schema_manager)?;
+        }
+
+        // Detach the schema database
+        self.schema_manager.detach_schema(&conn, &schema_name)?;
+
+        // Delete the schema database file
+        self.schema_manager.delete_schema_db(&schema_name)?;
+
+        // Remove schema from catalog
+        schema::drop_schema(&conn, &schema_name)?;
+
+        Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))])
+    }
+
+    /// Handle SET search_path statement
+    fn handle_set_search_path(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+        // Parse search_path from SET search_path TO value or SET search_path = value
+        let path_str = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w != "to" && *w != "=")
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string();
+
+        let search_path = schema::SearchPath::parse(&path_str)?;
+
+        // Update session context
+        let mut session = self.sessions.get_mut(&0).unwrap_or_else(|| {
+            self.sessions.insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions.get_mut(&0).unwrap()
+        });
+        session.search_path = search_path;
+
+        Ok(vec![Response::Execution(Tag::new("SET"))])
+    }
+
+    /// Handle SHOW search_path statement
+    fn handle_show_search_path(&self) -> Result<Vec<Response<'_>>> {
+        let session = self.sessions.get(&0).unwrap_or_else(|| {
+            self.sessions.insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions.get(&0).unwrap()
+        });
+
+        let path = session.search_path.to_string();
+
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+            "search_path".to_string(),
+            None,
+            None,
+            Type::TEXT,
+            FieldFormat::Text,
+        )]);
+
+        let mut encoder = DataRowEncoder::new(fields.clone());
+        encoder.encode_field(&Some(path))?;
+        let data_rows = vec![encoder.finish()];
+
+        let row_stream = stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            fields,
+            row_stream,
+        ))])
+    }
+
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+        let upper_sql = sql.trim().to_uppercase();
+
+        // Handle CREATE SCHEMA
+        if upper_sql.starts_with("CREATE SCHEMA") {
+            return self.handle_create_schema(sql);
+        }
+
+        // Handle DROP SCHEMA
+        if upper_sql.starts_with("DROP SCHEMA") {
+            return self.handle_drop_schema(sql);
+        }
+
+        // Handle SET search_path
+        if upper_sql.starts_with("SET SEARCH_PATH") {
+            return self.handle_set_search_path(sql);
+        }
+
+        // Handle SHOW search_path
+        if upper_sql == "SHOW SEARCH_PATH" {
+            return self.handle_show_search_path();
+        }
+
         let transpile_result = transpile_with_metadata(sql);
         
         // Handle SET ROLE specially
@@ -740,6 +931,7 @@ impl SqliteHandler {
                     self.sessions.insert(0, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
+                        search_path: SearchPath::default(),
                     });
                     self.sessions.get_mut(&0).unwrap()
                 });
@@ -783,6 +975,7 @@ impl SqliteHandler {
                     self.sessions.insert(0, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
+                        search_path: SearchPath::default(),
                     });
                     self.sessions.get(&0).unwrap()
                 });
@@ -883,6 +1076,7 @@ impl SimpleQueryHandler for SqliteHandler {
             self.sessions.insert(0, SessionContext {
                 authenticated_user: user.clone(),
                 current_user: user,
+                search_path: SearchPath::default(),
             });
         }
         

@@ -120,6 +120,32 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_rls_enabled__ table")?;
 
+    // __pg_namespace__: Schema catalog for dynamic schema support
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_namespace__ (
+            oid INTEGER PRIMARY KEY AUTOINCREMENT,
+            nspname TEXT UNIQUE NOT NULL,
+            nspowner INTEGER NOT NULL DEFAULT 10,
+            nspacl TEXT
+        )",
+        [],
+    )
+    .context("Failed to create __pg_namespace__ table")?;
+
+    // Insert default schemas if they don't exist
+    conn.execute(
+        "INSERT OR IGNORE INTO __pg_namespace__ (nspname, nspowner) VALUES ('public', 10)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO __pg_namespace__ (nspname, nspowner) VALUES ('pg_catalog', 10)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO __pg_namespace__ (nspname, nspowner) VALUES ('information_schema', 10)",
+        [],
+    )?;
+
     // Bootstrap: Create default 'postgres' superuser (OID 10)
     conn.execute(
         "INSERT OR IGNORE INTO __pg_authid__ (oid, rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin)
@@ -424,14 +450,11 @@ pub fn get_table_policies(conn: &Connection, table_name: &str) -> Result<Vec<Rls
 
 /// Initialize system catalog views to support psql commands like \dt, \d, etc.
 pub fn init_system_views(conn: &Connection) -> Result<()> {
-    // pg_namespace: list of schemas
+    // pg_namespace: list of schemas (reads from __pg_namespace__ for dynamic schema support)
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_namespace AS
-         SELECT 2200 as oid, 'public' as nspname
-         UNION ALL
-         SELECT 11 as oid, 'pg_catalog' as nspname
-         UNION ALL
-         SELECT 12 as oid, 'information_schema' as nspname",
+         SELECT oid, nspname, nspowner, nspacl
+         FROM __pg_namespace__",
         [],
     )?;
 
