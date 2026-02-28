@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use dashmap::DashMap;
 use futures::stream;
 use pgwire::api::auth::noop::NoopStartupHandler;
 use pgwire::api::query::{PlaceholderExtendedQueryHandler, SimpleQueryHandler};
@@ -35,12 +36,20 @@ struct Cli {
     database: String,
 }
 
-use catalog::{init_catalog, init_system_views, store_table_metadata};
+use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
 use transpiler::transpile_with_metadata;
+
+/// Session context for each client connection
+#[derive(Debug, Clone)]
+struct SessionContext {
+    authenticated_user: String,
+    current_user: String,
+}
 
 /// PostgreSQL-to-SQLite proxy handler
 struct SqliteHandler {
     conn: Arc<Mutex<Connection>>,
+    sessions: Arc<DashMap<u32, SessionContext>>,
 }
 
 impl SqliteHandler {
@@ -239,12 +248,115 @@ impl SqliteHandler {
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            sessions: Arc::new(DashMap::new()),
         })
+    }
+
+    /// Check if the current user has permission to execute the query
+    fn check_permissions(&self, referenced_tables: &[String], operation_type: transpiler::OperationType) -> Result<bool> {
+        // Get current user from session
+        let session = self.sessions.get(&0).unwrap_or_else(|| {
+            self.sessions.insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+            });
+            self.sessions.get(&0).unwrap()
+        });
+        let current_user = session.current_user.clone();
+
+        // Get the connection to query RBAC tables
+        let conn = self.conn.lock().unwrap();
+
+        // Check if user is superuser
+        let is_superuser: bool = conn.query_row(
+            "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
+            &[&current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if is_superuser {
+            return Ok(true);
+        }
+
+        // Get effective roles (including inherited) using prepare and query_map
+        let mut stmt = conn.prepare("
+            WITH RECURSIVE effective_roles AS (
+                SELECT oid FROM __pg_authid__ WHERE rolname = ?1
+                UNION
+                SELECT m.roleid FROM __pg_auth_members__ m
+                JOIN effective_roles er ON er.oid = m.member
+             )
+             SELECT oid FROM effective_roles
+        ").unwrap();
+        let effective_roles: Vec<i64> = stmt.query_map([&current_user], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if effective_roles.is_empty() {
+            return Ok(false);
+        }
+
+        // Map operation to privilege
+        let required_privilege = match operation_type {
+            transpiler::OperationType::SELECT => "SELECT",
+            transpiler::OperationType::INSERT => "INSERT",
+            transpiler::OperationType::UPDATE => "UPDATE",
+            transpiler::OperationType::DELETE => "DELETE",
+            _ => return Ok(true), // DDL and other operations are allowed for now
+        };
+
+        // Check permissions for each table
+        for table_name in referenced_tables {
+            let has_privilege: bool = conn.query_row(
+                "SELECT EXISTS (
+                    SELECT 1 FROM __pg_acl__ a
+                    JOIN pg_class c ON c.oid = a.object_id AND c.relname = ?1
+                    WHERE a.privilege = ?2
+                    AND (
+                        a.grantee_id IN (SELECT oid FROM __pg_authid__)
+                        OR a.grantee_id = 0
+                    )
+                )",
+                &[table_name, required_privilege],
+                |row| row.get(0),
+            ).unwrap_or(false);
+
+            if !has_privilege {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response<'_>>> {
         let transpile_result = transpile_with_metadata(sql);
+        
+        // Handle SET ROLE specially
+        if transpile_result.sql.starts_with("-- SET ROLE") {
+            let role_name = transpile_result.sql.trim_start_matches("-- SET ROLE ").trim();
+            if role_name != "NONE" {
+                // Update session context
+                let mut session = self.sessions.get_mut(&0).unwrap_or_else(|| {
+                    self.sessions.insert(0, SessionContext {
+                        authenticated_user: "postgres".to_string(),
+                        current_user: "postgres".to_string(),
+                    });
+                    self.sessions.get_mut(&0).unwrap()
+                });
+                session.current_user = role_name.to_string();
+            }
+            // Return success without executing
+            return Ok(vec![Response::Execution(Tag::new("SET"))]);
+        }
+        
+        // Check permissions before executing
+        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type)? {
+            return Err(anyhow::anyhow!("permission denied for table(s)"));
+        }
+
         let sqlite_sql = &transpile_result.sql;
 
         let conn = self.conn.lock().unwrap();
@@ -267,6 +379,23 @@ impl SqliteHandler {
                     .collect();
 
                 store_table_metadata(&conn, &metadata.table_name, &columns)?;
+                
+                // Store ownership (use current user as owner)
+                let session = self.sessions.get(&0).unwrap_or_else(|| {
+                    self.sessions.insert(0, SessionContext {
+                        authenticated_user: "postgres".to_string(),
+                        current_user: "postgres".to_string(),
+                    });
+                    self.sessions.get(&0).unwrap()
+                });
+                // Find owner OID from __pg_authid__
+                let owner_oid: i64 = conn.query_row(
+                    "SELECT oid FROM __pg_authid__ WHERE rolname = ?1",
+                    &[&session.current_user],
+                    |row| row.get(0),
+                ).unwrap_or(10); // Default to postgres (OID 10)
+                
+                store_relation_metadata(&conn, &metadata.table_name, owner_oid)?;
             }
 
             Ok(result)

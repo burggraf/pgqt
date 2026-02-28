@@ -124,12 +124,31 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::DELETE,
             },
-            NodeEnum::VariableSetStmt(ref _set_stmt) => TranspileResult {
-                sql: "select 1".to_string(), // Safely ignore SET for now
-                create_table_metadata: None,
-                referenced_tables: Vec::new(),
-                operation_type: OperationType::OTHER,
-            },
+            NodeEnum::VariableSetStmt(ref set_stmt) => {
+                // Handle SET ROLE specially
+                if set_stmt.name == "role" && !set_stmt.args.is_empty() {
+                    if let Some(ref node) = set_stmt.args[0].node {
+                        if let NodeEnum::AConst(ref aconst) = node {
+                            if let Some(ref val) = aconst.val {
+                                if let pg_query::protobuf::a_const::Val::Sval(ref s) = val {
+                                    return TranspileResult {
+                                        sql: format!("-- SET ROLE {}", s.sval),
+                                        create_table_metadata: None,
+                                        referenced_tables: Vec::new(),
+                                        operation_type: OperationType::OTHER,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                TranspileResult {
+                    sql: "select 1".to_string(), // Safely ignore other SET statements
+                    create_table_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::OTHER,
+                }
+            }
             NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
                 sql: format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name),
                 create_table_metadata: None,
@@ -143,19 +162,19 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
             },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
-                sql: reconstruct_drop_role_stmt(drop_role_stmt, ctx),
+                sql: reconstruct_drop_role_stmt(drop_role_stmt),
                 create_table_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
             NodeEnum::GrantStmt(ref grant_stmt) => TranspileResult {
-                sql: reconstruct_grant_stmt(grant_stmt, ctx),
+                sql: reconstruct_grant_stmt(grant_stmt),
                 create_table_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
             NodeEnum::GrantRoleStmt(ref grant_role_stmt) => TranspileResult {
-                sql: reconstruct_grant_role_stmt(grant_role_stmt, ctx),
+                sql: reconstruct_grant_role_stmt(grant_role_stmt),
                 create_table_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
@@ -990,6 +1009,21 @@ fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileContext) -> St
     format!("cast({} as {})", arg_sql, sqlite_type.to_lowercase())
 }
 
+/// Reconstruct a constant value
+fn reconstruct_aconst(aconst: &AConst) -> String {
+    if let Some(ref val) = aconst.val {
+        match val {
+            pg_query::protobuf::a_const::Val::Ival(i) => i.ival.to_string(),
+            pg_query::protobuf::a_const::Val::Fval(f) => f.fval.clone(),
+            pg_query::protobuf::a_const::Val::Sval(s) => format!("'{}'", s.sval.replace('"', "\"").replace('\'', "''")),
+            pg_query::protobuf::a_const::Val::Boolval(b) => (if b.boolval { "1" } else { "0" }).to_string(),
+            _ => "NULL".to_string(),
+        }
+    } else {
+        "NULL".to_string()
+    }
+}
+
 /// Reconstruct an AExpr node (operators)
 fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
     let lexpr_sql = a_expr
@@ -1089,14 +1123,14 @@ fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileContext) -> St
     // Map 'public' and 'pg_catalog' schema to no prefix (SQLite doesn't have schemas)
     // Other schemas are treated as attached databases
     let full_table = if schema_name.is_empty() || schema_name == "public" || schema_name == "pg_catalog" {
-        format!("\"{}\"", table_name)
+        table_name.clone()
     } else {
-        format!("\"{}\".\"{}\"", schema_name, table_name)
+        format!("{}.{}", schema_name, table_name)
     };
 
     if let Some(a) = alias {
         if a != table_name && a != format!("{}.{}", schema_name, table_name) {
-            format!("{} as \"{}\"", full_table, a)
+            format!("{} as {}", full_table, a)
         } else {
             full_table
         }
@@ -1113,7 +1147,7 @@ fn reconstruct_column_ref(col_ref: &ColumnRef, _ctx: &mut TranspileContext) -> S
         .filter_map(|f| {
             if let Some(ref inner) = f.node {
                 match inner {
-                    NodeEnum::String(s) => Some(format!("\"{}\"", s.sval.to_lowercase())),
+                    NodeEnum::String(s) => Some(s.sval.to_lowercase()),
                     NodeEnum::AStar(_) => Some("*".to_string()),
                     _ => None,
                 }
@@ -1248,71 +1282,91 @@ fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileConte
     let mut password = "NULL".to_string();
 
     for opt in &stmt.options {
-        if let Some(NodeEnum::DefElem(ref def)) = opt.node.as_ref() {
-            match def.defname.as_str() {
-                "superuser" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::AConst(ref aconst)) = arg.node {
-                            if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                superuser = i.ival != 0;
+        if let Some(ref node) = opt.node {
+            if let NodeEnum::DefElem(ref def) = node {
+                match def.defname.as_str() {
+                    "superuser" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::AConst(ref aconst) = val {
+                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
+                                        superuser = i.ival != 0;
+                                    }
+                                }
+                            } else {
+                                superuser = true;
+                            }
+                        } else {
+                            superuser = true;
+                        }
+                    }
+                    "inherit" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::AConst(ref aconst) = val {
+                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
+                                        inherit = i.ival != 0;
+                                    }
+                                }
                             }
                         }
-                    } else {
-                        superuser = true;
                     }
-                }
-                "inherit" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::AConst(ref aconst)) = arg.node {
-                            if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                inherit = i.ival != 0;
+                    "createrole" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::AConst(ref aconst) = val {
+                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
+                                        createrole = i.ival != 0;
+                                    }
+                                }
+                            } else {
+                                createrole = true;
+                            }
+                        } else {
+                            createrole = true;
+                        }
+                    }
+                    "createdb" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::AConst(ref aconst) = val {
+                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
+                                        createdb = i.ival != 0;
+                                    }
+                                }
+                            } else {
+                                createdb = true;
+                            }
+                        } else {
+                            createdb = true;
+                        }
+                    }
+                    "canlogin" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::AConst(ref aconst) = val {
+                                    if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
+                                        canlogin = i.ival != 0;
+                                    }
+                                }
+                            } else {
+                                canlogin = true;
+                            }
+                        } else {
+                            canlogin = true;
+                        }
+                    }
+                    "password" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::String(ref s) = val {
+                                    password = format!("'{}'", s.sval.replace('\'', "''"));
+                                }
                             }
                         }
-                    } else {
-                        inherit = true;
                     }
+                    _ => {}
                 }
-                "createrole" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::AConst(ref aconst)) = arg.node {
-                            if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                createrole = i.ival != 0;
-                            }
-                        }
-                    } else {
-                        createrole = true;
-                    }
-                }
-                "createdb" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::AConst(ref aconst)) = arg.node {
-                            if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                createdb = i.ival != 0;
-                            }
-                        }
-                    } else {
-                        createdb = true;
-                    }
-                }
-                "canlogin" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::AConst(ref aconst)) = arg.node {
-                            if let Some(pg_query::protobuf::a_const::Val::Ival(ref i)) = aconst.val {
-                                canlogin = i.ival != 0;
-                            }
-                        }
-                    } else {
-                        canlogin = true;
-                    }
-                }
-                "password" => {
-                    if let Some(ref arg) = def.arg {
-                        if let Some(NodeEnum::String(ref s)) = arg.node {
-                            password = format!("'{}'", s.sval.replace('\'', "''"));
-                        }
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -1331,10 +1385,12 @@ fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileConte
 }
 
 /// Reconstruct a DROP ROLE statement as a DELETE from __pg_authid__
-fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt, _ctx: &mut TranspileContext) -> String {
+fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt) -> String {
     let roles: Vec<String> = stmt.roles.iter().filter_map(|r| {
-        if let Some(NodeEnum::RoleSpec(ref role)) = r.node.as_ref() {
-            return Some(format!("'{}'", role.rolename.to_lowercase()));
+        if let Some(ref node) = r.node {
+            if let NodeEnum::RoleSpec(ref role) = node {
+                return Some(format!("'{}'", role.rolename.to_lowercase()));
+            }
         }
         None
     }).collect();
@@ -1343,7 +1399,7 @@ fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt, _ctx: &mut TranspileContext) 
 }
 
 /// Reconstruct a GRANT statement as an INSERT into __pg_acl__
-fn reconstruct_grant_stmt(stmt: &GrantStmt, _ctx: &mut TranspileContext) -> String {
+fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
     let is_grant = stmt.is_grant;
     let objtype = stmt.objtype;
     
@@ -1354,551 +1410,101 @@ fn reconstruct_grant_stmt(stmt: &GrantStmt, _ctx: &mut TranspileContext) -> Stri
     }
 
     let objects: Vec<String> = stmt.objects.iter().filter_map(|o| {
-        if let Some(NodeEnum::RangeVar(ref rv)) = o.node.as_ref() {
-            return Some(rv.relname.to_lowercase());
+        if let Some(ref node) = o.node {
+            if let NodeEnum::RangeVar(ref rv) = node {
+                return Some(rv.relname.to_lowercase());
+            }
         }
         None
     }).collect();
 
     let privileges: Vec<String> = stmt.privileges.iter().filter_map(|p| {
-        if let Some(NodeEnum::AccessPriv(ref ap)) = p.node.as_ref() {
-            return Some(ap.priv_name.to_uppercase());
+        if let Some(ref node) = p.node {
+            if let NodeEnum::AccessPriv(ref ap) = node {
+                return Some(ap.priv_name.to_uppercase());
+            }
         }
         None
     }).collect();
 
     let grantees: Vec<String> = stmt.grantees.iter().filter_map(|g| {
-        if let Some(NodeEnum::RoleSpec(ref rs)) = g.node.as_ref() {
-            // Check for special names or OIDs
-            if rs.roletype == pg_query::protobuf::RoleSpecType::RolespecPublic as i32 {
-                return Some("PUBLIC".to_string());
+        if let Some(ref node) = g.node {
+            if let NodeEnum::RoleSpec(ref rs) = node {
+                if rs.roletype == pg_query::protobuf::RoleSpecType::RolespecPublic as i32 {
+                    return Some("PUBLIC".to_string());
+                }
+                return Some(rs.rolename.to_lowercase());
             }
-            return Some(rs.rolename.to_lowercase());
         }
         None
     }).collect();
 
     if is_grant {
-        let mut inserts = Vec::new();
-        for obj in &objects {
-            for priv_name in &privileges {
-                for grantee in &grantees {
-                    let insert = format!(
-                        "INSERT OR REPLACE INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
-                         SELECT c.oid, 'relation', COALESCE(r.oid, 0), '{}', 10 \
-                         FROM pg_class c LEFT JOIN pg_roles r ON r.rolname = '{}' \
-                         WHERE c.relname = '{}'",
-                        priv_name,
-                        if grantee == "PUBLIC" { "" } else { grantee },
-                        obj
-                    );
-                    inserts.push(insert);
-                }
-            }
+        if objects.is_empty() || privileges.is_empty() || grantees.is_empty() {
+            return "SELECT 1".to_string();
         }
-        // SQLite doesn't support multiple statements in one call easily, 
-        // but our proxy executes them sequentially if we return a list of responses?
-        // Actually, we return a single string for now.
-        // Let's use a CTE or something to do multiple inserts.
-        // Or just return the first one and fix the proxy to handle multiple.
         
-        // For now, let's just return a single composite statement or just the first one.
-        // Better: Return a single statement that inserts all.
-        // Since SQLite doesn't have a multi-row INSERT with SELECT cleanly for this,
-        // let's just return the first one for the MVP.
-        if inserts.is_empty() { "SELECT 1".to_string() } else { inserts[0].clone() }
+        let obj = &objects[0];
+        let priv_ = &privileges[0];
+        let grantee = &grantees[0];
+        format!(
+            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+             SELECT c.oid, 'relation', COALESCE(r.oid, 0), '{}', 10 \
+             FROM pg_class c LEFT JOIN pg_roles r ON r.rolname = '{}' \
+             WHERE c.relname = '{}'",
+            priv_, grantee, obj
+        )
     } else {
-        // REVOKE
-        let revoke_where = format!(
-            "object_id IN (SELECT oid FROM pg_class WHERE relname IN ({})) AND \
-             grantee_id IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) AND \
-             privilege IN ({})",
+        format!(
+            "DELETE FROM __pg_acl__ WHERE object_id IN (SELECT oid FROM pg_class WHERE relname IN ({})) \
+             AND grantee_id IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) \
+             AND privilege IN ({})",
             objects.iter().map(|o| format!("'{}'", o)).collect::<Vec<_>>().join(", "),
             grantees.iter().map(|g| format!("'{}'", g)).collect::<Vec<_>>().join(", "),
             privileges.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(", ")
-        );
-        format!("DELETE FROM __pg_acl__ WHERE {}", revoke_where)
+        )
     }
 }
 
 /// Reconstruct a GRANT role statement as an INSERT into __pg_auth_members__
-fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt, _ctx: &mut TranspileContext) -> String {
+fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
     let is_grant = stmt.is_grant;
     
     let granted_roles: Vec<String> = stmt.granted_roles.iter().filter_map(|r| {
-        if let Some(NodeEnum::RoleSpec(ref role)) = r.node.as_ref() {
-            return Some(role.rolename.to_lowercase());
+        if let Some(ref node) = r.node {
+            if let NodeEnum::RoleSpec(ref role) = node {
+                return Some(role.rolename.to_lowercase());
+            }
         }
         None
     }).collect();
 
     let grantee_roles: Vec<String> = stmt.grantee_roles.iter().filter_map(|r| {
-        if let Some(NodeEnum::RoleSpec(ref role)) = r.node.as_ref() {
-            return Some(role.rolename.to_lowercase());
+        if let Some(ref node) = r.node {
+            if let NodeEnum::RoleSpec(ref role) = node {
+                return Some(role.rolename.to_lowercase());
+            }
         }
         None
     }).collect();
 
     if is_grant {
-        if granted_roles.is_empty() || grantee_roles.is_empty() { return "SELECT 1".to_string(); }
+        if granted_roles.is_empty() || grantee_roles.is_empty() {
+            return "SELECT 1".to_string();
+        }
         format!(
-            "INSERT OR REPLACE INTO __pg_auth_members__ (roleid, member, grantor) \
+            "INSERT INTO __pg_auth_members__ (roleid, member, grantor) \
              SELECT r.oid, m.oid, 10 \
              FROM pg_roles r, pg_roles m \
              WHERE r.rolname = '{}' AND m.rolname = '{}'",
             granted_roles[0], grantee_roles[0]
         )
     } else {
-        // REVOKE role
         format!(
             "DELETE FROM __pg_auth_members__ WHERE roleid IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) \
              AND member IN (SELECT oid FROM pg_roles WHERE rolname IN ({}))",
             granted_roles.iter().map(|r| format!("'{}'", r)).collect::<Vec<_>>().join(", "),
             grantee_roles.iter().map(|r| format!("'{}'", r)).collect::<Vec<_>>().join(", ")
         )
-    }
-}
-
-/// Reconstruct a constant value
-fn reconstruct_aconst(aconst: &AConst) -> String {
-    if let Some(ref val) = aconst.val {
-        match val {
-            pg_query::protobuf::a_const::Val::Ival(i) => i.ival.to_string(),
-            pg_query::protobuf::a_const::Val::Fval(f) => f.fval.clone(),
-            pg_query::protobuf::a_const::Val::Sval(s) => format!("'{}'", s.sval.replace('"', "\"").replace('\'', "''")),
-            pg_query::protobuf::a_const::Val::Boolval(b) => (if b.boolval { "1" } else { "0" }).to_string(),
-            _ => "NULL".to_string(),
-        }
-    } else {
-        "NULL".to_string()
-    }
-}
-
-/// Debug function to print AST structure
-#[allow(dead_code)]
-pub fn debug_ast(sql: &str) {
-    match pg_query::parse(sql) {
-        Ok(result) => {
-            println!("Parsed AST for: {}", sql);
-            for (i, raw_stmt) in result.protobuf.stmts.iter().enumerate() {
-                println!("Statement {}:", i);
-                if let Some(ref stmt) = raw_stmt.stmt {
-                    debug_node(stmt, 0);
-                }
-            }
-        }
-        Err(e) => println!("Parse error: {}", e),
-    }
-}
-
-#[allow(dead_code)]
-fn debug_node(node: &Node, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    if let Some(ref inner) = node.node {
-        match inner {
-            NodeEnum::SelectStmt(stmt) => {
-                println!("{}SelectStmt:", prefix);
-                println!("{}  target_list: {:?}", prefix, stmt.target_list.len());
-                println!("{}  from_clause: {:?}", prefix, stmt.from_clause.len());
-            }
-            NodeEnum::ResTarget(target) => {
-                println!("{}ResTarget: name='{}'", prefix, target.name);
-            }
-            NodeEnum::AStar(_) => {
-                println!("{}AStar: *", prefix);
-            }
-            NodeEnum::RangeVar(range_var) => {
-                println!("{}RangeVar: {}.{}", prefix, range_var.schemaname, range_var.relname);
-            }
-            NodeEnum::ColumnRef(_col_ref) => {
-                println!("{}ColumnRef:", prefix);
-            }
-            NodeEnum::String(s) => {
-                println!("{}String: '{}'", prefix, s.sval);
-            }
-            NodeEnum::CreateStmt(stmt) => {
-                println!("{}CreateStmt:", prefix);
-                if let Some(ref rel) = stmt.relation {
-                    println!("{}  table: {}", prefix, rel.relname);
-                }
-                for element in &stmt.table_elts {
-                    if let Some(ref node) = element.node {
-                        if let NodeEnum::ColumnDef(col_def) = node {
-                            println!("{}  column: {}", prefix, col_def.colname);
-                            if let Some(ref type_name) = col_def.type_name {
-                                let names: Vec<String> = type_name
-                                    .names
-                                    .iter()
-                                    .filter_map(|n| {
-                                        if let Some(ref inner) = n.node {
-                                            if let NodeEnum::String(s) = inner {
-                                                return Some(s.sval.clone());
-                                            }
-                                        }
-                                        None
-                                    })
-                                    .collect();
-                                println!("{}    type: {:?}", prefix, names);
-                            }
-                        }
-                    }
-                }
-            }
-            NodeEnum::ColumnDef(col_def) => {
-                println!("{}ColumnDef: {}", prefix, col_def.colname);
-            }
-            _ => println!("{}Other: {:?}", prefix, inner),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_debug_select_star() {
-        let input = "SELECT * FROM users";
-        debug_ast(input);
-    }
-
-    #[test]
-    fn test_transpile_select_star() {
-        let input = "SELECT * FROM users";
-        let expected = "select * from users";
-        let result = transpile(input);
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_transpile_select_columns() {
-        let input = "SELECT id, name FROM users";
-        let expected = "select id, name from users";
-        let result = transpile(input);
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_transpile_limit_all() {
-        let input = "SELECT * FROM users LIMIT ALL";
-        let expected = "select * from users limit -1";
-        let result = transpile(input);
-        println!("LIMIT ALL test: input='{}', output='{}'", input, result);
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_transpile_now() {
-        let input = "SELECT now()";
-        let result = transpile(input);
-        assert!(result.contains("datetime('now')"));
-    }
-
-    #[test]
-    fn test_transpile_case_expression() {
-        let input = "SELECT CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' END as type FROM pg_class c";
-        debug_ast(input);
-        let result = transpile(input);
-        println!("CASE expression result: {}", result);
-        assert!(result.contains("case"));
-        assert!(result.contains("when"));
-        assert!(result.contains("then"));
-        assert!(result.contains("end"));
-    }
-
-    #[test]
-    fn test_transpile_in_clause() {
-        let input = "SELECT * FROM users WHERE id IN (1, 2, 3)";
-        debug_ast(input);
-        let result = transpile(input);
-        println!("IN clause result: {}", result);
-        assert!(result.contains("in"));
-        assert!(result.contains("(1, 2, 3)"));
-    }
-
-    #[test]
-    fn test_transpile_dt_query() {
-        let input = r#"SELECT n.nspname as "Schema",
-  c.relname as "Name",
-  CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
-  pg_catalog.pg_get_userbyid(c.relowner) as "Owner"
-FROM pg_catalog.pg_class c
-     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relkind IN ('r','p','')
-      AND n.nspname <> 'pg_catalog'
-      AND n.nspname !~ '^pg_toast'
-      AND n.nspname <> 'information_schema'
-  AND pg_catalog.pg_table_is_visible(c.oid)
-ORDER BY 1,2"#;
-        debug_ast(input);
-        let result = transpile(input);
-        println!("\\dt query result: {}", result);
-        // Should use NOT regexp function call (with quotes)
-        assert!(result.contains("NOT regexp('^pg_toast', \"n\".\"nspname\")"));
-    }
-
-    #[test]
-    fn test_transpile_schema_mapping_public() {
-        let input = "SELECT * FROM public.users";
-        let result = transpile(input);
-        // public schema should be stripped
-        assert!(!result.contains("public."));
-        assert!(result.contains("users"));
-    }
-
-    #[test]
-    fn test_transpile_schema_mapping_attached_db() {
-        let input = "SELECT * FROM inventory.products";
-        let result = transpile(input);
-        // Non-public schemas should be kept as database.table
-        assert!(result.contains("inventory.products"));
-    }
-
-    #[test]
-    fn test_transpile_unqualified_table() {
-        let input = "SELECT * FROM users";
-        let result = transpile(input);
-        assert_eq!(result, "select * from users");
-    }
-
-    #[test]
-    fn test_create_table_transpile() {
-        let input = "CREATE TABLE test_table (id SERIAL, name VARCHAR(10))";
-        let result = transpile_with_metadata(input);
-        
-        assert!(result.sql.contains("create table test_table"));
-        assert!(result.sql.contains("integer primary key autoincrement"));
-        assert!(result.sql.contains("text"));
-        
-        let metadata = result.create_table_metadata.expect("Should have metadata");
-        assert_eq!(metadata.table_name, "test_table");
-        
-        let id_col = metadata
-            .columns
-            .iter()
-            .find(|c| c.column_name == "id")
-            .expect("Should have id column");
-        assert!(id_col.original_type.contains("SERIAL"));
-    }
-
-    #[test]
-    fn test_create_table_timestamp() {
-        let input = "CREATE TABLE events (id SERIAL, created_at TIMESTAMP WITH TIME ZONE)";
-        let result = transpile_with_metadata(input);
-        
-        assert!(result.sql.contains("create table events"));
-        assert!(result.sql.contains("text")); // TIMESTAMP maps to TEXT in SQLite
-        
-        let metadata = result.create_table_metadata.expect("Should have metadata");
-        let ts_col = metadata
-            .columns
-            .iter()
-            .find(|c| c.column_name == "created_at")
-            .expect("Should have created_at column");
-        assert!(ts_col.original_type.contains("TIMESTAMP"));
-    }
-
-    #[test]
-    fn test_rewrite_types() {
-        assert_eq!(rewrite_type_for_sqlite("SERIAL"), "integer primary key autoincrement");
-        assert_eq!(rewrite_type_for_sqlite("VARCHAR(10)"), "text");
-        assert_eq!(rewrite_type_for_sqlite("INTEGER"), "integer");
-        assert_eq!(rewrite_type_for_sqlite("BOOLEAN"), "integer");
-        assert_eq!(rewrite_type_for_sqlite("TIMESTAMP"), "text");
-        assert_eq!(rewrite_type_for_sqlite("JSONB"), "text");
-        assert_eq!(rewrite_type_for_sqlite("UUID"), "text");
-        assert_eq!(rewrite_type_for_sqlite("BYTEA"), "blob");
-        
-        // Additional types
-        assert_eq!(rewrite_type_for_sqlite("MONEY"), "real");
-        assert_eq!(rewrite_type_for_sqlite("INET"), "text");
-        assert_eq!(rewrite_type_for_sqlite("POINT"), "text");
-        assert_eq!(rewrite_type_for_sqlite("INT[]"), "text");
-        assert_eq!(rewrite_type_for_sqlite("TSVECTOR"), "text");
-    }
-}
-
-#[cfg(test)]
-mod debug_tests {
-    use super::*;
-
-    #[test]
-    fn test_debug_distinct() {
-        let input = "SELECT DISTINCT status FROM orders";
-        debug_ast(input);
-        let result = transpile(input);
-        println!("Transpiled: {}", result);
-        assert!(result.contains("distinct"));
-    }
-
-    #[test]
-    fn test_debug_cast() {
-        let input = "SELECT '1'::int";
-        debug_ast(input);
-        let result = transpile(input);
-        println!("Transpiled: {}", result);
-        assert!(result.contains("cast"));
-    }
-}
-
-#[cfg(test)]
-mod operator_tests {
-    use super::*;
-
-    #[test]
-    fn test_transpile_operators() {
-        let input = "SELECT id FROM users WHERE name ~~ 'alice%' AND id > 10";
-        let result = transpile(input);
-        println!("Transpiled: {}", result);
-        assert!(result.contains("like"));
-        assert!(result.contains("id > 10"));
-    }
-
-    #[test]
-    fn test_transpile_cast() {
-        let input = "SELECT '1'::int";
-        let result = transpile(input);
-        println!("Transpiled: {}", result);
-        assert!(result.contains("cast("));
-        assert!(result.contains("as integer"));
-    }
-}
-
-#[cfg(test)]
-mod statement_tests {
-    use super::*;
-
-    #[test]
-    fn test_transpile_insert() {
-        let input = "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')";
-        debug_ast(input);
-        let result = transpile(input);
-        println!("Transpiled INSERT: {}", result);
-        assert!(result.contains("insert into"));
-        assert!(result.contains("users"));
-        assert!(result.contains("values"));
-    }
-
-    #[test]
-    fn test_transpile_update() {
-        let input = "UPDATE users SET name = 'Bob' WHERE id = 1";
-        let result = transpile(input);
-        println!("Transpiled UPDATE: {}", result);
-        assert!(result.contains("update"));
-        assert!(result.contains("set"));
-        assert!(result.contains("where"));
-    }
-
-    #[test]
-    fn test_transpile_delete() {
-        let input = "DELETE FROM users WHERE id = 1";
-        let result = transpile(input);
-        println!("Transpiled DELETE: {}", result);
-        assert!(result.contains("delete from"));
-        assert!(result.contains("where"));
-    }
-
-    #[test]
-    fn test_transpile_order_by() {
-        let input = "SELECT * FROM users ORDER BY name ASC, id DESC";
-        let result = transpile(input);
-        println!("Transpiled ORDER BY: {}", result);
-        assert!(result.contains("order by"));
-        assert!(result.contains("name asc"));
-        assert!(result.contains("id desc"));
-    }
-
-    #[test]
-    fn test_transpile_group_by() {
-        let input = "SELECT status, COUNT(*) FROM orders GROUP BY status";
-        let result = transpile(input);
-        println!("Transpiled GROUP BY: {}", result);
-        assert!(result.contains("group by"));
-        assert!(result.contains("status"));
-    }
-
-    #[test]
-    fn test_transpile_join() {
-        let input = "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id";
-        let result = transpile(input);
-        println!("Transpiled JOIN: {}", result);
-        assert!(result.contains("join"));
-        assert!(result.contains("on"));
-    }
-
-    #[test]
-    fn test_transpile_subquery() {
-        let input = "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders)";
-        let result = transpile(input);
-        println!("Transpiled subquery: {}", result);
-        assert!(result.contains("in"));
-        assert!(result.contains("select"));
-    }
-
-    #[test]
-    fn test_transpile_offset() {
-        let input = "SELECT * FROM users LIMIT 10 OFFSET 20";
-        let result = transpile(input);
-        println!("Transpiled OFFSET: {}", result);
-        assert!(result.contains("limit 10"));
-        assert!(result.contains("offset 20"));
-    }
-
-    #[test]
-    fn test_transpile_distinct() {
-        let input = "SELECT DISTINCT status FROM orders";
-        let result = transpile(input);
-        println!("Transpiled DISTINCT: {}", result);
-        assert!(result.contains("distinct"));
-    }
-
-    #[test]
-    fn test_transpile_like_operators() {
-        let input = "SELECT * FROM users WHERE name ~~ 'Alice%'";
-        let result = transpile(input);
-        println!("Transpiled LIKE: {}", result);
-        assert!(result.contains("like"));
-    }
-
-    #[test]
-    fn test_transpile_not_like_operators() {
-        let input = "SELECT * FROM users WHERE name !~~ 'Alice%'";
-        let result = transpile(input);
-        println!("Transpiled NOT LIKE: {}", result);
-        assert!(result.contains("not like"));
-    }
-
-    #[test]
-    fn test_create_table_all_types() {
-        let input = r#"CREATE TABLE test (
-            id SERIAL,
-            name VARCHAR(100),
-            email TEXT,
-            age INTEGER,
-            score REAL,
-            is_active BOOLEAN,
-            created_at TIMESTAMP WITH TIME ZONE,
-            data JSONB,
-            uuid UUID,
-            content BYTEA,
-            price MONEY,
-            flags BIT(8),
-            ip_addr INET,
-            location POINT,
-            tags TEXT[],
-            search_doc TSVECTOR
-        )"#;
-        
-        let result = transpile_with_metadata(input);
-        println!("Transpiled CREATE TABLE: {}", result.sql);
-        
-        assert!(result.sql.contains("create table test"));
-        assert!(result.sql.contains("integer primary key autoincrement"));
-        assert!(result.sql.contains("text"));
-        assert!(result.sql.contains("integer"));
-        assert!(result.sql.contains("real"));
-        
-        let metadata = result.create_table_metadata.expect("Should have metadata");
-        assert_eq!(metadata.columns.len(), 16);
     }
 }

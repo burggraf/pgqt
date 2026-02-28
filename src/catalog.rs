@@ -82,6 +82,16 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_acl__ table")?;
 
+    // __pg_relation_meta__: table/view ownership
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_relation_meta__ (
+            relname TEXT PRIMARY KEY,
+            relowner INTEGER NOT NULL
+        )",
+        [],
+    )
+    .context("Failed to create __pg_relation_meta__ table")?;
+
     // Bootstrap: Create default 'postgres' superuser (OID 10)
     conn.execute(
         "INSERT OR IGNORE INTO __pg_authid__ (oid, rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin)
@@ -124,6 +134,20 @@ pub fn store_table_metadata(
         };
         store_column_metadata(conn, &metadata)?;
     }
+    Ok(())
+}
+
+/// Store relation ownership metadata
+pub fn store_relation_metadata(
+    conn: &Connection,
+    table_name: &str,
+    owner_oid: i64,
+) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO __pg_relation_meta__ (relname, relowner) VALUES (?1, ?2)",
+        (table_name, owner_oid),
+    )
+    .context("Failed to store relation metadata")?;
     Ok(())
 }
 
@@ -200,10 +224,10 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_class AS
          SELECT
-            rowid as oid,
-            name as relname,
+            sm.rowid as oid,
+            sm.name as relname,
             2200 as relnamespace,
-            10 as relowner,
+            COALESCE(rm.relowner, 10) as relowner,
             0 as relam,
             0 as relfilenode,
             0 as reltablespace,
@@ -214,7 +238,7 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             false as relhasindex,
             false as relisshared,
             'p' as relpersistence,
-            CASE type
+            CASE sm.type
                 WHEN 'table' THEN 'r'
                 WHEN 'view' THEN 'v'
                 WHEN 'index' THEN 'i'
@@ -236,9 +260,10 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             NULL as relacl,
             NULL as reloptions,
             NULL as relpartbound
-         FROM sqlite_master
-         WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '__pg_meta__'
-         AND name NOT LIKE 'pg_%'",
+         FROM sqlite_master sm
+         LEFT JOIN __pg_relation_meta__ rm ON rm.relname = sm.name
+         WHERE sm.name NOT LIKE 'sqlite_%' AND sm.name NOT LIKE '__pg_meta__'
+         AND sm.name NOT LIKE 'pg_%'",
         [],
     )?;
 
