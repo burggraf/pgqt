@@ -49,14 +49,40 @@ postgresql://postgres@127.0.0.1:5432/test.db
 
 ### Type Mapping
 
-| PostgreSQL | SQLite Storage | Original Type Preserved |
-|-----------|----------------|------------------------|
-| SERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ |
-| VARCHAR(n) | TEXT | ✅ |
-| INTEGER | INTEGER | ✅ |
-| TIMESTAMP WITH TIME ZONE | TEXT | ✅ |
-| JSON/JSONB | TEXT | ✅ |
-| BOOLEAN | INTEGER | ✅ |
+| PostgreSQL Type | SQLite Storage | Original Type Preserved |
+|----------------|----------------|------------------------|
+| **Serial Types** |||
+| SERIAL, BIGSERIAL, SMALLSERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ |
+| **Integer Types** |||
+| INTEGER, BIGINT, SMALLINT, INT2/4/8 | INTEGER | ✅ |
+| **Floating Point** |||
+| REAL, FLOAT4, FLOAT8, DOUBLE PRECISION | REAL | ✅ |
+| NUMERIC, DECIMAL, MONEY | REAL | ✅ |
+| **Character/String** |||
+| VARCHAR(n), CHAR(n), TEXT | TEXT | ✅ |
+| **Binary** |||
+| BYTEA | BLOB | ✅ |
+| **Boolean** |||
+| BOOLEAN, BOOL | INTEGER | ✅ |
+| **Date/Time** |||
+| TIMESTAMP [WITH/WITHOUT TIME ZONE], DATE, TIME | TEXT | ✅ |
+| INTERVAL | TEXT | ✅ |
+| **JSON** |||
+| JSON, JSONB | TEXT | ✅ |
+| **Network Address** |||
+| INET, CIDR, MACADDR, MACADDR8 | TEXT | ✅ |
+| **Geometric** |||
+| POINT, LINE, LSEG, BOX, PATH, POLYGON, CIRCLE | TEXT | ✅ |
+| **Range Types** |||
+| INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE | TEXT | ✅ |
+| **Full-Text Search** |||
+| TSVECTOR, TSQUERY | TEXT | ✅ |
+| **Other** |||
+| UUID | TEXT | ✅ |
+| BIT, VARBIT | TEXT | ✅ |
+| XML | TEXT | ✅ |
+| ARRAY types (INT[], TEXT[], etc.) | TEXT | ✅ |
+| ENUM, DOMAIN | TEXT | ✅ |
 
 ### SQL Transpilation
 

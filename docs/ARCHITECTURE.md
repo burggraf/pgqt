@@ -102,26 +102,67 @@ Row data (text)                          RowDescription + DataRow
 
 | PostgreSQL Type | SQLite Storage | Original Preserved | Notes |
 |----------------|----------------|-------------------|-------|
+| **Serial Types** ||||
 | SERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ | Auto-increment |
 | BIGSERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ | SQLite max is 64-bit |
-| VARCHAR(n) | TEXT | ✅ | Length constraint in metadata |
-| CHAR(n) | TEXT | ✅ | No padding in SQLite |
+| SMALLSERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ | Auto-increment |
+| **Integer Types** ||||
+| INTEGER, INT | INTEGER | ✅ | Direct mapping |
+| BIGINT, INT8 | INTEGER | ✅ | SQLite INTEGER is 64-bit |
+| SMALLINT, INT2 | INTEGER | ✅ | Range checked on insert |
+| **Floating Point** ||||
+| REAL, FLOAT4 | REAL | ✅ | Direct mapping |
+| DOUBLE PRECISION, FLOAT8 | REAL | ✅ | Direct mapping |
+| NUMERIC(p,s), DECIMAL | REAL | ✅ | Precision in metadata |
+| **Character/String** ||||
+| VARCHAR(n), CHARACTER VARYING | TEXT | ✅ | Length constraint in metadata |
+| CHAR(n), CHARACTER, BPCHAR | TEXT | ✅ | No padding in SQLite |
 | TEXT | TEXT | ✅ | Direct mapping |
-| INTEGER | INTEGER | ✅ | Direct mapping |
-| BIGINT | INTEGER | ✅ | SQLite INTEGER is 64-bit |
-| SMALLINT | INTEGER | ✅ | Range checked on insert |
-| REAL | REAL | ✅ | Direct mapping |
-| DOUBLE PRECISION | REAL | ✅ | Direct mapping |
-| NUMERIC(p,s) | REAL | ✅ | Precision in metadata |
-| BOOLEAN | INTEGER | ✅ | 0/1 with CHECK constraint |
-| TIMESTAMP [TZ] | TEXT | ✅ | ISO 8601 format |
-| DATE | TEXT | ✅ | ISO 8601 format |
-| TIME [TZ] | TEXT | ✅ | ISO 8601 format |
-| JSON/JSONB | TEXT | ✅ | Validated on insert |
-| UUID | TEXT | ✅ | Format validated |
+| **Binary** ||||
 | BYTEA | BLOB | ✅ | Binary data |
-| ARRAY | TEXT | ✅ | Stored as JSON array |
+| **Boolean** ||||
+| BOOLEAN, BOOL | INTEGER | ✅ | 0/1 with CHECK constraint |
+| **Date/Time** ||||
+| TIMESTAMP [WITH/WITHOUT TIME ZONE] | TEXT | ✅ | ISO 8601 format |
+| TIMESTAMPTZ | TEXT | ✅ | With timezone info |
+| DATE | TEXT | ✅ | ISO 8601 format |
+| TIME [WITH/WITHOUT TIME ZONE] | TEXT | ✅ | ISO 8601 format |
+| INTERVAL | TEXT | ✅ | Time span |
+| **JSON** ||||
+| JSON | TEXT | ✅ | Plain text |
+| JSONB | TEXT | ✅ | Binary JSON |
+| **Network Address** ||||
+| INET | TEXT | ✅ | IPv4/IPv6 host |
+| CIDR | TEXT | ✅ | IPv4/IPv6 network |
+| MACADDR | TEXT | ✅ | 6-byte MAC address |
+| MACADDR8 | TEXT | ✅ | 8-byte MAC address (EUI-64) |
+| **Geometric** ||||
+| POINT | TEXT | ✅ | (x, y) pair |
+| LINE | TEXT | ✅ | Infinite line |
+| LSEG | TEXT | ✅ | Line segment |
+| BOX | TEXT | ✅ | Rectangular box |
+| PATH | TEXT | ✅ | Open/closed path |
+| POLYGON | TEXT | ✅ | Closed path (area) |
+| CIRCLE | TEXT | ✅ | Center and radius |
+| **Range Types** ||||
+| INT4RANGE | TEXT | ✅ | Integer range |
+| INT8RANGE | TEXT | ✅ | Bigint range |
+| NUMRANGE | TEXT | ✅ | Numeric range |
+| TSRANGE | TEXT | ✅ | Timestamp range |
+| TSTZRANGE | TEXT | ✅ | Timestamp with tz range |
+| DATERANGE | TEXT | ✅ | Date range |
+| **Full-Text Search** ||||
+| TSVECTOR | TEXT | ✅ | Search document |
+| TSQUERY | TEXT | ✅ | Search query |
+| **Other Types** ||||
+| UUID | TEXT | ✅ | Format validated |
+| MONEY | REAL | ✅ | Currency amount |
+| BIT, BIT VARYING, VARBIT | TEXT | ✅ | Bit string |
+| XML | TEXT | ✅ | XML data |
+| ARRAY (e.g., INT[]) | TEXT | ✅ | Stored as JSON array |
 | ENUM | TEXT | ✅ | CHECK constraint |
+| DOMAIN | TEXT | ✅ | User-defined |
+| Composite Types | TEXT | ✅ | Row types |
 
 ## Concurrency Model
 
