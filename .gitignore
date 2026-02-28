@@ -6,3 +6,4 @@ test_pg_lite*.db
 test_pg_lite_meta*.db
 /venv
 tests/__pycache__/
+prompts/*
