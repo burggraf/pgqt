@@ -3,7 +3,9 @@
 //! This module provides PostgreSQL-compatible RLS by injecting WHERE clauses
 //! into queries during transpilation.
 
-use anyhow::{Context, Result};
+#![allow(dead_code)]
+
+use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::catalog::{RlsPolicy, get_applicable_policies, is_rls_enabled, is_rls_forced};

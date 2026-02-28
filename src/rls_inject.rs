@@ -9,7 +9,9 @@
 //! Future improvement: Full AST-based injection when pg_query provides
 //! better support for node construction.
 
-use anyhow::{Context, Result};
+#![allow(dead_code)]
+
+use anyhow::Result;
 
 /// Injects an RLS WHERE clause into a SELECT statement
 ///

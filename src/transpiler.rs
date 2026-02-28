@@ -1,6 +1,6 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    AConst, AExpr, BoolExpr, BoolExprType, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
+    AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt,
@@ -1568,6 +1568,8 @@ fn reconstruct_alter_table_stmt(stmt: &AlterTableStmt, ctx: &mut TranspileContex
     format!("-- ALTER TABLE {} (non-RLS operation not yet supported)", table_name)
 }
 
+// RLS helper functions - not yet integrated into main transpilation pipeline
+#[allow(dead_code)]
 /// Reconstruct CREATE POLICY statement
 /// 
 /// CREATE POLICY name ON table_name 
@@ -1735,6 +1737,7 @@ fn extract_policy_with_check(sql: &str) -> Option<String> {
 }
 
 /// Reconstruct DROP POLICY statement
+#[allow(dead_code)]
 fn reconstruct_drop_policy_stmt(sql: &str) -> String {
     // DROP POLICY [IF EXISTS] name ON table_name [CASCADE | RESTRICT]
     let policy_name = extract_drop_policy_name(sql);
@@ -1747,6 +1750,7 @@ fn reconstruct_drop_policy_stmt(sql: &str) -> String {
 }
 
 /// Extract policy name from DROP POLICY statement
+#[allow(dead_code)]
 fn extract_drop_policy_name(sql: &str) -> String {
     // DROP POLICY [IF EXISTS] name ON ...
     let re = regex::Regex::new(r"DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?(\w+)").unwrap();
@@ -1757,6 +1761,7 @@ fn extract_drop_policy_name(sql: &str) -> String {
 }
 
 /// Extract table name from DROP POLICY statement
+#[allow(dead_code)]
 fn extract_drop_policy_table_name(sql: &str) -> String {
     // DROP POLICY name ON table_name ...
     let re = regex::Regex::new(r"DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?\w+\s+ON\s+(\w+)").unwrap();
@@ -1770,6 +1775,7 @@ fn extract_drop_policy_table_name(sql: &str) -> String {
 /// 
 /// This function takes a connection and RLS context to properly inject
 /// RLS predicates into the transpiled SQL using AST manipulation.
+#[allow(dead_code)]
 pub fn transpile_with_rls(
     sql: &str,
     conn: &Connection,
@@ -1816,11 +1822,12 @@ pub fn transpile_with_rls(
 }
 
 /// Transpile SQL with RLS injection using AST manipulation
+#[allow(dead_code)]
 fn transpile_with_rls_ast(
     node: &Node,
     conn: &Connection,
     rls_ctx: &RlsContext,
-    original_sql: &str,
+    _original_sql: &str,
 ) -> TranspileResult {
     let mut ctx = TranspileContext::new();
     

@@ -236,6 +236,7 @@ pub fn get_column_metadata(
 }
 
 /// RLS Policy metadata
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RlsPolicy {
     pub name: String,
@@ -249,6 +250,7 @@ pub struct RlsPolicy {
 }
 
 /// Enable RLS on a table
+#[allow(dead_code)]
 pub fn enable_rls(conn: &Connection, table_name: &str, force: bool) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO __pg_rls_enabled__ (relname, rls_enabled, rls_forced) VALUES (?1, TRUE, ?2)",
@@ -259,6 +261,7 @@ pub fn enable_rls(conn: &Connection, table_name: &str, force: bool) -> Result<()
 }
 
 /// Disable RLS on a table
+#[allow(dead_code)]
 pub fn disable_rls(conn: &Connection, table_name: &str) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO __pg_rls_enabled__ (relname, rls_enabled, rls_forced) VALUES (?1, FALSE, FALSE)",
@@ -283,6 +286,7 @@ pub fn is_rls_enabled(conn: &Connection, table_name: &str) -> Result<bool> {
 }
 
 /// Check if RLS is forced on a table (bypass for table owner)
+#[allow(dead_code)]
 pub fn is_rls_forced(conn: &Connection, table_name: &str) -> Result<bool> {
     let result: Result<bool, _> = conn.query_row(
         "SELECT rls_forced FROM __pg_rls_enabled__ WHERE relname = ?1",
@@ -297,6 +301,7 @@ pub fn is_rls_forced(conn: &Connection, table_name: &str) -> Result<bool> {
 }
 
 /// Store an RLS policy
+#[allow(dead_code)]
 pub fn store_rls_policy(conn: &Connection, policy: &RlsPolicy) -> Result<()> {
     let roles_str = if policy.roles.is_empty() {
         None
@@ -372,6 +377,7 @@ pub fn get_applicable_policies(
 }
 
 /// Drop an RLS policy
+#[allow(dead_code)]
 pub fn drop_rls_policy(conn: &Connection, policy_name: &str, table_name: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM __pg_rls_policies__ WHERE polname = ?1 AND polrelid = ?2",
@@ -382,6 +388,7 @@ pub fn drop_rls_policy(conn: &Connection, policy_name: &str, table_name: &str) -
 }
 
 /// Get all policies for a table (for admin/inspection)
+#[allow(dead_code)]
 pub fn get_table_policies(conn: &Connection, table_name: &str) -> Result<Vec<RlsPolicy>> {
     let mut stmt = conn.prepare(
         "SELECT polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled
