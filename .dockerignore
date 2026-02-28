@@ -1,0 +1,7 @@
+target/
+*.db
+*.log
+test_output.txt
+venv/
+.git/
+.github/

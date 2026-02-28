@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+  build-release:
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset_name: pglite-proxy-linux-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset_name: pglite-proxy-macos-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset_name: pglite-proxy-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: pglite-proxy-windows-amd64.exe
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: dtolnay/rust-action@stable
+      with:
+        targets: ${{ matrix.target }}
+    
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev cmake
+    
+    - name: Build
+      run: cargo build --release --target ${{ matrix.target }}
+    
+    - name: Package (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd target/${{ matrix.target }}/release
+        tar czvf ../../../${{ matrix.asset_name }}.tar.gz postgresqlite
+        cd ../../..
+    
+    - name: Package (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cd target/${{ matrix.target }}/release
+        7z a ../../../${{ matrix.asset_name }}.zip postgresqlite.exe
+        cd ../../..
+    
+    - name: Upload Release Asset (Unix)
+      if: matrix.os != 'windows-latest'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.asset_name }}.tar.gz
+        asset_name: ${{ matrix.asset_name }}.tar.gz
+        asset_content_type: application/gzip
+    
+    - name: Upload Release Asset (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.asset_name }}.zip
+        asset_name: ${{ matrix.asset_name }}.zip
+        asset_content_type: application/zip
+
+  docker-release:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Extract version
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Build and push
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/pglite-proxy:latest
+          ${{ secrets.DOCKER_USERNAME }}/pglite-proxy:${{ steps.version.outputs.VERSION }}

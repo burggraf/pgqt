@@ -1,0 +1,213 @@
+
+running 23 tests
+test plpgsql::tests::test_runtime_creation ... ok
+test transpiler::debug_tests::test_debug_cast ... ok
+test transpiler::debug_tests::test_debug_distinct ... ok
+test transpiler::operator_tests::test_transpile_cast ... ok
+test catalog::tests::test_store_table_metadata ... ok
+test transpiler::operator_tests::test_transpile_operators ... ok
+test transpiler::tests::test_create_table_timestamp ... ok
+test transpiler::tests::test_create_table_transpile ... ok
+test catalog::tests::test_get_nonexistent_column ... ok
+test transpiler::tests::test_rewrite_types ... ok
+test transpiler::tests::test_debug_select_star ... ok
+test transpiler::tests::test_transpile_now ... ok
+test catalog::tests::test_store_and_retrieve_column_metadata ... ok
+test transpiler::tests::test_transpile_limit_all ... ok
+test transpiler::tests::test_transpile_schema_mapping_attached_db ... ok
+test catalog::tests::test_init_catalog_creates_table ... ok
+test catalog::tests::test_delete_table_metadata ... ok
+test transpiler::tests::test_transpile_select_star ... ok
+test transpiler::tests::test_transpile_schema_mapping_public ... ok
+test rls::tests::test_enable_rls ... ok
+test transpiler::tests::test_transpile_select_columns ... ok
+test transpiler::tests::test_transpile_unqualified_table ... ok
+test rls::tests::test_create_policy ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 22 tests
+test transpiler::debug_tests::test_debug_cast ... ok
+test transpiler::debug_tests::test_debug_distinct ... ok
+test transpiler::operator_tests::test_transpile_cast ... ok
+test transpiler::operator_tests::test_transpile_operators ... ok
+test catalog::tests::test_init_catalog_creates_table ... ok
+test transpiler::tests::test_create_table_timestamp ... ok
+test transpiler::tests::test_create_table_transpile ... ok
+test catalog::tests::test_get_nonexistent_column ... ok
+test catalog::tests::test_store_and_retrieve_column_metadata ... ok
+test transpiler::tests::test_rewrite_types ... ok
+test catalog::tests::test_store_table_metadata ... ok
+test transpiler::tests::test_debug_select_star ... ok
+test transpiler::tests::test_transpile_now ... ok
+test transpiler::tests::test_transpile_limit_all ... ok
+test transpiler::tests::test_transpile_schema_mapping_attached_db ... ok
+test transpiler::tests::test_transpile_select_columns ... ok
+test catalog::tests::test_delete_table_metadata ... ok
+test transpiler::tests::test_transpile_select_star ... ok
+test transpiler::tests::test_transpile_schema_mapping_public ... ok
+test transpiler::tests::test_transpile_unqualified_table ... ok
+test tests::test_handler_initializes_catalog ... ok
+test tests::test_create_table_stores_metadata ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 3 tests
+test test_get_nonexistent_column ... ok
+test test_store_and_retrieve_column ... ok
+test test_init_catalog_creates_table ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test test_basic_connectivity ... ignored, Requires running proxy
+test test_create_table_with_types ... ignored, Requires running proxy
+test test_schema_mapping ... ignored, Requires running proxy
+test test_select_transpilation ... ignored, Requires running proxy
+test test_type_casts ... ignored, Requires running proxy
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test test_enable_rls ... ok
+test test_create_policy ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 26 tests
+test test_alias ... ok
+test test_delete_statement ... FAILED
+test test_create_table_boolean ... FAILED
+test test_insert_statement ... FAILED
+test test_create_table_metadata ... FAILED
+test test_create_table_json ... FAILED
+test test_create_table_timestamp_types ... ok
+test test_group_by ... FAILED
+test test_transpile_cast_int ... FAILED
+test test_join ... FAILED
+test test_transpile_cast_text ... FAILED
+test test_transpile_limit_all ... ok
+test test_transpile_limit ... ok
+test test_subquery ... FAILED
+test test_transpile_like_operator ... FAILED
+test test_transpile_distinct ... FAILED
+test test_transpile_now ... ok
+test test_transpile_not_like_operator ... FAILED
+test test_transpile_order_by ... FAILED
+test test_transpile_schema_other ... ok
+test test_transpile_offset ... FAILED
+test test_transpile_schema_public ... ok
+test test_transpile_select_columns ... ok
+test test_transpile_where_clause ... ok
+test test_transpile_simple_select ... ok
+test test_update_statement ... FAILED
+
+failures:
+
+---- test_delete_statement stdout ----
+
+thread 'test_delete_statement' (19911006) panicked at tests/transpiler_tests.rs:194:5:
+assertion failed: result.contains("delete from")
+
+---- test_create_table_boolean stdout ----
+
+thread 'test_create_table_boolean' (19911002) panicked at tests/transpiler_tests.rs:151:5:
+assertion failed: result.sql.contains("integer")
+
+---- test_insert_statement stdout ----
+
+thread 'test_insert_statement' (19911008) panicked at tests/transpiler_tests.rs:177:5:
+assertion failed: result.contains("insert into")
+
+---- test_create_table_metadata stdout ----
+
+thread 'test_create_table_metadata' (19911004) panicked at tests/transpiler_tests.rs:126:5:
+assertion failed: result.sql.contains("integer primary key autoincrement")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- test_create_table_json stdout ----
+
+thread 'test_create_table_json' (19911003) panicked at tests/transpiler_tests.rs:165:5:
+assertion failed: result.sql.contains("text")
+
+---- test_group_by stdout ----
+
+thread 'test_group_by' (19911007) panicked at tests/transpiler_tests.rs:219:5:
+assertion failed: result.contains("group by")
+
+---- test_transpile_cast_int stdout ----
+
+thread 'test_transpile_cast_int' (19911011) panicked at tests/transpiler_tests.rs:93:5:
+assertion failed: result.contains("cast(")
+
+---- test_join stdout ----
+
+thread 'test_join' (19911009) panicked at tests/transpiler_tests.rs:202:5:
+assertion failed: result.contains("join")
+
+---- test_transpile_cast_text stdout ----
+
+thread 'test_transpile_cast_text' (19911012) panicked at tests/transpiler_tests.rs:101:5:
+assertion failed: result.contains("cast(")
+
+---- test_subquery stdout ----
+
+thread 'test_subquery' (19911010) panicked at tests/transpiler_tests.rs:211:5:
+assertion failed: result.contains("where")
+
+---- test_transpile_like_operator stdout ----
+
+thread 'test_transpile_like_operator' (19911014) panicked at tests/transpiler_tests.rs:109:5:
+assertion failed: result.contains("like")
+
+---- test_transpile_distinct stdout ----
+
+thread 'test_transpile_distinct' (19911013) panicked at tests/transpiler_tests.rs:62:5:
+assertion failed: result.contains("distinct")
+
+---- test_transpile_not_like_operator stdout ----
+
+thread 'test_transpile_not_like_operator' (19911017) panicked at tests/transpiler_tests.rs:116:5:
+assertion failed: result.contains("not like")
+
+---- test_transpile_order_by stdout ----
+
+thread 'test_transpile_order_by' (19911020) panicked at tests/transpiler_tests.rs:53:5:
+assertion failed: result.contains("order by")
+
+---- test_transpile_offset stdout ----
+
+thread 'test_transpile_offset' (19911019) panicked at tests/transpiler_tests.rs:46:5:
+assertion failed: result.contains("offset 20")
+
+---- test_update_statement stdout ----
+
+thread 'test_update_statement' (19911026) panicked at tests/transpiler_tests.rs:185:5:
+assertion failed: result.contains("update")
+
+
+failures:
+    test_create_table_boolean
+    test_create_table_json
+    test_create_table_metadata
+    test_delete_statement
+    test_group_by
+    test_insert_statement
+    test_join
+    test_subquery
+    test_transpile_cast_int
+    test_transpile_cast_text
+    test_transpile_distinct
+    test_transpile_like_operator
+    test_transpile_not_like_operator
+    test_transpile_offset
+    test_transpile_order_by
+    test_update_statement
+
+test result: FAILED. 10 passed; 16 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: dtolnay/rust-action@stable
+    
+    - name: Cache cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build
+      run: cargo build --verbose
+    
+    - name: Run tests
+      run: cargo test --verbose
+    
+    - name: Check formatting
+      run: cargo fmt -- --check
+    
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: dtolnay/rust-action@stable
+    
+    - name: Install PostgreSQL client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+    
+    - name: Build release
+      run: cargo build --release
+    
+    - name: Start proxy
+      run: |
+        ./target/release/postgresqlite &
+        sleep 3
+    
+    - name: Run integration tests
+      run: |
+        psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT 1 as test;"
+        psql -h 127.0.0.1 -p 5432 -U postgres -c "CREATE TABLE test (id SERIAL, name VARCHAR(50));"
+        psql -h 127.0.0.1 -p 5432 -U postgres -c "INSERT INTO test (name) VALUES ('integration');"
+        psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT * FROM test;"
+        psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT * FROM __pg_meta__;"
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [test, integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Build Docker image
+      run: docker build -t pglite-proxy:test .
+    
+    - name: Test Docker image
+      run: |
+        docker run -d --name pglite-test -p 5432:5432 pglite-proxy:test
+        sleep 5
+        docker exec pglite-test pg_isready -h localhost -p 5432
+        docker stop pglite-test
+        docker rm pglite-test
