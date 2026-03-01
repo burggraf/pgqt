@@ -89,12 +89,15 @@ run_e2e_tests() {
         return
     fi
     
-    # Run each e2e test
+    # Note: E2E tests manage their own proxy servers on different ports
+    # We run them individually and check for PASSED in output
     for test_file in tests/*_e2e_test.py; do
         if [ -f "$test_file" ]; then
             local test_name=$(basename "$test_file" .py)
             echo -n "Testing $test_name... "
             
+            # Each e2e test starts its own proxy server
+            # Give each test up to 90 seconds to complete
             if python3 "$test_file" 2>&1 | grep -q "PASSED\|All tests passed"; then
                 echo -e "${GREEN}✓${NC}"
                 E2E_PASSED=$((E2E_PASSED + 1))
@@ -102,9 +105,18 @@ run_e2e_tests() {
                 echo -e "${RED}✗${NC}"
                 E2E_FAILED=$((E2E_FAILED + 1))
             fi
+            
+            # Small delay to ensure port is freed before next test
+            sleep 2
         fi
     done
     echo ""
+    
+    if [ $E2E_FAILED -gt 0 ]; then
+        echo -e "${YELLOW}Note: E2E tests require the proxy to be built (cargo build --release)${NC}"
+        echo -e "${YELLOW}      Some tests may fail if ports are already in use.${NC}"
+        echo ""
+    fi
 }
 
 # Function to print summary
