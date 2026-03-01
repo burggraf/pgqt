@@ -37,9 +37,8 @@ def get_connection():
         database=DB_NAME
     )
 
-def test_point_type():
+def test_point_type(conn):
     """Test point type creation, insertion, and distance."""
-    conn = get_connection()
     cur = conn.cursor()
     
     cur.execute("DROP TABLE IF EXISTS points")
@@ -55,12 +54,10 @@ def test_point_type():
     assert distances[1] == 5.0, f"Expected 5.0, got {distances[1]}"
     
     cur.close()
-    conn.close()
     print("✓ test_point_type passed")
 
-def test_box_operators():
+def test_box_operators(conn):
     """Test box type and its spatial operators."""
-    conn = get_connection()
     cur = conn.cursor()
     
     cur.execute("DROP TABLE IF EXISTS boxes")
@@ -73,36 +70,42 @@ def test_box_operators():
     
     # Test overlaps (&&)
     cur.execute("SELECT id FROM boxes WHERE b && '(1,1),(2,2)' ORDER BY id")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [1, 2], f"Expected [1, 2], got {ids}"
     
     # Test contains (@>)
+    # Box 1: (0,0),(2,2) contains (0.5,0.5),(1.5,1.5) - yes
+    # Box 2: (1,1),(3,3) does NOT contain (0.5,0.5),(1.5,1.5) because 0.5 < 1
     cur.execute("SELECT id FROM boxes WHERE b @> '(0.5,0.5),(1.5,1.5)' ORDER BY id")
-    ids = [row[0] for row in cur.fetchall()]
-    assert ids == [1, 2], f"Expected [1, 2], got {ids}"
+    ids = [int(row[0]) for row in cur.fetchall()]
+    assert ids == [1], f"Expected [1], got {ids}"
     
     # Test contained in (<@)
     cur.execute("SELECT id FROM boxes WHERE '(0,0),(10,10)' @> b ORDER BY id")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [1, 2, 3], f"Expected [1, 2, 3], got {ids}"
 
-    # Test left (<<)
+    # Test left (<<) - strictly left means box.high.x < other.low.x
+    # Box 1: high.x=2, Box 2: high.x=3, Box 3: high.x=5
+    # Query box: (3.5,0),(6,6) has low.x=3.5
+    # Box 1 (high.x=2) < 3.5 - yes
+    # Box 2 (high.x=3) < 3.5 - yes  
     cur.execute("SELECT id FROM boxes WHERE b << '(3.5,0),(6,6)' ORDER BY id")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [1, 2], f"Expected [1, 2], got {ids}"
     
-    # Test right (>>)
+    # Test right (>>) - strictly right means box.low.x > other.high.x
+    # Query box: (0,0),(3.5,3.5) has high.x=3.5
+    # Box 3: low.x=4 > 3.5 - yes
     cur.execute("SELECT id FROM boxes WHERE b >> '(0,0),(3.5,3.5)' ORDER BY id")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [3], f"Expected [3], got {ids}"
 
     cur.close()
-    conn.close()
     print("✓ test_box_operators passed")
 
-def test_below_above_operators():
+def test_below_above_operators(conn):
     """Test below (<<|) and above (|>>) operators for boxes."""
-    conn = get_connection()
     cur = conn.cursor()
     
     cur.execute("DROP TABLE IF EXISTS boxes_y")
@@ -110,18 +113,22 @@ def test_below_above_operators():
     cur.execute("INSERT INTO boxes_y (b) VALUES ('(0,0),(2,2)'), ('(0,4),(2,6)')")
     conn.commit()
     
-    # Test below (<<|)
+    # Test below (<<|) - strictly below means box.high.y < other.low.y
+    # Box 1: high.y=2, Box 2: high.y=6
+    # Query box: (0,3),(2,3.5) has low.y=3
+    # Box 1 (high.y=2) < 3 - yes
     cur.execute("SELECT id FROM boxes_y WHERE b <<| '(0,3),(2,3.5)'")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [1], f"Expected [1], got {ids}"
     
-    # Test above (|>>)
+    # Test above (|>>) - strictly above means box.low.y > other.high.y
+    # Query box: (0,3),(2,3.5) has high.y=3.5
+    # Box 2: low.y=4 > 3.5 - yes
     cur.execute("SELECT id FROM boxes_y WHERE b |>> '(0,3),(2,3.5)'")
-    ids = [row[0] for row in cur.fetchall()]
+    ids = [int(row[0]) for row in cur.fetchall()]
     assert ids == [2], f"Expected [2], got {ids}"
     
     cur.close()
-    conn.close()
     print("✓ test_below_above_operators passed")
 
 def main():
@@ -134,24 +141,34 @@ def main():
     server_proc = subprocess.Popen(
         ["cargo", "run", "--", "--port", str(DB_PORT), "--database", db_file],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stderr=subprocess.STDOUT,
+        text=True
     )
     
     # Wait for server to start
     print("Waiting for server to initialize...")
     time.sleep(10)
     
+    # In another thread, print server output
+    import threading
+    def log_server():
+        for line in server_proc.stdout:
+            print(f"SERVER: {line.strip()}")
+    threading.Thread(target=log_server, daemon=True).start()
+    
     try:
-        test_point_type()
-        test_box_operators()
-        test_below_above_operators()
+        conn = get_connection()
+        print("Connected to proxy.")
+        test_point_type(conn)
+        test_box_operators(conn)
+        test_below_above_operators(conn)
+        conn.close()
         print("\nAll E2E geometric tests passed!")
     except Exception as e:
         print(f"\nTests failed: {e}")
-        # Print server output for debugging
-        stdout, stderr = server_proc.communicate(timeout=1)
-        print("Server stdout:", stdout.decode())
-        print("Server stderr:", stderr.decode())
+        # traceback
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     finally:
         server_proc.terminate()

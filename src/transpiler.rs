@@ -1081,6 +1081,25 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
                     if (trimmed.starts_with('[') || trimmed.starts_with('(')) &&
                        (trimmed.ends_with(']') || trimmed.ends_with(')')) &&
                        (trimmed.contains(',') || trimmed.to_lowercase() == "empty") {
+                        // Check if it's a geometric type (point, box, circle, etc.)
+                        // Geometric types: (x,y), ((x1,y1),(x2,y2)), <(x,y),r>
+                        // Ranges: [a,b), (a,b], [a,b], (a,b), empty
+                        // Points have 1 comma, boxes/lsegs have 3 commas, circles start with <
+                        let comma_count = trimmed.matches(",").count();
+                        let is_point = trimmed.starts_with("(") && 
+                            !trimmed.contains("[") && 
+                            !trimmed.contains("]") &&
+                            comma_count == 1;
+                        let is_box_or_lseg = trimmed.starts_with("(") && 
+                            !trimmed.contains("[") && 
+                            !trimmed.contains("]") &&
+                            comma_count == 3;
+                        let is_circle = trimmed.starts_with("<") && trimmed.ends_with(">");
+                        // Check if it looks like a JSON array (contains quotes)
+                        let is_json_array = trimmed.starts_with("[") && trimmed.contains('"');
+                        if is_point || is_box_or_lseg || is_circle || is_json_array {
+                            return val; // Don't canonicalize geometric types or JSON arrays
+                        }
                         return format!("range_canonicalize({})", val);
                     }
                 }
@@ -1472,19 +1491,21 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
         // Array and Range operators (PostgreSQL compatibility)
         "&&" => {
-            // Check if operands look like ranges or arrays
+            // Check if operands look like ranges or arrays or geo objects
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
+            // Determine operation type: geo, array, or range
+            // Priority: geo > array > range
+            let is_geo = lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+                        (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+                        (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")"));
+            let is_array = !is_geo && (lexpr_is_array || rexpr_is_array ||
+                           lexpr_lower.contains("[") || rexpr_lower.contains("["));
+            let is_range = !is_geo && !is_array && (lexpr_lower.contains("range") || rexpr_lower.contains("range"));
             
-            // Determine if this is a range operation vs array operation
-            // First check if either operand is an array expression (from AST)
-            // Then check for range literals: [1,2), (1,2], [1,2], (1,2) - contain brackets/parens
-            let is_array = lexpr_is_array || rexpr_is_array;
-            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
-                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
-                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")));
-            
-            if is_range {
+            if is_geo {
+                format!("geo_overlaps({}, {})", lexpr_sql, rexpr_sql)
+            } else if is_range {
                 format!("range_overlaps({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_overlap({}, {})", lexpr_sql, rexpr_sql)
@@ -1493,14 +1514,18 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@>" => {
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
-            
-            let is_array = lexpr_is_array || rexpr_is_array;
-            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
-                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
-                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")) ||
+            // Determine operation type: geo, array, or range
+            let is_geo = lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+                        (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+                        (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")"));
+            let is_array = !is_geo && (lexpr_is_array || rexpr_is_array ||
+                           lexpr_lower.contains("[") || rexpr_lower.contains("["));
+            let is_range = !is_geo && !is_array && (lexpr_lower.contains("range") || rexpr_lower.contains("range") ||
                            lexpr_lower == "r"); // Special case for our test table column
             
-            if is_range {
+            if is_geo {
+                format!("geo_contains({}, {})", lexpr_sql, rexpr_sql)
+            } else if is_range {
                 format!("range_contains({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_contains({}, {})", lexpr_sql, rexpr_sql)
@@ -1509,20 +1534,66 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "<@" => {
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
+            // Determine operation type: geo, array, or range
+            let is_geo = lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+                        (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+                        (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")"));
+            let is_array = !is_geo && (lexpr_is_array || rexpr_is_array ||
+                           lexpr_lower.contains("[") || rexpr_lower.contains("["));
+            let is_range = !is_geo && !is_array && (lexpr_lower.contains("range") || rexpr_lower.contains("range"));
             
-            let is_array = lexpr_is_array || rexpr_is_array;
-            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
-                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
-                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")));
-            
-            if is_range {
+            if is_geo {
+                format!("geo_contained({}, {})", lexpr_sql, rexpr_sql)
+            } else if is_range {
                 format!("range_contained({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_contained({}, {})", lexpr_sql, rexpr_sql)
             }
         }
-        "<<" => format!("range_left({}, {})", lexpr_sql, rexpr_sql),
-        ">>" => format!("range_right({}, {})", lexpr_sql, rexpr_sql),
+        "<<" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+               (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+               (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")")) {
+                format!("geo_left({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("range_left({}, {})", lexpr_sql, rexpr_sql)
+            }
+        },
+        ">>" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+               (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+               (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")")) {
+                format!("geo_right({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("range_right({}, {})", lexpr_sql, rexpr_sql)
+            }
+        },
+        "<<|" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+               (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+               (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")")) {
+                format!("geo_below({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("{} <<| {}", lexpr_sql, rexpr_sql)
+            }
+        },
+        "|>>" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+               (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+               (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")")) {
+                format!("geo_above({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("{} |>> {}", lexpr_sql, rexpr_sql)
+            }
+        },
         "-|-" => format!("range_adjacent({}, {})", lexpr_sql, rexpr_sql),
         "&<" => format!("range_no_extend_right({}, {})", lexpr_sql, rexpr_sql),
         "&>" => format!("range_no_extend_left({}, {})", lexpr_sql, rexpr_sql),
@@ -1576,8 +1647,19 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
                 format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
             }
         }
-        // Vector distance operators (pgvector compatibility)
-        "<->" => format!("vector_l2_distance({}, {})", lexpr_sql, rexpr_sql),     // L2 distance
+        // Vector distance operators (pgvector compatibility) and geometric distance
+        "<->" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            // Check for geometric types: contains '<' (circle) or '(x,y)' pattern
+            if lexpr_lower.contains("<") || rexpr_lower.contains("<") ||
+               (!lexpr_lower.contains("[") && lexpr_lower.contains("(") && lexpr_lower.contains(",") && lexpr_lower.contains(")")) ||
+               (!rexpr_lower.contains("[") && rexpr_lower.contains("(") && rexpr_lower.contains(",") && rexpr_lower.contains(")")) {
+                format!("geo_distance({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("vector_l2_distance({}, {})", lexpr_sql, rexpr_sql)
+            }
+        },     // L2 distance or geometric distance
         "<=>" => format!("vector_cosine_distance({}, {})", lexpr_sql, rexpr_sql), // Cosine distance
         "<#>" => format!("vector_inner_product({}, {})", lexpr_sql, rexpr_sql),   // Inner product
         "<+>" => format!("vector_l1_distance({}, {})", lexpr_sql, rexpr_sql),     // L1 distance

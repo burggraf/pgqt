@@ -28,7 +28,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Arrays** | ✅ | Medium | Full array support via JSON strings in SQLite. Operators: && (overlap), @> (contains), <@ (contained by). Functions: array_append, array_prepend, array_cat, array_remove, array_replace, array_length, array_dims, array_ndims, cardinality, array_position, array_positions, array_to_string, string_to_array, array_fill, trim_array. See [docs/ARRAYS.md](./ARRAYS.md) for details. |
 | **Enums** | ✅ | Low | Emulated via TEXT with CHECK constraints in SQLite. |
 | **Ranges** | ✅ | Medium | Emulated via TEXT with PostgreSQL canonicalization and operator support. Supported types: int4range, int8range, numrange, tsrange, tstzrange, daterange. See [docs/RANGE.md](./RANGE.md). |
-| **Geometric Types** | ❌ | Medium | Possible via SpatiaLite extension or custom BLOB formats. |
+| **Geometric Types** | ✅ | Medium | Implemented using TEXT storage with PostgreSQL canonical string formats. Supported types: point, box, circle, line, lseg, path, polygon. Operators: && (overlaps), @> (contains), <@ (contained in), << (left), >> (right), <<\| (below), \|>> (above), <-> (distance), ?\|, ?-, ?\|\|, ?-\|. See [docs/GEO.md](./GEO.md). |
 | **Full-Text Search (TSVECTOR)** | ✅ | Medium | Types `TSVECTOR` and `TSQUERY` are mapped to TEXT with full FTS function emulation: to_tsvector, to_tsquery, plainto_tsquery, phraseto_tsquery, websearch_to_tsquery, ts_rank, ts_headline, setweight, strip. Operators: @@, &, |, !, <->, ||. See [docs/FTS.md](./FTS.md) for details. |
 
 ## PostgreSQL Specific Syntax
