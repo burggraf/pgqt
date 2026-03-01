@@ -43,6 +43,7 @@ impl fmt::Display for Point {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub struct Lseg {
     pub p1: Point,
     pub p2: Point,
@@ -117,6 +118,7 @@ impl fmt::Display for Box {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub struct Circle {
     pub center: Point,
     pub radius: f64,

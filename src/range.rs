@@ -13,7 +13,6 @@
 //! automatically performed, normalizing to `[low, high)` format.
 
 use std::cmp::{Ordering, PartialOrd};
-use std::fmt;
 
 /// Represents a boundary value of a range
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +36,7 @@ impl<T: PartialOrd> PartialOrd for RangeBound<T> {
 
 /// Type of range (discrete or continuous)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum RangeType {
     Int4,
     Int8,
@@ -63,6 +63,7 @@ pub enum RangeValue {
 
 impl RangeValue {
     /// Create an empty range of a given type
+    #[allow(dead_code)]
     pub fn empty(rtype: RangeType) -> Self {
         RangeValue::Empty(rtype)
     }
@@ -73,6 +74,7 @@ impl RangeValue {
     }
 
     /// Get the range type
+    #[allow(dead_code)]
     pub fn rtype(&self) -> RangeType {
         match self {
             RangeValue::Range { rtype, .. } => *rtype,
