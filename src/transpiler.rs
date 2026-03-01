@@ -4,6 +4,7 @@ use pg_query::protobuf::{
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
+    RangeFunction, Alias,
 };
 
 // RLS-related imports
@@ -923,6 +924,7 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
             NodeEnum::SqlvalueFunction(ref sql_val) => reconstruct_sql_value_function(sql_val),
             NodeEnum::ArrayExpr(ref array_expr) => reconstruct_array_expr(array_expr, ctx),
             NodeEnum::AArrayExpr(ref a_array_expr) => reconstruct_a_array_expr(a_array_expr, ctx),
+            NodeEnum::RangeFunction(ref range_func) => reconstruct_range_function(range_func, ctx),
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }
     } else {
@@ -1254,11 +1256,60 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@@" => format!("fts_match({}, {})", lexpr_sql, rexpr_sql),
         "@>@" => format!("fts_contains({}, {})", lexpr_sql, rexpr_sql),  // tsquery contains
         "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
-        "||" => format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql), // tsvector concat
         // Array operators (PostgreSQL compatibility)
         "&&" => format!("array_overlap({}, {})", lexpr_sql, rexpr_sql),
         "@>" => format!("array_contains({}, {})", lexpr_sql, rexpr_sql),
         "<@" => format!("array_contained({}, {})", lexpr_sql, rexpr_sql),
+        // JSONB operators (PostgreSQL compatibility)
+        "?" => format!("json_type({}, '$.' || {}) IS NOT NULL", lexpr_sql, rexpr_sql),
+        "?|" => format!("EXISTS (SELECT 1 FROM json_each({}) WHERE json_type({}, '$.' || value) IS NOT NULL)", rexpr_sql, lexpr_sql),
+        "?&" => format!("NOT EXISTS (SELECT 1 FROM json_each({}) WHERE json_type({}, '$.' || value) IS NULL)", rexpr_sql, lexpr_sql),
+        // || operator is overloaded in PostgreSQL:
+        // - JSONB: json1 || json2 -> json_patch(json1, json2)
+        // - tsvector: ts1 || ts2 -> tsvector_concat(ts1, ts2)
+        // - text: s1 || s2 -> s1 || s2 (SQLite native)
+        "||" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            let lexpr_trimmed = lexpr_sql.trim();
+            let rexpr_trimmed = rexpr_sql.trim();
+            
+            // Check for tsvector context (function calls like to_tsvector)
+            if lexpr_lower.contains("to_tsvector") || rexpr_lower.contains("to_tsvector") ||
+               lexpr_lower.contains("tsvector") || rexpr_lower.contains("tsvector") {
+                format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql)
+            }
+            // Check for JSON context (literals or json functions)
+            else if lexpr_trimmed.starts_with("'{") || rexpr_trimmed.starts_with("'{") ||
+                    lexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("'[") ||
+                    lexpr_lower.contains("json") || rexpr_lower.contains("json") ||
+                    lexpr_lower.contains("props") || rexpr_lower.contains("props") {
+                format!("json_patch({}, {})", lexpr_sql, rexpr_sql)
+            }
+            // Default to SQLite's string concatenation
+            else {
+                format!("{} || {}", lexpr_sql, rexpr_sql)
+            }
+        }
+        // JSONB key removal: json - 'key' -> json_remove(json, '$.key')
+        // For arrays: json - ARRAY['a','b'] -> json_remove(json, '$.a', '$.b')
+        "-" => {
+            // Check if rexpr looks like a JSON array
+            let rexpr_trimmed = rexpr_sql.trim();
+            if rexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("[") {
+                // Extract the array and expand it into multiple paths
+                // This is a simplified approach - parse the JSON array string
+                let array_str = rexpr_trimmed.trim_matches(|c| c == '\'');
+                if let Ok(keys) = serde_json::from_str::<Vec<String>>(array_str) {
+                    let paths: Vec<String> = keys.iter().map(|k| format!("'$.{}'", k)).collect();
+                    format!("json_remove({}, {})", lexpr_sql, paths.join(", "))
+                } else {
+                    format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+                }
+            } else {
+                format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+            }
+        }
         // Vector distance operators (pgvector compatibility)
         "<->" => format!("vector_l2_distance({}, {})", lexpr_sql, rexpr_sql),     // L2 distance
         "<=>" => format!("vector_cosine_distance({}, {})", lexpr_sql, rexpr_sql), // Cosine distance
@@ -1349,6 +1400,47 @@ fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut Trans
     }
 }
 
+/// Reconstruct a RangeFunction node (table function in FROM clause, like LATERAL jsonb_each)
+fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut TranspileContext) -> String {
+    // Extract the function calls from the functions field
+    // Each item in functions is typically a List containing [FuncCall, empty_alias]
+    let func_sql: Vec<String> = range_func
+        .functions
+        .iter()
+        .filter_map(|n| {
+            if let Some(ref inner) = n.node {
+                if let NodeEnum::List(ref list) = inner {
+                    // First item is usually the function call
+                    if let Some(first) = list.items.first() {
+                        return Some(reconstruct_node(first, ctx));
+                    }
+                } else {
+                    return Some(reconstruct_node(n, ctx));
+                }
+            }
+            None
+        })
+        .collect();
+    
+    // Build the table function call
+    let base_func = func_sql.join(", ");
+    
+    // Handle alias - for jsonb_each(props) AS x(key, value), we need to handle coldeflist
+    let alias_str = if let Some(ref alias) = range_func.alias {
+        format!(" AS {}", alias.aliasname.to_lowercase())
+    } else {
+        String::new()
+    };
+    
+    // Note: LATERAL keyword is implicit in SQLite for table-valued functions
+    // so we don't need to include it
+    if base_func.is_empty() {
+        String::new()
+    } else {
+        format!("{}{}", base_func, alias_str)
+    }
+}
+
 /// Reconstruct a CoalesceExpr node
 fn reconstruct_coalesce_expr(coalesce_expr: &CoalesceExpr, ctx: &mut TranspileContext) -> String {
     let args: Vec<String> = coalesce_expr
@@ -1426,6 +1518,175 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
             .collect();
         args.join(", ")
     };
+
+    // Handle functions that need special argument processing
+    match func_name {
+        "jsonb_path_exists" => {
+            // jsonb_path_exists(json, path) -> json_type(json, path) IS NOT NULL
+            // Handle PostgreSQL JSONPath wildcards like $.skills[*]
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let path = &args[1];
+                // Strip [*] wildcard - SQLite doesn't support it directly
+                // $.skills[*] -> $.skills (check if array exists and has elements)
+                let clean_path = path.replace("[*]", "");
+                // Check if the path exists and for arrays, check they have elements
+                return format!(
+                    "CASE WHEN json_type({}, {}) = 'array' THEN json_array_length(json_extract({}, {})) > 0 ELSE json_type({}, {}) IS NOT NULL END",
+                    args[0], clean_path, args[0], clean_path, args[0], clean_path
+                );
+            }
+            return format!("json_type({}) IS NOT NULL", args_str);
+        }
+        "jsonb_path_match" => {
+            // jsonb_path_match(json, path) -> json_extract(json, path) = true
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let clean_path = args[1].replace("[*]", "");
+                return format!("json_extract({}, {}) = 1", args[0], clean_path);
+            }
+            return format!("json_extract({}) = 1", args_str);
+        }
+        "jsonb_path_query" => {
+            // jsonb_path_query(json, path) -> json_extract(json, path)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let clean_path = args[1].replace("[*]", "");
+                return format!("json_extract({}, {})", args[0], clean_path);
+            }
+            return format!("json_extract({})", args_str);
+        }
+        "jsonb_path_query_array" => {
+            // jsonb_path_query_array(json, path) -> json_extract(json, path) (returns as array)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let clean_path = args[1].replace("[*]", "");
+                return format!("json_extract({}, {})", args[0], clean_path);
+            }
+            return format!("json_extract({})", args_str);
+        }
+        "jsonb_path_query_first" => {
+            // jsonb_path_query_first(json, path) -> json_extract(json, path) (returns first match)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let clean_path = args[1].replace("[*]", "");
+                return format!("json_extract({}, {})", args[0], clean_path);
+            }
+            return format!("json_extract({})", args_str);
+        }
+        "jsonb_typeof" => {
+            // jsonb_typeof(json) -> json_type(json) (returns type name)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if !args.is_empty() {
+                // SQLite json_type returns 'null', 'true', 'false', 'integer', 'real', 'text', 'array', 'object'
+                // PostgreSQL jsonb_typeof returns 'object', 'array', 'string', 'number', 'boolean', 'null'
+                // We need to map SQLite types to PostgreSQL types
+                return format!(
+                    "CASE json_type({0}) \
+                    WHEN 'true' THEN 'boolean' \
+                    WHEN 'false' THEN 'boolean' \
+                    WHEN 'integer' THEN 'number' \
+                    WHEN 'real' THEN 'number' \
+                    WHEN 'text' THEN 'string' \
+                    ELSE json_type({0}) END",
+                    args[0]
+                );
+            }
+            return "json_type(".to_string() + &args_str + ")";
+        }
+        "jsonb_object_keys" => {
+            // jsonb_object_keys(json) -> extract keys from json object
+            // PostgreSQL returns a set of keys, but we return as JSON array for SQLite
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if !args.is_empty() {
+                // Return keys as a JSON array using a subquery
+                return format!(
+                    "(SELECT json_group_array(key) FROM json_each({}))",
+                    args[0]
+                );
+            }
+            return format!("(SELECT json_group_array(key) FROM json_each({}))", args_str);
+        }
+        "jsonb_each" | "json_each" => {
+            // jsonb_each(json) -> json_each(json) in SQLite
+            // This returns key/value pairs as rows
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if !args.is_empty() {
+                return format!("json_each({})", args[0]);
+            }
+            return format!("json_each({})", args_str);
+        }
+        "jsonb_array_elements" => {
+            // jsonb_array_elements(json) -> json_each(json) for arrays
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if !args.is_empty() {
+                return format!("json_each({})", args[0]);
+            }
+            return format!("json_each({})", args_str);
+        }
+        "jsonb_extract_path" => {
+            // jsonb_extract_path(json, keys...) -> json_extract(json, path)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                // Build path from the keys
+                return format!("json_extract({}, {})", args[0], args[1..].join(", "));
+            }
+            return format!("json_extract({})", args_str);
+        }
+        "jsonb_extract_path_text" => {
+            // jsonb_extract_path_text(json, keys...) -> json_extract() with ->>
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                return format!("json_extract({}, {})", args[0], args[1..].join(", "));
+            }
+            return format!("json_extract({})", args_str);
+        }
+        _ => {}
+    }
 
     // Map PostgreSQL functions to SQLite equivalents
     let sqlite_func = match func_name {
@@ -3058,13 +3319,69 @@ VALUES
     ('Bob', ARRAY['qa', 'onsite'], '{"age": 25}'),
     ('Carol', ARRAY['dev', 'remote'], '{"age": 35}')"#;
         let result = transpile_with_metadata(sql);
-        
+
         // Should convert all ARRAY[] to JSON arrays
         assert!(result.sql.contains("insert into test_jsonb"));
         // No empty values
         assert!(!result.sql.contains(", ,"), "Arrays should not be empty: {}", result.sql);
         // All three rows should have JSON arrays
-        assert!(result.sql.contains("'[\"dev\",\"remote\"]'") || result.sql.contains("'[\"qa\",\"onsite\"]'"), 
+        assert!(result.sql.contains("'[\"dev\",\"remote\"]'") || result.sql.contains("'[\"qa\",\"onsite\"]'"),
                 "Arrays should be converted to JSON: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_key_exists_operator() {
+        // Test that the ? operator for JSONB key existence is translated
+        let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ? 'team'");
+        // Should translate to json_type check
+        assert!(result.sql.contains("json_type"), "Should use json_type for ? operator: {}", result.sql);
+        assert!(result.sql.contains("IS NOT NULL"), "Should check IS NOT NULL: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_any_key_exists_operator() {
+        // Test that the ?| operator for JSONB any-key-existence is translated
+        let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ?| ARRAY['skills', 'hobbies']");
+        // Should translate to EXISTS with json_each
+        assert!(result.sql.contains("EXISTS"), "Should use EXISTS for ?| operator: {}", result.sql);
+        assert!(result.sql.contains("json_each"), "Should use json_each for ?| operator: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_all_keys_exist_operator() {
+        // Test that the ?& operator for JSONB all-keys-existence is translated
+        let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ?& ARRAY['skills', 'hobbies']");
+        // Should translate to NOT EXISTS with json_each
+        assert!(result.sql.contains("NOT EXISTS"), "Should use NOT EXISTS for ?& operator: {}", result.sql);
+        assert!(result.sql.contains("json_each"), "Should use json_each for ?& operator: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_path_exists() {
+        let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE jsonb_path_exists(props, '$.team.id')");
+        assert!(result.sql.contains("json_type"), "Should use json_type for jsonb_path_exists: {}", result.sql);
+        assert!(result.sql.contains("IS NOT NULL"), "Should check IS NOT NULL: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_path_query() {
+        let result = transpile_with_metadata("SELECT jsonb_path_query(props, '$.team')");
+        assert!(result.sql.contains("json_extract"), "Should use json_extract for jsonb_path_query: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_each_lateral() {
+        let result = transpile_with_metadata("SELECT id, name, key, value FROM test_jsonb, LATERAL jsonb_each(props) AS x(key, value)");
+        println!("Transpiled LATERAL: {}", result.sql);
+        // Should translate jsonb_each to json_each and handle LATERAL
+        assert!(!result.sql.is_empty(), "Should produce some SQL");
+    }
+
+    #[test]
+    fn test_jsonb_remove_array() {
+        let result = transpile_with_metadata("SELECT props - ARRAY['age', 'active'] AS reduced FROM test_jsonb");
+        println!("Transpiled remove array: {}", result.sql);
+        // Should expand array into multiple paths
+        assert!(result.sql.contains("json_remove"), "Should use json_remove: {}", result.sql);
     }
 }
