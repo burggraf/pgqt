@@ -8,4 +8,3 @@ test_pg_lite_meta*.db
 tests/__pycache__/
 prompts/*
 .worktrees/
-.worktrees/
