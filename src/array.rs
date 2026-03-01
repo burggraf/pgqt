@@ -104,6 +104,7 @@ impl ArrayValue {
     }
 
     /// Convert to JSON string format
+    #[allow(dead_code)]
     pub fn to_json_string(&self) -> String {
         match self {
             ArrayValue::Empty => "[]".to_string(),

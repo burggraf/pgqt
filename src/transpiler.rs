@@ -2475,6 +2475,7 @@ fn reconstruct_delete_stmt_with_rls(
 // ============================================================================
 
 /// Frame option bitmasks from PostgreSQL (parsenodes.h)
+#[allow(dead_code)]
 pub mod frame_options {
     pub const NONDEFAULT: i32 = 0x00001;
     pub const RANGE: i32 = 0x00002;

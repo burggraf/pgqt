@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 /// Schema metadata stored in __pg_namespace__
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SchemaMetadata {
     pub oid: i64,
     pub nspname: String,
@@ -74,6 +75,7 @@ impl SearchPath {
     }
 
     /// Get the first schema in the path (the "current" schema)
+    #[allow(dead_code)]
     pub fn first(&self) -> Option<&str> {
         // Skip $user if it doesn't resolve to an actual schema
         for schema in &self.schemas {
@@ -192,6 +194,7 @@ impl SchemaManager {
     }
 
     /// Attach all existing schemas (called on startup)
+    #[allow(dead_code)]
     pub fn attach_all_schemas(&self, conn: &Connection) -> Result<()> {
         let schemas = list_schemas(conn)?;
         for schema in schemas {
@@ -211,6 +214,7 @@ impl SchemaManager {
 // ============================================================================
 
 /// Initialize the schema catalog table
+#[allow(dead_code)]
 pub fn init_schema_catalog(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_namespace__ (
@@ -308,6 +312,7 @@ pub fn schema_exists(conn: &Connection, name: &str) -> Result<bool> {
 }
 
 /// Get schema OID
+#[allow(dead_code)]
 pub fn get_schema_oid(conn: &Connection, name: &str) -> Result<Option<i64>> {
     let result: Result<i64, _> = conn.query_row(
         "SELECT oid FROM __pg_namespace__ WHERE nspname = ?",
@@ -318,6 +323,7 @@ pub fn get_schema_oid(conn: &Connection, name: &str) -> Result<Option<i64>> {
 }
 
 /// Get schema owner OID
+#[allow(dead_code)]
 pub fn get_schema_owner(conn: &Connection, name: &str) -> Result<Option<i64>> {
     let result: Result<i64, _> = conn.query_row(
         "SELECT nspowner FROM __pg_namespace__ WHERE nspname = ?",
@@ -328,6 +334,7 @@ pub fn get_schema_owner(conn: &Connection, name: &str) -> Result<Option<i64>> {
 }
 
 /// List all schemas
+#[allow(dead_code)]
 pub fn list_schemas(conn: &Connection) -> Result<Vec<SchemaMetadata>> {
     let mut stmt = conn.prepare(
         "SELECT oid, nspname, nspowner, nspacl FROM __pg_namespace__ ORDER BY oid",
@@ -456,6 +463,7 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
 // ============================================================================
 
 /// Grant a privilege on a schema
+#[allow(dead_code)]
 pub fn grant_schema_privilege(
     conn: &Connection,
     schema_name: &str,
@@ -475,6 +483,7 @@ pub fn grant_schema_privilege(
 }
 
 /// Revoke a privilege on a schema
+#[allow(dead_code)]
 pub fn revoke_schema_privilege(
     conn: &Connection,
     schema_name: &str,
@@ -493,6 +502,7 @@ pub fn revoke_schema_privilege(
 }
 
 /// Check if a user has a privilege on a schema
+#[allow(dead_code)]
 pub fn check_schema_privilege(
     conn: &Connection,
     schema_name: &str,
