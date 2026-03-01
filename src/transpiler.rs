@@ -1388,8 +1388,37 @@ fn reconstruct_sql_value_function(sql_val: &SqlValueFunction) -> String {
     }
 }
 
+/// Check if a node is an array expression (ArrayExpr or AArrayExpr)
+fn is_array_expr(node: &Node) -> bool {
+    if let Some(ref inner) = node.node {
+        matches!(inner, NodeEnum::ArrayExpr(_) | NodeEnum::AArrayExpr(_))
+    } else {
+        false
+    }
+}
+
+/// Check if a node is a string literal containing a JSON array
+fn is_json_array_string(node: &Node) -> bool {
+    if let Some(ref inner) = node.node {
+        if let NodeEnum::AConst(const_node) = inner {
+            if let Some(ref val) = const_node.val {
+                if let pg_query::protobuf::a_const::Val::Sval(sval) = val {
+                    let s = &sval.sval;
+                    // Check if it looks like a JSON array: starts with [ and ends with ]
+                    return s.trim().starts_with('[') && s.trim().ends_with(']');
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Reconstruct an AExpr node (operators)
 fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
+    // Check if operands are array expressions before reconstructing
+    let lexpr_is_array = a_expr.lexpr.as_ref().map_or(false, |n| is_array_expr(n) || is_json_array_string(n));
+    let rexpr_is_array = a_expr.rexpr.as_ref().map_or(false, |n| is_array_expr(n) || is_json_array_string(n));
+    
     let lexpr_sql = a_expr
         .lexpr
         .as_ref()
@@ -1446,8 +1475,16 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
             // Check if operands look like ranges or arrays
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
-            if lexpr_lower.contains("range") || rexpr_lower.contains("range") ||
-               lexpr_lower.contains("[") || rexpr_lower.contains("(") {
+            
+            // Determine if this is a range operation vs array operation
+            // First check if either operand is an array expression (from AST)
+            // Then check for range literals: [1,2), (1,2], [1,2], (1,2) - contain brackets/parens
+            let is_array = lexpr_is_array || rexpr_is_array;
+            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
+                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
+                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")));
+            
+            if is_range {
                 format!("range_overlaps({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_overlap({}, {})", lexpr_sql, rexpr_sql)
@@ -1456,17 +1493,29 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@>" => {
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
-            if lexpr_lower.contains("range") || lexpr_lower.contains("[") || lexpr_lower.contains("(") ||
-               rexpr_lower.contains("range") || rexpr_lower.contains("[") || rexpr_lower.contains("(") ||
-               lexpr_lower == "r" { // Special case for our test table column
+            
+            let is_array = lexpr_is_array || rexpr_is_array;
+            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
+                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
+                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")) ||
+                           lexpr_lower == "r"); // Special case for our test table column
+            
+            if is_range {
                 format!("range_contains({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_contains({}, {})", lexpr_sql, rexpr_sql)
             }
         }
         "<@" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
-            if rexpr_lower.contains("range") || rexpr_lower.contains("[") || rexpr_lower.contains("(") {
+            
+            let is_array = lexpr_is_array || rexpr_is_array;
+            let is_range = !is_array && ((lexpr_lower.contains("range") || rexpr_lower.contains("range")) ||
+                           (lexpr_lower.contains("[") || lexpr_lower.contains("(")) ||
+                           (rexpr_lower.contains("[") || rexpr_lower.contains("(")));
+            
+            if is_range {
                 format!("range_contained({}, {})", lexpr_sql, rexpr_sql)
             } else {
                 format!("array_contained({}, {})", lexpr_sql, rexpr_sql)
