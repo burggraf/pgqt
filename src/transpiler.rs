@@ -3,7 +3,7 @@ use pg_query::protobuf::{
     AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
-    AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt,
+    AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
 };
 
 // RLS-related imports
@@ -920,6 +920,7 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
                 // CaseWhen is handled within reconstruct_case_expr, not standalone
                 "".to_string()
             }
+            NodeEnum::SqlvalueFunction(ref sql_val) => reconstruct_sql_value_function(sql_val),
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }
     } else {
@@ -1082,6 +1083,51 @@ fn reconstruct_aconst(aconst: &AConst) -> String {
         }
     } else {
         "NULL".to_string()
+    }
+}
+
+/// Reconstruct a SQL value function (CURRENT_TIMESTAMP, CURRENT_DATE, etc.)
+fn reconstruct_sql_value_function(sql_val: &SqlValueFunction) -> String {
+    use pg_query::protobuf::SqlValueFunctionOp;
+    
+    match sql_val.op() {
+        SqlValueFunctionOp::SvfopCurrentTimestamp | SqlValueFunctionOp::SvfopCurrentTimestampN => {
+            // SQLite's CURRENT_TIMESTAMP is equivalent to PostgreSQL's
+            "CURRENT_TIMESTAMP".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentDate => {
+            "date('now')".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentTime | SqlValueFunctionOp::SvfopCurrentTimeN => {
+            "time('now')".to_string()
+        }
+        SqlValueFunctionOp::SvfopLocaltime | SqlValueFunctionOp::SvfopLocaltimeN => {
+            "time('now', 'localtime')".to_string()
+        }
+        SqlValueFunctionOp::SvfopLocaltimestamp | SqlValueFunctionOp::SvfopLocaltimestampN => {
+            "datetime('now', 'localtime')".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentUser | SqlValueFunctionOp::SvfopUser => {
+            // SQLite doesn't have a built-in CURRENT_USER, but we can return a reasonable default
+            "'current_user'".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentRole => {
+            "'current_role'".to_string()
+        }
+        SqlValueFunctionOp::SvfopSessionUser => {
+            "'session_user'".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentCatalog => {
+            "'current_catalog'".to_string()
+        }
+        SqlValueFunctionOp::SvfopCurrentSchema => {
+            // Return 'main' as the default schema in SQLite
+            "'main'".to_string()
+        }
+        _ => {
+            // Unknown SQL value function, try to deparse
+            "NULL".to_string()
+        }
     }
 }
 
