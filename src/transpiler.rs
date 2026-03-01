@@ -1,6 +1,6 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
+    AArrayExpr, AConst, AExpr, ArrayExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
@@ -921,6 +921,8 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
                 "".to_string()
             }
             NodeEnum::SqlvalueFunction(ref sql_val) => reconstruct_sql_value_function(sql_val),
+            NodeEnum::ArrayExpr(ref array_expr) => reconstruct_array_expr(array_expr, ctx),
+            NodeEnum::AArrayExpr(ref a_array_expr) => reconstruct_a_array_expr(a_array_expr, ctx),
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }
     } else {
@@ -1084,6 +1086,74 @@ fn reconstruct_aconst(aconst: &AConst) -> String {
     } else {
         "NULL".to_string()
     }
+}
+
+/// Reconstruct an ArrayExpr node (ARRAY[...] syntax)
+/// Converts PostgreSQL ARRAY expressions to SQLite JSON arrays
+fn reconstruct_array_expr(array_expr: &ArrayExpr, ctx: &mut TranspileContext) -> String {
+    let elements: Vec<serde_json::Value> = array_expr
+        .elements
+        .iter()
+        .map(|n| {
+            let val = reconstruct_node(n, ctx);
+            // If the value is already quoted (a string), use it as-is for JSON
+            // Otherwise, it's a literal that needs to be included in JSON
+            if val.starts_with('\'') && val.ends_with('\'') {
+                // It's a string literal - extract the inner value for JSON
+                let inner = &val[1..val.len()-1];
+                serde_json::Value::String(inner.to_string())
+            } else if val == "NULL" {
+                serde_json::Value::Null
+            } else if val == "1" || val == "0" {
+                // Boolean values (converted to 1/0 by reconstruct_aconst)
+                serde_json::Value::Bool(val == "1")
+            } else if let Ok(num) = val.parse::<i64>() {
+                serde_json::Value::Number(num.into())
+            } else if let Ok(num) = val.parse::<f64>() {
+                serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(0.into()))
+            } else {
+                serde_json::Value::String(val)
+            }
+        })
+        .collect();
+    
+    // Store as JSON array string
+    format!("'{}'", serde_json::to_string(&elements).unwrap_or_else(|_| "[]".to_string()))
+}
+
+/// Reconstruct an AArrayExpr node (ARRAY[...] syntax in parsed SQL)
+/// Converts PostgreSQL ARRAY expressions to SQLite JSON arrays
+fn reconstruct_a_array_expr(a_array_expr: &AArrayExpr, ctx: &mut TranspileContext) -> String {
+    let elements: Vec<serde_json::Value> = a_array_expr
+        .elements
+        .iter()
+        .map(|n| {
+            let val = reconstruct_node(n, ctx);
+            // If the value is already quoted (a string), use it as-is for JSON
+            // Otherwise, it's a literal that needs to be included in JSON
+            if val.starts_with('\'') && val.ends_with('\'') {
+                // It's a string literal - extract the inner value for JSON
+                let inner = &val[1..val.len()-1];
+                serde_json::Value::String(inner.to_string())
+            } else if val == "NULL" {
+                serde_json::Value::Null
+            } else if val == "1" || val == "0" {
+                // Boolean values (converted to 1/0 by reconstruct_aconst)
+                serde_json::Value::Bool(val == "1")
+            } else if let Ok(num) = val.parse::<i64>() {
+                serde_json::Value::Number(num.into())
+            } else if let Ok(num) = val.parse::<f64>() {
+                serde_json::Number::from_f64(num)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::String(val))
+            } else {
+                serde_json::Value::String(val)
+            }
+        })
+        .collect();
+    
+    // Store as JSON array string
+    format!("'{}'", serde_json::to_string(&elements).unwrap_or_else(|_| "[]".to_string()))
 }
 
 /// Reconstruct a SQL value function (CURRENT_TIMESTAMP, CURRENT_DATE, etc.)
@@ -2965,5 +3035,36 @@ mod tests {
         let result = transpile_with_metadata("CREATE TABLE IF NOT EXISTS my_table (id INTEGER PRIMARY KEY)");
         assert!(result.sql.contains("create table"));
         assert!(result.sql.contains("my_table"));
+    }
+
+    #[test]
+    fn test_insert_with_array_expr() {
+        let sql = "INSERT INTO test_jsonb(name, tags, props) VALUES ('Alice', ARRAY['dev', 'remote'], '{\"age\": 30}')";
+        let result = transpile_with_metadata(sql);
+        
+        // Should convert ARRAY['dev', 'remote'] to a JSON array
+        assert!(result.sql.contains("insert into test_jsonb"));
+        // Check that array is converted to JSON format (not empty)
+        assert!(!result.sql.contains(", ,"), "Array should not be empty: {}", result.sql);
+        // Check proper JSON array format
+        assert!(result.sql.contains("'[\"dev\",\"remote\"]'"), "Array should be JSON: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_with_multiple_array_rows() {
+        let sql = r#"INSERT INTO test_jsonb(name, tags, props)
+VALUES
+    ('Alice', ARRAY['dev', 'remote'], '{"age": 30, "active": true}'),
+    ('Bob', ARRAY['qa', 'onsite'], '{"age": 25}'),
+    ('Carol', ARRAY['dev', 'remote'], '{"age": 35}')"#;
+        let result = transpile_with_metadata(sql);
+        
+        // Should convert all ARRAY[] to JSON arrays
+        assert!(result.sql.contains("insert into test_jsonb"));
+        // No empty values
+        assert!(!result.sql.contains(", ,"), "Arrays should not be empty: {}", result.sql);
+        // All three rows should have JSON arrays
+        assert!(result.sql.contains("'[\"dev\",\"remote\"]'") || result.sql.contains("'[\"qa\",\"onsite\"]'"), 
+                "Arrays should be converted to JSON: {}", result.sql);
     }
 }
