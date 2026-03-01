@@ -1,65 +1,50 @@
-# Implementation Plan: PostgreSQL Range Types Support
+# Implementation Plan: Geometric Types for PostgreSQL-to-SQLite Proxy
 
 ## Overview
-Implement PostgreSQL-compatible Range Types (`int4range`, `int8range`, `numrange`, `tsrange`, `tstzrange`, `daterange`) by emulating them as strings (TEXT) in SQLite. Support canonicalization for discrete types, common operators, and metadata functions.
+Implement support for PostgreSQL's geometric data types: `point`, `line`, `lseg`, `box`, `path`, `polygon`, and `circle`. These types will be stored as `TEXT` in SQLite using PostgreSQL's canonical string representation. Operators will be transpiled to custom SQLite functions implemented in Rust.
 
-## Tasks
+## 1. Storage Strategy
+- All geometric types will be stored as `TEXT` in SQLite.
+- The format will match PostgreSQL's output format (canonical strings).
+- Type mapping in `src/transpiler.rs` will be updated to map these types to `TEXT`.
 
-### Phase 1: Core Logic (`src/range.rs`)
-- [ ] Define `RangeValue` enum and `RangeBound` struct.
-- [ ] Implement parser for PG range string format: `[low,high)`, `empty`, `(,high]`, etc.
-- [ ] Implement canonicalization for discrete types (`int4range`, `int8range`, `daterange`):
-    - `[low, high]` -> `[low, high+1)`
-    - `(low, high)` -> `[low+1, high)`
-    - Handle `empty` cases (e.g., `[10, 10)` or `[10, 9]`).
-- [ ] Implement range operations:
-    - `contains` (`@>`)
-    - `contained_by` (`<@`)
-    - `overlaps` (`&&`)
-    - `strictly_left` (`<<`)
-    - `strictly_right` (`>>`)
-    - `adjacent` (`-|-`)
-    - `no_extend_right` (`&<`)
-    - `no_extend_left` (`&>`)
-    - `union` (`+`) - if overlapping/adjacent
-    - `intersection` (`*`)
-    - `difference` (`-`)
-- [ ] Implement metadata functions: `lower`, `upper`, `lower_inc`, `upper_inc`, `lower_inf`, `upper_inf`, `isempty`.
-- [ ] Add extensive unit tests for all logic.
+## 2. Core Logic (`src/geo.rs`)
+Create a new module `src/geo.rs` to handle:
+- Parsing of geometric string formats.
+- Implementation of geometric operators as Rust functions.
+- Structs representing each geometric type:
+    - `Point { x: f64, y: f64 }`
+    - `Line { a: f64, b: f64, c: f64 }`
+    - `Lseg { p1: Point, p2: Point }`
+    - `Box { p1: Point, p2: Point }` (reordered to UR, LL)
+    - `Path { points: Vec<Point>, closed: bool }`
+    - `Polygon { points: Vec<Point> }`
+    - `Circle { center: Point, radius: f64 }`
 
-### Phase 2: Transpilation (`src/transpiler.rs`)
-- [ ] Update `rewrite_type_for_sqlite` to map range types to `text`.
-- [ ] Implement operator transpilation in `reconstruct_a_expr`:
-    - `@>` -> `range_contains(l, r)`
-    - `<@` -> `range_contained(l, r)`
-    - `&&` -> `range_overlaps(l, r)`
-    - `<<` -> `range_left(l, r)`
-    - `>>` -> `range_right(l, r)`
-    - `-|-` -> `range_adjacent(l, r)`
-    - `&<` -> `range_no_extend_right(l, r)`
-    - `&>` -> `range_no_extend_left(l, r)`
-- [ ] Implement constructor functions: `int4range(...)`, `daterange(...)`, etc.
+## 3. SQL Transpilation (`src/transpiler.rs`)
+Update `src/transpiler.rs`:
+- Map PG geometric types to SQLite `TEXT`.
+- Transpile operators to function calls:
+    - `&&` (overlaps) -> `geo_overlaps(left, right)`
+    - `@>` (contains) -> `geo_contains(left, right)`
+    - `<@` (contained in) -> `geo_contained(left, right)`
+    - `<<` (strictly left) -> `geo_left(left, right)`
+    - `>>` (strictly right) -> `geo_right(left, right)`
+    - `<->` (distance) -> `geo_distance(left, right)`
+    - `?|` (is vertical) -> `geo_vertical(obj)`
+    - `?-` (is horizontal) -> `geo_horizontal(obj)`
+    - `?||` (is parallel) -> `geo_parallel(left, right)`
+    - `?-|` (is perpendicular) -> `geo_perpendicular(left, right)`
 
-### Phase 3: Runtime Integration (`src/main.rs`)
-- [ ] Register SQLite scalar functions:
-    - `range_contains`, `range_contained`, `range_overlaps`, etc.
-    - `lower`, `upper`, `lower_inc`, `upper_inc`, `lower_inf`, `upper_inf`, `isempty`, `range_merge`.
-- [ ] Register constructor functions as SQLite functions.
+## 4. Function Registration (`src/main.rs`)
+Register the new `geo_*` functions in the SQLite connection in `src/main.rs`.
 
-### Phase 4: Testing & Documentation
-- [ ] Create `tests/range_e2e_test.py` for full integration testing.
-- [ ] Update `docs/TODO-FEATURES.md`.
-- [ ] Create `docs/RANGE.md` with implementation details.
-- [ ] Update `README.md`.
+## 5. Verification & Testing
+- **Unit Tests**: Test parsing and operator logic in `src/geo.rs`.
+- **Integration Tests**: Test transpiler changes in `tests/transpiler_tests.rs`.
+- **E2E Tests**: Python-based tests connecting via `pgwire` to verify full end-to-end compatibility.
 
-### Phase 5: Finalization
-- [ ] Run all tests.
-- [ ] Commit and push changes.
-
-## Research Findings
-- Discrete types: `int4range`, `int8range`, `daterange`.
-- Continuous types: `numrange`, `tsrange`, `tstzrange`.
-- Canonical form: `[low, high)` for discrete types.
-- Unbounded: `(,)` or `(low,)` or `(,high)`.
-- Empty: `empty` or any range where `low >= high` (after normalization).
-- GiST indexes: Not applicable in SQLite directly, but we can use standard indexes on the TEXT column for equality, or virtual tables/R-trees for range queries if needed later. For now, simple emulated operators are enough.
+## 6. Documentation
+- Update `README.md` to include Geometric types.
+- Update `docs/TODO-FEATURES.md`.
+- Create `docs/GEO.md` with detailed information on supported types and operators.

@@ -16,6 +16,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
 - **Range Types**: PostgreSQL range types (`int4range`, `daterange`, etc.) with canonicalization and overlap operators
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
+- **Geometric Types**: 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 
 ## Quick Start
@@ -809,6 +810,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
 ### Phase 4 (In Progress)
 - [x] **Vector Search** - pgvector-compatible vector search for embeddings
+- [x] **Geometric Types** - 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
 - [ ] Connection pooling and load balancing
 
 ## License

@@ -2,6 +2,7 @@ pub mod array;
 pub mod catalog;
 pub mod distinct_on;
 pub mod fts;
+pub mod geo;
 pub mod plpgsql;
 pub mod range;
 pub mod rls;

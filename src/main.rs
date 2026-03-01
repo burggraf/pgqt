@@ -25,6 +25,7 @@ mod vector;
 mod schema;
 mod array;
 mod range;
+mod geo;
 
 /// Output destination for server messages
 #[derive(Debug, Clone, PartialEq)]
@@ -647,6 +648,73 @@ impl SqliteHandler {
             let arr: String = ctx.get(0)?;
             let elem: String = ctx.get(1)?;
             crate::array::array_append(&arr, &elem)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // ========================================
+        // PostgreSQL Geometric Functions
+        // ========================================
+
+        conn.create_scalar_function("geo_distance", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            // If it's a vector, don't try to parse it as a point
+            if a.trim().starts_with('[') || b.trim().starts_with('[') {
+                return crate::vector::l2_distance(&a, &b)
+                        .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))));
+            }
+            match crate::geo::point_distance(&a, &b) {
+                Ok(d) => Ok(d),
+                Err(e) => Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            }
+        })?;
+
+        conn.create_scalar_function("geo_overlaps", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_overlaps(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_contains", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_contains(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_contained", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_contains(&b, &a) // Contained is reverse of contains for boxes
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_left", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_left(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_right", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_right(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_below", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_below(&a, &b)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("geo_above", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let a: String = ctx.get(0)?;
+            let b: String = ctx.get(1)?;
+            crate::geo::box_above(&a, &b)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
