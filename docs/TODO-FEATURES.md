@@ -25,7 +25,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Primitive Types** | ✅ | - | Mapped: INT -> INTEGER, TEXT -> TEXT, BYTEA -> BLOB, etc. |
 | **JSON / JSONB** | ✅ | Low | SQLite has excellent JSON support (JSON1 extension). JSONB (binary) is now standard in newer SQLite versions. |
 | **UUID** | ✅ | Low | Stored as TEXT or BLOB(16). |
-| **Arrays** | ⚠️ | Medium | Emulated via JSON strings in SQLite. Needs transpilation for array operators (`&&`, `@>`). |
+| **Arrays** | ✅ | Medium | Full array support via JSON strings in SQLite. Operators: && (overlap), @> (contains), <@ (contained by). Functions: array_append, array_prepend, array_cat, array_remove, array_replace, array_length, array_dims, array_ndims, cardinality, array_position, array_positions, array_to_string, string_to_array, array_fill, trim_array. See [docs/ARRAYS.md](./ARRAYS.md) for details. |
 | **Enums** | ✅ | Low | Emulated via TEXT with CHECK constraints in SQLite. |
 | **Ranges** | ❌ | Medium | Could be emulated via two columns (start, end) or JSON. |
 | **Geometric Types** | ❌ | Medium | Possible via SpatiaLite extension or custom BLOB formats. |

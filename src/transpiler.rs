@@ -1121,6 +1121,10 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@>@" => format!("fts_contains({}, {})", lexpr_sql, rexpr_sql),  // tsquery contains
         "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
         "||" => format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql), // tsvector concat
+        // Array operators (PostgreSQL compatibility)
+        "&&" => format!("array_overlap({}, {})", lexpr_sql, rexpr_sql),
+        "@>" => format!("array_contains({}, {})", lexpr_sql, rexpr_sql),
+        "<@" => format!("array_contained({}, {})", lexpr_sql, rexpr_sql),
         // Vector distance operators (pgvector compatibility)
         "<->" => format!("vector_l2_distance({}, {})", lexpr_sql, rexpr_sql),     // L2 distance
         "<=>" => format!("vector_cosine_distance({}, {})", lexpr_sql, rexpr_sql), // Cosine distance

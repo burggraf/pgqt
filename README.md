@@ -569,6 +569,55 @@ FROM articles;
 
 For complete documentation, see [docs/FTS.md](./docs/FTS.md).
 
+### Array Support
+
+PGlite Proxy provides PostgreSQL-compatible array support with full operator and function coverage:
+
+```sql
+-- Create table with array columns
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    tags TEXT[],
+    category_ids INTEGER[]
+);
+
+-- Insert with arrays
+INSERT INTO products (name, tags, category_ids)
+VALUES ('Widget', '{"featured","sale"}', '{1,5,10}');
+
+-- Overlap: Find products with ANY of the given tags
+SELECT * FROM products WHERE tags && '{"featured","new"}';
+
+-- Contains: Find products with ALL of the given tags
+SELECT * FROM products WHERE tags @> '{"featured","sale"}';
+
+-- Contained by: Find products where tags are a subset
+SELECT * FROM products WHERE tags <@ '{"featured","sale","new"}';
+
+-- Array functions
+SELECT array_append(tags, 'special') FROM products;
+SELECT array_remove(category_ids, 5) FROM products;
+SELECT cardinality(tags) FROM products;
+SELECT array_to_string(tags, ', ') FROM products;
+```
+
+**Supported Array Operators:**
+- `&&` - Overlap (any element in common)
+- `@>` - Contains (left contains all of right)
+- `<@` - Contained by (left is subset of right)
+
+**Supported Array Functions:**
+- `array_append(arr, elem)`, `array_prepend(elem, arr)`
+- `array_cat(arr1, arr2)`, `array_remove(arr, elem)`, `array_replace(arr, old, new)`
+- `array_length(arr, dim)`, `array_lower(arr, dim)`, `array_upper(arr, dim)`
+- `array_ndims(arr)`, `array_dims(arr)`, `cardinality(arr)`
+- `array_position(arr, elem [, start])`, `array_positions(arr, elem)`
+- `array_to_string(arr, delim [, null_str])`, `string_to_array(text, delim [, null_str])`
+- `array_fill(value, dims [, bounds])`, `trim_array(arr, n)`
+
+For complete documentation, see [docs/ARRAYS.md](./docs/ARRAYS.md).
+
 ### Vector Search (pgvector Compatible)
 
 PGlite Proxy provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:
