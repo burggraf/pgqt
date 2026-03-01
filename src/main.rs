@@ -16,6 +16,7 @@ use rusqlite::Connection;
 use tokio::net::TcpListener;
 
 mod catalog;
+mod distinct_on;
 mod rls;
 mod rls_inject;
 mod transpiler;

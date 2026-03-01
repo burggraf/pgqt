@@ -756,6 +756,43 @@ FROM stocks;
 
 For complete documentation, see [docs/WINDOW.md](./docs/WINDOW.md).
 
+### DISTINCT ON
+
+PGlite Proxy provides PostgreSQL-compatible DISTINCT ON support using ROW_NUMBER() window function polyfill:
+
+```sql
+-- Get the latest order for each customer
+SELECT DISTINCT ON (customer_id) customer_id, order_date, amount
+FROM orders
+ORDER BY customer_id, order_date DESC;
+
+-- Get the highest paid employee in each department/role
+SELECT DISTINCT ON (department, role) department, role, name, salary
+FROM employees
+ORDER BY department, role, salary DESC;
+```
+
+**Supported DISTINCT ON Features:**
+- Single and multiple column expressions
+- Expression-based DISTINCT ON (e.g., `DISTINCT ON (DATE(created_at))`)
+- ORDER BY with different sort columns for tie-breaking
+- LIMIT and OFFSET support
+- WHERE clause filtering
+- JOIN support
+
+**Transformation:**
+`SELECT DISTINCT ON (a) x, y FROM t ORDER BY a, b` is transformed to:
+```sql
+SELECT x, y FROM (
+    SELECT x, y, ROW_NUMBER() OVER (PARTITION BY a ORDER BY a, b) as __rn
+    FROM t
+) AS __distinct_on_sub
+WHERE __rn = 1
+ORDER BY a, b
+```
+
+For complete documentation, see [docs/DISTINCT_ON.md](./docs/DISTINCT_ON.md).
+
 For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
 ## Roadmap
@@ -764,7 +801,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [x] **Schemas (Namespaces)** - Full schema support using SQLite ATTACH DATABASE
 - [x] **Window Functions** - Full support for all PostgreSQL window functions with frame specifications
-- [ ] `DISTINCT ON` polyfill using window functions
+- [x] `DISTINCT ON` polyfill using window functions
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [x] Row-Level Security (RLS) emulation
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5

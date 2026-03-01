@@ -37,7 +37,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | :--- | :---: | :---: | :--- |
 | **`INSERT ... ON CONFLICT` (Upsert)** | ✅ | Low | SQLite supports `ON CONFLICT` syntax. |
 | **`RETURNING` Clause** | ✅ | Medium | SQLite 3.35.0+ supports `RETURNING`. Proxy handles older versions via `last_insert_rowid()`. |
-| **`DISTINCT ON (...)`** | ⚠️ | Medium | Phase 3 Roadmap: Polyfill using window functions `ROW_NUMBER()`. |
+| **`DISTINCT ON (...)`** | ✅ | Medium | Polyfilled using ROW_NUMBER() window function. See [docs/DISTINCT_ON.md](./DISTINCT_ON.md) for details. |
 | **`LATERAL` Joins** | ❌ | High | SQLite does not support lateral joins. Very difficult to polyfill without complex query restructuring. |
 | **Postgres Casting (`::type`)** | ✅ | Low | Transpiler converts `x::int` to `CAST(x AS INTEGER)`. |
 | **Operator Shorthands (`~~`, `!~`)** | ✅ | Low | Transpiler converts `~~` to `LIKE` and `!~` to `NOT REGEXP`. |
