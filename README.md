@@ -14,6 +14,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Role-Based Access Control (RBAC)**: PostgreSQL-compatible users, roles, and permission management
 - **Row-Level Security (RLS)**: Fine-grained access control at the row level
 - **Full-Text Search (FTS)**: PostgreSQL-compatible full-text search using to_tsvector, to_tsquery, and the @@ match operator
+- **Range Types**: PostgreSQL range types (`int4range`, `daterange`, etc.) with canonicalization and overlap operators
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 

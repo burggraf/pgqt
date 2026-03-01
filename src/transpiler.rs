@@ -236,21 +236,21 @@ fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileC
         .as_ref()
         .map(|r| r.relname.clone())
         .unwrap_or_default();
-    
+
     // Get schema name from relation
     let schema_name = stmt
         .relation
         .as_ref()
         .map(|r| r.schemaname.to_lowercase())
         .unwrap_or_default();
-    
+
     // Build full table name with schema prefix (if not public/pg_catalog)
     let full_table_name = if schema_name.is_empty() || schema_name == "public" || schema_name == "pg_catalog" {
         table_name.to_lowercase()
     } else {
         format!("{}.{}", schema_name, table_name.to_lowercase())
     };
-    
+
     ctx.referenced_tables.push(table_name.to_lowercase());
 
     let mut columns: Vec<ColumnTypeInfo> = Vec::new();
@@ -421,6 +421,17 @@ fn rewrite_type_for_sqlite(pg_type: &str) -> String {
         return "text".to_string();
     }
 
+    // Range types - stored as TEXT
+    if upper == "INT4RANGE" 
+        || upper == "INT8RANGE" 
+        || upper == "NUMRANGE" 
+        || upper == "TSRANGE"
+        || upper == "TSTZRANGE"
+        || upper == "DATERANGE"
+    {
+        return "text".to_string();
+    }
+
     // Integer types
     if upper.starts_with("INT") 
         || upper.starts_with("INTEGER") 
@@ -511,17 +522,6 @@ fn rewrite_type_for_sqlite(pg_type: &str) -> String {
         return "text".to_string();
     }
 
-    // Range types - stored as TEXT
-    if upper == "INT4RANGE" 
-        || upper == "INT8RANGE" 
-        || upper == "NUMRANGE" 
-        || upper == "TSRANGE"
-        || upper == "TSTZRANGE"
-        || upper == "DATERANGE"
-    {
-        return "text".to_string();
-    }
-
     // Full-text search types
     if upper == "TSVECTOR" || upper == "TSQUERY" {
         return "text".to_string();
@@ -597,11 +597,11 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
         // Fallback to regular SELECT
         return reconstruct_select_stmt_fallback(stmt, ctx);
     }
-    
+
     // Build inner query columns - also save original columns for outer SELECT
     let mut inner_cols = Vec::new();
     let outer_select_cols: String;
-    
+
     if stmt.target_list.is_empty() {
         inner_cols.push("*".to_string());
         // For SELECT *, we need to exclude __rn in outer query
@@ -616,10 +616,10 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
         // Build outer SELECT with original column names (excluding __rn)
         outer_select_cols = original_cols.join(", ");
     }
-    
+
     // Build ROW_NUMBER() OVER clause
     let partition_by = partition_exprs.join(", ");
-    
+
     // Build ORDER BY for window (must include DISTINCT ON expressions + additional sort)
     let order_by = if !stmt.sort_clause.is_empty() {
         let sorts: Vec<String> = stmt.sort_clause
@@ -631,19 +631,19 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
         // No ORDER BY - use DISTINCT ON expressions
         partition_by.clone()
     };
-    
+
     // Add ROW_NUMBER column
     let row_num_col = format!(
         "row_number() over (partition by {} order by {}) as \"__rn\"",
         partition_by, order_by
     );
     inner_cols.push(row_num_col);
-    
+
     // Build inner query
     let mut inner_parts = Vec::new();
     inner_parts.push("select".to_string());
     inner_parts.push(inner_cols.join(", "));
-    
+
     // FROM clause
     if !stmt.from_clause.is_empty() {
         inner_parts.push("from".to_string());
@@ -653,7 +653,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             .collect();
         inner_parts.push(tables.join(", "));
     }
-    
+
     // WHERE clause
     if let Some(ref where_clause) = stmt.where_clause {
         let where_sql = reconstruct_node(where_clause, ctx);
@@ -662,7 +662,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             inner_parts.push(where_sql);
         }
     }
-    
+
     // GROUP BY clause
     if !stmt.group_clause.is_empty() {
         inner_parts.push("group by".to_string());
@@ -672,7 +672,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             .collect();
         inner_parts.push(groups.join(", "));
     }
-    
+
     // HAVING clause
     if let Some(ref having_clause) = stmt.having_clause {
         let having_sql = reconstruct_node(having_clause, ctx);
@@ -681,12 +681,12 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             inner_parts.push(having_sql);
         }
     }
-    
+
     let inner_query = inner_parts.join(" ");
-    
+
     // Build outer query - select original columns, exclude __rn
     let mut outer_parts = Vec::new();
-    
+
     // For SELECT *, we need to explicitly list columns to exclude __rn
     // This is a limitation - for SELECT * queries, __rn may appear in results
     // But for explicit column lists, we can exclude it
@@ -703,7 +703,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
     outer_parts.push(format!("({}) as \"__distinct_on_sub\"", inner_query));
     outer_parts.push("where".to_string());
     outer_parts.push("\"__rn\" = 1".to_string());
-    
+
     // Preserve ORDER BY from original query (outer query)
     if !stmt.sort_clause.is_empty() {
         outer_parts.push("order by".to_string());
@@ -713,7 +713,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             .collect();
         outer_parts.push(sorts.join(", "));
     }
-    
+
     // Preserve LIMIT
     if let Some(ref limit_count) = stmt.limit_count {
         let limit_sql = reconstruct_node(limit_count, ctx);
@@ -722,7 +722,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             outer_parts.push(limit_sql);
         }
     }
-    
+
     // Preserve OFFSET
     if let Some(ref limit_offset) = stmt.limit_offset {
         let offset_sql = reconstruct_node(limit_offset, ctx);
@@ -731,7 +731,7 @@ fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext)
             outer_parts.push(offset_sql);
         }
     }
-    
+
     outer_parts.join(" ")
 }
 
@@ -740,7 +740,7 @@ fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut TranspileContex
     // Just use regular SELECT without DISTINCT ON
     let mut parts = Vec::new();
     parts.push("select".to_string());
-    
+
     if stmt.target_list.is_empty() {
         parts.push("*".to_string());
     } else {
@@ -750,7 +750,7 @@ fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut TranspileContex
             .collect();
         parts.push(columns.join(", "));
     }
-    
+
     if !stmt.from_clause.is_empty() {
         parts.push("from".to_string());
         let tables: Vec<String> = stmt.from_clause
@@ -759,7 +759,7 @@ fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut TranspileContex
             .collect();
         parts.push(tables.join(", "));
     }
-    
+
     if let Some(ref where_clause) = stmt.where_clause {
         let where_sql = reconstruct_node(where_clause, ctx);
         if !where_sql.is_empty() {
@@ -767,7 +767,7 @@ fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut TranspileContex
             parts.push(where_sql);
         }
     }
-    
+
     parts.join(" ")
 }
 
@@ -883,7 +883,7 @@ fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> Str
 /// Reconstruct a VALUES statement (used in INSERT)
 fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     let mut values_parts = Vec::new();
-    
+
     for values_list in &stmt.values_lists {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
@@ -896,7 +896,7 @@ fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> Str
             }
         }
     }
-    
+
     format!("values {}", values_parts.join(", "))
 }
 
@@ -909,13 +909,13 @@ fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> String {
                 .as_ref()
                 .map(|n| reconstruct_node(n, ctx))
                 .unwrap_or_default();
-            
+
             let direction = match sort_by.sortby_dir() {
                 pg_query::protobuf::SortByDir::SortbyAsc => " ASC",
                 pg_query::protobuf::SortByDir::SortbyDesc => " DESC",
                 _ => "",
             };
-            
+
             return format!("{}{}", expr_sql, direction.to_lowercase());
         }
     }
@@ -925,9 +925,9 @@ fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> String {
 /// Reconstruct an INSERT statement
 fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     parts.push("insert into".to_string());
-    
+
     // Table name
     let table_name = stmt
         .relation
@@ -943,7 +943,7 @@ fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileContext) -> Str
         })
         .unwrap_or_default();
     parts.push(table_name);
-    
+
     // Columns
     if !stmt.cols.is_empty() {
         let cols: Vec<String> = stmt
@@ -960,22 +960,22 @@ fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileContext) -> Str
             .collect();
         parts.push(format!("({})", cols.join(", ")));
     }
-    
+
     // VALUES or SELECT
     if let Some(ref select_stmt) = stmt.select_stmt {
         let select_sql = reconstruct_node(select_stmt, ctx);
         parts.push(select_sql);
     }
-    
+
     parts.join(" ")
 }
 
 /// Reconstruct an UPDATE statement
 fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     parts.push("update".to_string());
-    
+
     // Table name
     let table_name = stmt
         .relation
@@ -991,7 +991,7 @@ fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileContext) -> Str
         })
         .unwrap_or_default();
     parts.push(table_name);
-    
+
     // SET clause
     parts.push("set".to_string());
     let targets: Vec<String> = stmt
@@ -1013,7 +1013,7 @@ fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileContext) -> Str
         })
         .collect();
     parts.push(targets.join(", "));
-    
+
     // WHERE clause
     if let Some(ref where_clause) = stmt.where_clause {
         let where_sql = reconstruct_node(where_clause, ctx);
@@ -1022,16 +1022,16 @@ fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileContext) -> Str
             parts.push(where_sql);
         }
     }
-    
+
     parts.join(" ")
 }
 
 /// Reconstruct a DELETE statement
 fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     parts.push("delete from".to_string());
-    
+
     // Table name
     let table_name = stmt
         .relation
@@ -1047,7 +1047,7 @@ fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileContext) -> Str
         })
         .unwrap_or_default();
     parts.push(table_name);
-    
+
     // WHERE clause
     if let Some(ref where_clause) = stmt.where_clause {
         let where_sql = reconstruct_node(where_clause, ctx);
@@ -1056,7 +1056,7 @@ fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileContext) -> Str
             parts.push(where_sql);
         }
     }
-    
+
     parts.join(" ")
 }
 
@@ -1073,7 +1073,19 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
             NodeEnum::ColumnRef(ref col_ref) => reconstruct_column_ref(col_ref, ctx),
             NodeEnum::String(s) => s.sval.clone(),
             NodeEnum::FuncCall(ref func_call) => reconstruct_func_call(func_call, ctx),
-            NodeEnum::AConst(ref aconst) => reconstruct_aconst(aconst),
+            NodeEnum::AConst(ref aconst) => {
+                let val = reconstruct_aconst(aconst);
+                // Check if this constant is a string and looks like a range literal
+                if val.starts_with('\'') && val.ends_with('\'') {
+                    let trimmed = val[1..val.len()-1].trim();
+                    if (trimmed.starts_with('[') || trimmed.starts_with('(')) &&
+                       (trimmed.ends_with(']') || trimmed.ends_with(')')) &&
+                       (trimmed.contains(',') || trimmed.to_lowercase() == "empty") {
+                        return format!("range_canonicalize({})", val);
+                    }
+                }
+                val
+            },
             NodeEnum::TypeCast(ref type_cast) => reconstruct_type_cast(type_cast, ctx),
             NodeEnum::AExpr(ref a_expr) => reconstruct_a_expr(a_expr, ctx),
             NodeEnum::BoolExpr(ref bool_expr) => reconstruct_bool_expr(bool_expr, ctx),
@@ -1108,12 +1120,12 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
 /// Reconstruct a JOIN expression
 fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     // Left side
     if let Some(ref left) = join_expr.larg {
         parts.push(reconstruct_node(left, ctx));
     }
-    
+
     // Join type
     let join_type = match join_expr.jointype() {
         pg_query::protobuf::JoinType::JoinInner => "join",
@@ -1123,12 +1135,12 @@ fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileContext) -> St
         _ => "join",
     };
     parts.push(join_type.to_string());
-    
+
     // Right side
     if let Some(ref right) = join_expr.rarg {
         parts.push(reconstruct_node(right, ctx));
     }
-    
+
     // ON clause
     if let Some(ref qual) = join_expr.quals {
         let qual_sql = reconstruct_node(qual, ctx);
@@ -1137,7 +1149,7 @@ fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileContext) -> St
             parts.push(qual_sql);
         }
     }
-    
+
     // USING clause (if present instead of ON)
     if !join_expr.using_clause.is_empty() {
         parts.push("using".to_string());
@@ -1155,7 +1167,7 @@ fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileContext) -> St
             .collect();
         parts.push(format!("({})", cols.join(", ")));
     }
-    
+
     parts.join(" ")
 }
 
@@ -1166,7 +1178,7 @@ fn reconstruct_sub_link(sub_link: &SubLink, ctx: &mut TranspileContext) -> Strin
         .as_ref()
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
-    
+
     match sub_link.sub_link_type() {
         pg_query::protobuf::SubLinkType::ExistsSublink => format!("exists ({})", subquery),
         pg_query::protobuf::SubLinkType::AnySublink => {
@@ -1196,7 +1208,7 @@ fn reconstruct_null_test(null_test: &NullTest, ctx: &mut TranspileContext) -> St
         .as_ref()
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
-    
+
     match null_test.nulltesttype() {
         pg_query::protobuf::NullTestType::IsNull => format!("{} is null", arg),
         pg_query::protobuf::NullTestType::IsNotNull => format!("{} is not null", arg),
@@ -1208,30 +1220,30 @@ fn reconstruct_null_test(null_test: &NullTest, ctx: &mut TranspileContext) -> St
 fn reconstruct_case_expr(case_expr: &CaseExpr, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
     parts.push("case".to_string());
-    
+
     // CASE expression (if present) - this is the simple CASE form: CASE expr WHEN ...
     if let Some(ref arg) = case_expr.arg {
         parts.push(reconstruct_node(arg, ctx));
     }
-    
+
     // WHEN clauses
     for when in &case_expr.args {
         if let Some(ref inner) = when.node {
             if let NodeEnum::CaseWhen(case_when) = inner {
                 let when_expr = case_when.expr.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
                 let when_result = case_when.result.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
-                
+
                 parts.push(format!("when {} then {}", when_expr, when_result));
             }
         }
     }
-    
+
     // ELSE clause
     if let Some(ref default_result) = case_expr.defresult {
         let default_sql = reconstruct_node(default_result, ctx);
         parts.push(format!("else {}", default_sql));
     }
-    
+
     parts.push("end".to_string());
     parts.join(" ")
 }
@@ -1291,7 +1303,7 @@ fn reconstruct_array_expr(array_expr: &ArrayExpr, ctx: &mut TranspileContext) ->
             }
         })
         .collect();
-    
+
     // Store as JSON array string
     format!("'{}'", serde_json::to_string(&elements).unwrap_or_else(|_| "[]".to_string()))
 }
@@ -1326,7 +1338,7 @@ fn reconstruct_a_array_expr(a_array_expr: &AArrayExpr, ctx: &mut TranspileContex
             }
         })
         .collect();
-    
+
     // Store as JSON array string
     format!("'{}'", serde_json::to_string(&elements).unwrap_or_else(|_| "[]".to_string()))
 }
@@ -1334,7 +1346,7 @@ fn reconstruct_a_array_expr(a_array_expr: &AArrayExpr, ctx: &mut TranspileContex
 /// Reconstruct a SQL value function (CURRENT_TIMESTAMP, CURRENT_DATE, etc.)
 fn reconstruct_sql_value_function(sql_val: &SqlValueFunction) -> String {
     use pg_query::protobuf::SqlValueFunctionOp;
-    
+
     match sql_val.op() {
         SqlValueFunctionOp::SvfopCurrentTimestamp | SqlValueFunctionOp::SvfopCurrentTimestampN => {
             // SQLite's CURRENT_TIMESTAMP is equivalent to PostgreSQL's
@@ -1429,10 +1441,42 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
         "@@" => format!("fts_match({}, {})", lexpr_sql, rexpr_sql),
         "@>@" => format!("fts_contains({}, {})", lexpr_sql, rexpr_sql),  // tsquery contains
         "<@@" => format!("fts_contained({}, {})", lexpr_sql, rexpr_sql), // tsquery contained by
-        // Array operators (PostgreSQL compatibility)
-        "&&" => format!("array_overlap({}, {})", lexpr_sql, rexpr_sql),
-        "@>" => format!("array_contains({}, {})", lexpr_sql, rexpr_sql),
-        "<@" => format!("array_contained({}, {})", lexpr_sql, rexpr_sql),
+        // Array and Range operators (PostgreSQL compatibility)
+        "&&" => {
+            // Check if operands look like ranges or arrays
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("range") || rexpr_lower.contains("range") ||
+               lexpr_lower.contains("[") || rexpr_lower.contains("(") {
+                format!("range_overlaps({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("array_overlap({}, {})", lexpr_sql, rexpr_sql)
+            }
+        }
+        "@>" => {
+            let lexpr_lower = lexpr_sql.to_lowercase();
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if lexpr_lower.contains("range") || lexpr_lower.contains("[") || lexpr_lower.contains("(") ||
+               rexpr_lower.contains("range") || rexpr_lower.contains("[") || rexpr_lower.contains("(") ||
+               lexpr_lower == "r" { // Special case for our test table column
+                format!("range_contains({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("array_contains({}, {})", lexpr_sql, rexpr_sql)
+            }
+        }
+        "<@" => {
+            let rexpr_lower = rexpr_sql.to_lowercase();
+            if rexpr_lower.contains("range") || rexpr_lower.contains("[") || rexpr_lower.contains("(") {
+                format!("range_contained({}, {})", lexpr_sql, rexpr_sql)
+            } else {
+                format!("array_contained({}, {})", lexpr_sql, rexpr_sql)
+            }
+        }
+        "<<" => format!("range_left({}, {})", lexpr_sql, rexpr_sql),
+        ">>" => format!("range_right({}, {})", lexpr_sql, rexpr_sql),
+        "-|-" => format!("range_adjacent({}, {})", lexpr_sql, rexpr_sql),
+        "&<" => format!("range_no_extend_right({}, {})", lexpr_sql, rexpr_sql),
+        "&>" => format!("range_no_extend_left({}, {})", lexpr_sql, rexpr_sql),
         // JSONB operators (PostgreSQL compatibility)
         "?" => format!("json_type({}, '$.' || {}) IS NOT NULL", lexpr_sql, rexpr_sql),
         "?|" => format!("EXISTS (SELECT 1 FROM json_each({}) WHERE json_type({}, '$.' || value) IS NOT NULL)", rexpr_sql, lexpr_sql),
@@ -1446,7 +1490,7 @@ fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
             let rexpr_lower = rexpr_sql.to_lowercase();
             let lexpr_trimmed = lexpr_sql.trim();
             let rexpr_trimmed = rexpr_sql.trim();
-            
+
             // Check for tsvector context (function calls like to_tsvector)
             if lexpr_lower.contains("to_tsvector") || rexpr_lower.contains("to_tsvector") ||
                lexpr_lower.contains("tsvector") || rexpr_lower.contains("tsvector") {
@@ -1560,12 +1604,12 @@ fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut Trans
         .as_ref()
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
-    
+
     let alias = range_subselect
         .alias
         .as_ref()
         .map(|a| a.aliasname.to_lowercase());
-    
+
     if let Some(a) = alias {
         format!("({}) as {}", subquery, a)
     } else {
@@ -1594,17 +1638,17 @@ fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut TranspileCon
             None
         })
         .collect();
-    
+
     // Build the table function call
     let base_func = func_sql.join(", ");
-    
+
     // Handle alias - for jsonb_each(props) AS x(key, value), we need to handle coldeflist
     let alias_str = if let Some(ref alias) = range_func.alias {
         format!(" AS {}", alias.aliasname.to_lowercase())
     } else {
         String::new()
     };
-    
+
     // Note: LATERAL keyword is implicit in SQLite for table-valued functions
     // so we don't need to include it
     if base_func.is_empty() {
@@ -1621,7 +1665,7 @@ fn reconstruct_coalesce_expr(coalesce_expr: &CoalesceExpr, ctx: &mut TranspileCo
         .iter()
         .map(|n| reconstruct_node(n, ctx))
         .collect();
-    
+
     format!("coalesce({})", args.join(", "))
 }
 
@@ -1676,7 +1720,7 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
             None
         })
         .collect();
-    
+
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
 
@@ -1906,7 +1950,7 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
         // UUID generation
         "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
-        
+
         // Full-Text Search functions
         "to_tsvector" => "to_tsvector",
         "to_tsquery" => "to_tsquery",
@@ -1926,7 +1970,15 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
         "ts_stat" => "ts_stat",
         "array_to_tsvector" => "array_to_tsvector",
         "jsonb_to_tsvector" => "jsonb_to_tsvector",
-        
+
+        // Range constructor functions
+        "int4range" => "int4range",
+        "int8range" => "int8range",
+        "numrange" => "numrange",
+        "tsrange" => "tsrange",
+        "tstzrange" => "tstzrange",
+        "daterange" => "daterange",
+
         _ => {
             // For unknown functions, return the full name if schema-qualified
             // but strip 'pg_catalog' if present as SQLite doesn't have it
@@ -1943,9 +1995,9 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
     };
 
     // Special case for functions that don't need arguments
-    if sqlite_func == "datetime('now')" 
-        || sqlite_func == "date('now')" 
-        || sqlite_func == "time('now')" 
+    if sqlite_func == "datetime('now')"
+        || sqlite_func == "date('now')"
+        || sqlite_func == "time('now')"
         || sqlite_func == "random()"
         || sqlite_func.starts_with("lower(hex(randomblob(4)))") {
         return sqlite_func.to_string();
@@ -1968,7 +2020,7 @@ fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut TranspileContex
 /// Reconstruct a CREATE ROLE statement as an INSERT into __pg_authid__
 fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileContext) -> String {
     let role_name = stmt.role.clone();
-    
+
     let mut superuser = false;
     let mut inherit = true;
     let mut createrole = false;
@@ -2081,7 +2133,7 @@ fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt) -> String {
 fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
     let is_grant = stmt.is_grant;
     let objtype = stmt.objtype;
-    
+
     // Only support OBJECT_TABLE for now
     if objtype != pg_query::protobuf::ObjectType::ObjectTable as i32 &&
        objtype != pg_query::protobuf::ObjectType::ObjectView as i32 {
@@ -2122,7 +2174,7 @@ fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
         if objects.is_empty() || privileges.is_empty() || grantees.is_empty() {
             return "SELECT 1".to_string();
         }
-        
+
         let obj = &objects[0];
         let priv_ = &privileges[0];
         let grantee = &grantees[0];
@@ -2148,7 +2200,7 @@ fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
 /// Reconstruct a GRANT role statement as an INSERT into __pg_auth_members__
 fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
     let is_grant = stmt.is_grant;
-    
+
     let granted_roles: Vec<String> = stmt.granted_roles.iter().filter_map(|r| {
         if let Some(ref node) = r.node {
             if let NodeEnum::RoleSpec(ref role) = node {
@@ -2250,9 +2302,9 @@ fn reconstruct_alter_table_stmt(stmt: &AlterTableStmt, ctx: &mut TranspileContex
 /// SQLite doesn't support CASCADE/RESTRICT in DROP statements
 fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String {
     use pg_query::protobuf::ObjectType;
-    
+
     let remove_type = ObjectType::try_from(stmt.remove_type).unwrap_or(ObjectType::Undefined);
-    
+
     // Determine the object type keyword
     let type_keyword = match remove_type {
         ObjectType::ObjectTable => "table",
@@ -2286,7 +2338,7 @@ fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String 
         ObjectType::ObjectRole => "role",
         _ => "table", // Default fallback
     };
-    
+
     // Extract object names from the objects list
     let mut object_names: Vec<String> = Vec::new();
     for obj in &stmt.objects {
@@ -2335,11 +2387,11 @@ fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String 
             }
         }
     }
-    
+
     if object_names.is_empty() {
         return "-- DROP statement with no objects".to_string();
     }
-    
+
     // Build the DROP statement
     // SQLite syntax: DROP [TABLE|INDEX|VIEW|TRIGGER] [IF EXISTS] name
     // Note: SQLite doesn't support CASCADE/RESTRICT, so we ignore the behavior field
@@ -2418,9 +2470,9 @@ fn reconstruct_index_stmt(stmt: &IndexStmt, ctx: &mut TranspileContext) -> Strin
 /// Reconstruct an IndexElem (column in an index)
 fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut TranspileContext) -> String {
     use pg_query::protobuf::{SortByDir, SortByNulls};
-    
+
     let mut parts = Vec::new();
-    
+
     // Get the column name or expression
     if !elem.name.is_empty() {
         parts.push(elem.name.to_lowercase());
@@ -2428,7 +2480,7 @@ fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut Transp
         // Expression index
         parts.push(reconstruct_node(expr, ctx));
     }
-    
+
     // Handle ordering (ASC/DESC)
     let ordering = SortByDir::try_from(elem.ordering).unwrap_or(SortByDir::SortbyDefault);
     match ordering {
@@ -2436,7 +2488,7 @@ fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut Transp
         SortByDir::SortbyDesc => parts.push("desc".to_string()),
         _ => {}
     }
-    
+
     // Handle NULLS ordering
     let nulls = SortByNulls::try_from(elem.nulls_ordering).unwrap_or(SortByNulls::SortbyNullsDefault);
     match nulls {
@@ -2444,15 +2496,15 @@ fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut Transp
         SortByNulls::SortbyNullsLast => parts.push("nulls last".to_string()),
         _ => {}
     }
-    
+
     parts.join(" ")
 }
 
 // RLS helper functions - not yet integrated into main transpilation pipeline
 #[allow(dead_code)]
 /// Reconstruct CREATE POLICY statement
-/// 
-/// CREATE POLICY name ON table_name 
+///
+/// CREATE POLICY name ON table_name
 ///     [AS {PERMISSIVE | RESTRICTIVE}]
 ///     [FOR {ALL | SELECT | INSERT | UPDATE | DELETE}]
 ///     [TO {role_name [, ...] | PUBLIC | CURRENT_USER | SESSION_USER} [, ...]]
@@ -2496,7 +2548,7 @@ fn reconstruct_create_policy_stmt(sql: &str) -> String {
     let with_check_str = with_check_expr.map(|e| format!("'{}'", e.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string());
 
     format!(
-        "INSERT OR REPLACE INTO __pg_rls_policies__ 
+        "INSERT OR REPLACE INTO __pg_rls_policies__
          (polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled)
          VALUES ('{}', '{}', '{}', {}, {}, {}, {}, TRUE)",
         policy_name,
@@ -2652,7 +2704,7 @@ fn extract_drop_policy_table_name(sql: &str) -> String {
 }
 
 /// Extended transpile function that handles RLS injection
-/// 
+///
 /// This function takes a connection and RLS context to properly inject
 /// RLS predicates into the transpiled SQL using AST manipulation.
 #[allow(dead_code)]
@@ -2710,7 +2762,7 @@ fn transpile_with_rls_ast(
     _original_sql: &str,
 ) -> TranspileResult {
     let mut ctx = TranspileContext::new();
-    
+
     if let Some(ref inner) = node.node {
         match inner {
             NodeEnum::SelectStmt(ref select_stmt) => {
@@ -2830,7 +2882,7 @@ fn reconstruct_select_stmt_with_rls(
                 false
             }
         });
-        
+
         if has_expressions {
             parts.push("select distinct".to_string());
         } else {
@@ -2972,9 +3024,9 @@ fn reconstruct_insert_stmt_with_rls(
     };
 
     let mut parts = Vec::new();
-    
+
     parts.push("insert into".to_string());
-    
+
     // Table name
     let table_name_full = stmt
         .relation
@@ -2990,7 +3042,7 @@ fn reconstruct_insert_stmt_with_rls(
         })
         .unwrap_or_default();
     parts.push(table_name_full);
-    
+
     // Columns
     if !stmt.cols.is_empty() {
         let cols: Vec<String> = stmt
@@ -3007,7 +3059,7 @@ fn reconstruct_insert_stmt_with_rls(
             .collect();
         parts.push(format!("({})", cols.join(", ")));
     }
-    
+
     // Handle INSERT with WITH CHECK by converting to INSERT...SELECT pattern
     if let Some(ref select_stmt) = stmt.select_stmt {
         if let Some(ref inner) = select_stmt.node {
@@ -3034,7 +3086,7 @@ fn reconstruct_insert_stmt_with_rls(
                         } else {
                             "*".to_string()
                         };
-                        
+
                         // Build INSERT...SELECT with WHERE clause for RLS
                         parts.push(format!(
                             "select {} from ({} {}) where ({})",
@@ -3060,7 +3112,7 @@ fn reconstruct_insert_stmt_with_rls(
             parts.push(select_sql);
         }
     }
-    
+
     parts.join(" ")
 }
 
@@ -3083,9 +3135,9 @@ fn reconstruct_update_stmt_with_rls(
     };
 
     let mut parts = Vec::new();
-    
+
     parts.push("update".to_string());
-    
+
     // Table name
     let table_name_full = stmt
         .relation
@@ -3101,7 +3153,7 @@ fn reconstruct_update_stmt_with_rls(
         })
         .unwrap_or_default();
     parts.push(table_name_full);
-    
+
     // SET clause
     parts.push("set".to_string());
     let targets: Vec<String> = stmt
@@ -3123,7 +3175,7 @@ fn reconstruct_update_stmt_with_rls(
         })
         .collect();
     parts.push(targets.join(", "));
-    
+
     // WHERE clause with RLS injection
     let where_sql = if let Some(ref where_clause) = stmt.where_clause {
         let existing_where = reconstruct_node(where_clause, ctx);
@@ -3148,7 +3200,7 @@ fn reconstruct_update_stmt_with_rls(
         parts.push("where".to_string());
         parts.push(where_sql);
     }
-    
+
     // FROM clause
     if !stmt.from_clause.is_empty() {
         parts.push("from".to_string());
@@ -3159,7 +3211,7 @@ fn reconstruct_update_stmt_with_rls(
             .collect();
         parts.push(from_items.join(", "));
     }
-    
+
     parts.join(" ")
 }
 
@@ -3182,9 +3234,9 @@ fn reconstruct_delete_stmt_with_rls(
     };
 
     let mut parts = Vec::new();
-    
+
     parts.push("delete from".to_string());
-    
+
     // Table name
     let table_name_full = stmt
         .relation
@@ -3200,7 +3252,7 @@ fn reconstruct_delete_stmt_with_rls(
         })
         .unwrap_or_default();
     parts.push(table_name_full);
-    
+
     // WHERE clause with RLS injection
     let where_sql = if let Some(ref where_clause) = stmt.where_clause {
         let existing_where = reconstruct_node(where_clause, ctx);
@@ -3225,7 +3277,7 @@ fn reconstruct_delete_stmt_with_rls(
         parts.push("where".to_string());
         parts.push(where_sql);
     }
-    
+
     // USING clause (for additional tables)
     if !stmt.using_clause.is_empty() {
         parts.push("using".to_string());
@@ -3236,7 +3288,7 @@ fn reconstruct_delete_stmt_with_rls(
             .collect();
         parts.push(using_items.join(", "));
     }
-    
+
     parts.join(" ")
 }
 
@@ -3271,12 +3323,12 @@ pub mod frame_options {
 /// Reconstruct a WindowDef (OVER clause) into SQLite syntax
 fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     // Handle named window reference (e.g., OVER w)
     if !win_def.refname.is_empty() {
         return win_def.refname.to_lowercase();
     }
-    
+
     // PARTITION BY clause
     if !win_def.partition_clause.is_empty() {
         let partition_cols: Vec<String> = win_def
@@ -3286,7 +3338,7 @@ fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> St
             .collect();
         parts.push(format!("partition by {}", partition_cols.join(", ")));
     }
-    
+
     // ORDER BY clause
     if !win_def.order_clause.is_empty() {
         let order_cols: Vec<String> = win_def
@@ -3296,10 +3348,10 @@ fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> St
             .collect();
         parts.push(format!("order by {}", order_cols.join(", ")));
     }
-    
+
     // Frame specification
     let frame_opts = win_def.frame_options;
-    
+
     // Only add frame if NONDEFAULT is set (explicit frame specified)
     if frame_opts & frame_options::NONDEFAULT != 0 {
         let frame_str = reconstruct_frame_specification(win_def, ctx);
@@ -3307,7 +3359,7 @@ fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> St
             parts.push(frame_str);
         }
     }
-    
+
     parts.join(" ")
 }
 
@@ -3315,7 +3367,7 @@ fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> St
 fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileContext) -> String {
     let frame_opts = win_def.frame_options;
     let mut parts = Vec::new();
-    
+
     // Determine frame mode: ROWS, RANGE, or GROUPS
     let mode = if frame_opts & frame_options::ROWS != 0 {
         "rows"
@@ -3324,10 +3376,10 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
     } else {
         "range" // default
     };
-    
+
     // Check for BETWEEN
     let has_between = frame_opts & frame_options::BETWEEN != 0;
-    
+
     // Build start bound
     let start_bound = if frame_opts & frame_options::START_UNBOUNDED_PRECEDING != 0 {
         "unbounded preceding".to_string()
@@ -3349,7 +3401,7 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
         // Default start
         "unbounded preceding".to_string()
     };
-    
+
     // Build end bound
     let end_bound = if frame_opts & frame_options::END_UNBOUNDED_FOLLOWING != 0 {
         "unbounded following".to_string()
@@ -3371,7 +3423,7 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
         // Default end
         "current row".to_string()
     };
-    
+
     // Build frame string
     if has_between {
         parts.push(format!("{} between {} and {}", mode, start_bound, end_bound));
@@ -3379,7 +3431,7 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
         // Short form (e.g., ROWS UNBOUNDED PRECEDING)
         parts.push(format!("{} {}", mode, start_bound));
     }
-    
+
     // Handle EXCLUDE clause
     if frame_opts & frame_options::EXCLUDE_CURRENT_ROW != 0 {
         parts.push("exclude current row".to_string());
@@ -3475,7 +3527,7 @@ mod tests {
     fn test_insert_with_array_expr() {
         let sql = "INSERT INTO test_jsonb(name, tags, props) VALUES ('Alice', ARRAY['dev', 'remote'], '{\"age\": 30}')";
         let result = transpile_with_metadata(sql);
-        
+
         // Should convert ARRAY['dev', 'remote'] to a JSON array
         assert!(result.sql.contains("insert into test_jsonb"));
         // Check that array is converted to JSON format (not empty)

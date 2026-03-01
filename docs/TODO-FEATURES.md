@@ -27,7 +27,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **UUID** | ✅ | Low | Stored as TEXT or BLOB(16). |
 | **Arrays** | ✅ | Medium | Full array support via JSON strings in SQLite. Operators: && (overlap), @> (contains), <@ (contained by). Functions: array_append, array_prepend, array_cat, array_remove, array_replace, array_length, array_dims, array_ndims, cardinality, array_position, array_positions, array_to_string, string_to_array, array_fill, trim_array. See [docs/ARRAYS.md](./ARRAYS.md) for details. |
 | **Enums** | ✅ | Low | Emulated via TEXT with CHECK constraints in SQLite. |
-| **Ranges** | ❌ | Medium | Could be emulated via two columns (start, end) or JSON. |
+| **Ranges** | ✅ | Medium | Emulated via TEXT with PostgreSQL canonicalization and operator support. Supported types: int4range, int8range, numrange, tsrange, tstzrange, daterange. See [docs/RANGE.md](./RANGE.md). |
 | **Geometric Types** | ❌ | Medium | Possible via SpatiaLite extension or custom BLOB formats. |
 | **Full-Text Search (TSVECTOR)** | ✅ | Medium | Types `TSVECTOR` and `TSQUERY` are mapped to TEXT with full FTS function emulation: to_tsvector, to_tsquery, plainto_tsquery, phraseto_tsquery, websearch_to_tsquery, ts_rank, ts_headline, setweight, strip. Operators: @@, &, |, !, <->, ||. See [docs/FTS.md](./FTS.md) for details. |
 

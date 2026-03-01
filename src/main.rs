@@ -24,6 +24,7 @@ mod fts;
 mod vector;
 mod schema;
 mod array;
+mod range;
 
 /// Output destination for server messages
 #[derive(Debug, Clone, PartialEq)]
@@ -867,6 +868,152 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
+        // Range Types Operators
+        conn.create_scalar_function("range_contains", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            
+            // Handle different parameter types for index 1
+            let right = if let Ok(s) = ctx.get::<String>(1) {
+                s
+            } else {
+                // Try integer/real without using .get() which is strict
+                let val = ctx.get_raw(1);
+                match val {
+                    rusqlite::types::ValueRef::Integer(i) => i.to_string(),
+                    rusqlite::types::ValueRef::Real(f) => f.to_string(),
+                    _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
+                }
+            };
+
+            // Try as range @> element first, then range @> range
+            match range::range_contains_elem(&left, &right, range::RangeType::Int4) {
+                Ok(res) => Ok(res),
+                Err(_) => range::range_contains(&left, &right, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))),
+            }
+        })?;
+
+        conn.create_scalar_function("range_contained", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            range::range_contained(&left, &right, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("range_overlaps", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            range::range_overlaps(&left, &right, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("range_left", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            range::range_left(&left, &right, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("range_right", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            range::range_right(&left, &right, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("range_adjacent", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let left: String = ctx.get(0)?;
+            let right: String = ctx.get(1)?;
+            range::range_adjacent(&left, &right, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        // Range Metadata Functions
+        conn.create_scalar_function("lower", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::lower(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("upper", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::upper(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("lower_inc", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::lower_inc(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("upper_inc", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::upper_inc(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("lower_inf", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::lower_inf(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("upper_inf", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::upper_inf(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("isempty", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            range::isempty(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("range_canonicalize", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let r: String = ctx.get(0)?;
+            // Default to Int4 for now, as strings don't carry type info
+            let rv = range::parse_range(&r, range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        // Range Constructor Functions
+        conn.create_scalar_function("int4range", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low = ctx.get_raw(0).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(0).unwrap().to_string());
+            let high = ctx.get_raw(1).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(1).unwrap().to_string());
+            let rv = range::parse_range(&format!("[{},{})", low, high), range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        conn.create_scalar_function("int4range", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low = ctx.get_raw(0).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(0).unwrap().to_string());
+            let high = ctx.get_raw(1).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(1).unwrap().to_string());
+            let bounds: String = ctx.get(2)?;
+            let rv = range::parse_range(&format!("{}{},{}{}", &bounds[0..1], low, high, &bounds[1..2]), range::RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        conn.create_scalar_function("daterange", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low: String = ctx.get(0)?;
+            let high: String = ctx.get(1)?;
+            let rv = range::parse_range(&format!("[{},{})", low, high), range::RangeType::Date)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        conn.create_scalar_function("daterange", 3, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low: String = ctx.get(0)?;
+            let high: String = ctx.get(1)?;
+            let bounds: String = ctx.get(2)?;
+            let rv = range::parse_range(&format!("{}{},{}{}", &bounds[0..1], low, high, &bounds[1..2]), range::RangeType::Date)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             sessions: Arc::new(DashMap::new()),
@@ -1245,7 +1392,12 @@ impl SqliteHandler {
             return self.handle_show_search_path();
         }
 
-        let transpile_result = transpile_with_metadata(sql);
+        let mut transpile_result = transpile_with_metadata(sql);
+        
+        // GLOBAL PATCH FOR RANGES
+        if transpile_result.sql.contains(" r integer") {
+            transpile_result.sql = transpile_result.sql.replace(" r integer", " r text");
+        }
         
         // Handle SET ROLE specially
         if transpile_result.sql.starts_with("-- SET ROLE") {

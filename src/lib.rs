@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod distinct_on;
 pub mod fts;
 pub mod plpgsql;
+pub mod range;
 pub mod rls;
 pub mod rls_inject;
 pub mod schema;
