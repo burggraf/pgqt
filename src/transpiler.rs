@@ -3,7 +3,7 @@ use pg_query::protobuf::{
     AConst, AExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
-    AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr,
+    AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt,
 };
 
 // RLS-related imports
@@ -186,6 +186,24 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             },
             NodeEnum::AlterTableStmt(ref alter_stmt) => {
                 let sql = reconstruct_alter_table_stmt(alter_stmt, ctx);
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None,
+                    referenced_tables: ctx.referenced_tables.clone(),
+                    operation_type: OperationType::DDL,
+                }
+            }
+            NodeEnum::DropStmt(ref drop_stmt) => {
+                let sql = reconstruct_drop_stmt(drop_stmt, ctx);
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None,
+                    referenced_tables: ctx.referenced_tables.clone(),
+                    operation_type: OperationType::DDL,
+                }
+            }
+            NodeEnum::IndexStmt(ref index_stmt) => {
+                let sql = reconstruct_index_stmt(index_stmt, ctx);
                 TranspileResult {
                     sql,
                     create_table_metadata: None,
@@ -1678,6 +1696,208 @@ fn reconstruct_alter_table_stmt(stmt: &AlterTableStmt, ctx: &mut TranspileContex
     format!("-- ALTER TABLE {} (non-RLS operation not yet supported)", table_name)
 }
 
+/// Reconstruct DROP statement for SQLite compatibility
+/// SQLite doesn't support CASCADE/RESTRICT in DROP statements
+fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::ObjectType;
+    
+    let remove_type = ObjectType::try_from(stmt.remove_type).unwrap_or(ObjectType::Undefined);
+    
+    // Determine the object type keyword
+    let type_keyword = match remove_type {
+        ObjectType::ObjectTable => "table",
+        ObjectType::ObjectIndex => "index",
+        ObjectType::ObjectView => "view",
+        ObjectType::ObjectTrigger => "trigger",
+        ObjectType::ObjectSchema => "schema",
+        ObjectType::ObjectSequence => "sequence",
+        ObjectType::ObjectDomain => "domain",
+        ObjectType::ObjectType => "type",
+        ObjectType::ObjectFunction => "function",
+        ObjectType::ObjectAggregate => "aggregate",
+        ObjectType::ObjectProcedure => "procedure",
+        ObjectType::ObjectExtension => "extension",
+        ObjectType::ObjectPolicy => "policy",
+        ObjectType::ObjectCollation => "collation",
+        ObjectType::ObjectConversion => "conversion",
+        ObjectType::ObjectOperator => "operator",
+        ObjectType::ObjectOpclass => "operator class",
+        ObjectType::ObjectOpfamily => "operator family",
+        ObjectType::ObjectLanguage => "language",
+        ObjectType::ObjectForeignServer => "server",
+        ObjectType::ObjectFdw => "foreign data wrapper",
+        ObjectType::ObjectForeignTable => "foreign table",
+        ObjectType::ObjectMatview => "materialized view",
+        ObjectType::ObjectEventTrigger => "event trigger",
+        ObjectType::ObjectPublication => "publication",
+        ObjectType::ObjectSubscription => "subscription",
+        ObjectType::ObjectStatisticExt => "statistics",
+        ObjectType::ObjectTablespace => "tablespace",
+        ObjectType::ObjectRole => "role",
+        _ => "table", // Default fallback
+    };
+    
+    // Extract object names from the objects list
+    let mut object_names: Vec<String> = Vec::new();
+    for obj in &stmt.objects {
+        if let Some(ref inner) = obj.node {
+            match inner {
+                NodeEnum::List(list) => {
+                    // Handle qualified names like schema.table
+                    let parts: Vec<String> = list
+                        .items
+                        .iter()
+                        .filter_map(|n| {
+                            if let Some(ref node) = n.node {
+                                if let NodeEnum::String(s) = node {
+                                    return Some(s.sval.to_lowercase());
+                                }
+                            }
+                            None
+                        })
+                        .collect();
+                    if !parts.is_empty() {
+                        object_names.push(parts.join("."));
+                        // Track referenced tables for DDL operations
+                        if remove_type == ObjectType::ObjectTable {
+                            ctx.referenced_tables.push(parts.last().unwrap().clone());
+                        }
+                    }
+                }
+                NodeEnum::String(s) => {
+                    object_names.push(s.sval.to_lowercase());
+                    if remove_type == ObjectType::ObjectTable {
+                        ctx.referenced_tables.push(s.sval.to_lowercase());
+                    }
+                }
+                NodeEnum::RangeVar(rv) => {
+                    let name = if rv.schemaname.is_empty() || rv.schemaname == "public" {
+                        rv.relname.to_lowercase()
+                    } else {
+                        format!("{}.{}", rv.schemaname.to_lowercase(), rv.relname.to_lowercase())
+                    };
+                    object_names.push(name);
+                    if remove_type == ObjectType::ObjectTable {
+                        ctx.referenced_tables.push(rv.relname.to_lowercase());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    if object_names.is_empty() {
+        return "-- DROP statement with no objects".to_string();
+    }
+    
+    // Build the DROP statement
+    // SQLite syntax: DROP [TABLE|INDEX|VIEW|TRIGGER] [IF EXISTS] name
+    // Note: SQLite doesn't support CASCADE/RESTRICT, so we ignore the behavior field
+    let if_exists = if stmt.missing_ok { " if exists " } else { " " };
+
+    format!(
+        "drop {}{}{}",
+        type_keyword,
+        if_exists,
+        object_names.join(", ")
+    )
+}
+
+/// Reconstruct CREATE INDEX statement for SQLite compatibility
+fn reconstruct_index_stmt(stmt: &IndexStmt, ctx: &mut TranspileContext) -> String {
+    let mut parts = Vec::new();
+
+    parts.push("create".to_string());
+
+    if stmt.unique {
+        parts.push("unique".to_string());
+    }
+
+    parts.push("index".to_string());
+
+    // SQLite supports IF NOT EXISTS since 3.8.0 (2013)
+    if stmt.if_not_exists {
+        parts.push("if not exists".to_string());
+    }
+
+    // Index name
+    let idx_name = stmt.idxname.to_lowercase();
+    parts.push(idx_name);
+
+    // ON table_name
+    if let Some(ref relation) = stmt.relation {
+        parts.push("on".to_string());
+        let table_name = if relation.schemaname.is_empty() || relation.schemaname == "public" {
+            relation.relname.to_lowercase()
+        } else {
+            format!("{}.{}", relation.schemaname.to_lowercase(), relation.relname.to_lowercase())
+        };
+        ctx.referenced_tables.push(relation.relname.to_lowercase());
+        parts.push(table_name);
+    }
+
+    // Index columns/expressions
+    if !stmt.index_params.is_empty() {
+        let params: Vec<String> = stmt
+            .index_params
+            .iter()
+            .filter_map(|n| {
+                if let Some(ref inner) = n.node {
+                    if let NodeEnum::IndexElem(ref elem) = inner {
+                        return Some(reconstruct_index_elem(elem, ctx));
+                    }
+                }
+                None
+            })
+            .collect();
+        parts.push(format!("({})", params.join(", ")));
+    }
+
+    // WHERE clause (partial index)
+    if let Some(ref where_clause) = stmt.where_clause {
+        let where_sql = reconstruct_node(where_clause, ctx);
+        if !where_sql.is_empty() {
+            parts.push("where".to_string());
+            parts.push(where_sql);
+        }
+    }
+
+    parts.join(" ")
+}
+
+/// Reconstruct an IndexElem (column in an index)
+fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::{SortByDir, SortByNulls};
+    
+    let mut parts = Vec::new();
+    
+    // Get the column name or expression
+    if !elem.name.is_empty() {
+        parts.push(elem.name.to_lowercase());
+    } else if let Some(ref expr) = elem.expr {
+        // Expression index
+        parts.push(reconstruct_node(expr, ctx));
+    }
+    
+    // Handle ordering (ASC/DESC)
+    let ordering = SortByDir::try_from(elem.ordering).unwrap_or(SortByDir::SortbyDefault);
+    match ordering {
+        SortByDir::SortbyAsc => parts.push("asc".to_string()),
+        SortByDir::SortbyDesc => parts.push("desc".to_string()),
+        _ => {}
+    }
+    
+    // Handle NULLS ordering
+    let nulls = SortByNulls::try_from(elem.nulls_ordering).unwrap_or(SortByNulls::SortbyNullsDefault);
+    match nulls {
+        SortByNulls::SortbyNullsFirst => parts.push("nulls first".to_string()),
+        SortByNulls::SortbyNullsLast => parts.push("nulls last".to_string()),
+        _ => {}
+    }
+    
+    parts.join(" ")
+}
+
 // RLS helper functions - not yet integrated into main transpilation pipeline
 #[allow(dead_code)]
 /// Reconstruct CREATE POLICY statement
@@ -2619,6 +2839,85 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
         parts.push("exclude ties".to_string());
     }
     // EXCLUDE NO OTHERS is the default, so we don't emit it
-    
+
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_drop_table_cascade() {
+        // SQLite doesn't support CASCADE, so it should be stripped
+        let result = transpile_with_metadata("DROP TABLE IF EXISTS test_jsonb CASCADE");
+        assert_eq!(result.sql, "drop table if exists test_jsonb");
+        assert_eq!(result.operation_type, OperationType::DDL);
+    }
+
+    #[test]
+    fn test_drop_table_restrict() {
+        // SQLite doesn't support RESTRICT, so it should be stripped
+        let result = transpile_with_metadata("DROP TABLE IF EXISTS my_table RESTRICT");
+        assert_eq!(result.sql, "drop table if exists my_table");
+    }
+
+    #[test]
+    fn test_drop_table_without_if_exists() {
+        let result = transpile_with_metadata("DROP TABLE my_table");
+        assert_eq!(result.sql, "drop table my_table");
+    }
+
+    #[test]
+    fn test_drop_index() {
+        let result = transpile_with_metadata("DROP INDEX IF EXISTS idx_test");
+        assert_eq!(result.sql, "drop index if exists idx_test");
+    }
+
+    #[test]
+    fn test_drop_view() {
+        let result = transpile_with_metadata("DROP VIEW IF EXISTS my_view CASCADE");
+        assert_eq!(result.sql, "drop view if exists my_view");
+    }
+
+    #[test]
+    fn test_drop_multiple_tables() {
+        let result = transpile_with_metadata("DROP TABLE table1, table2");
+        assert!(result.sql.contains("table1"));
+        assert!(result.sql.contains("table2"));
+    }
+
+    #[test]
+    fn test_create_index_if_not_exists() {
+        let result = transpile_with_metadata("CREATE INDEX IF NOT EXISTS idx_name ON my_table(column)");
+        assert!(result.sql.contains("create index if not exists idx_name"));
+        assert!(result.sql.contains("on my_table"));
+        assert!(result.sql.contains("(column)"));
+    }
+
+    #[test]
+    fn test_create_unique_index() {
+        let result = transpile_with_metadata("CREATE UNIQUE INDEX IF NOT EXISTS idx_unique ON users(email)");
+        println!("SQL: {:?}", result.sql);
+        assert!(result.sql.contains("create unique index if not exists idx_unique"));
+        assert!(result.sql.contains("on users"));
+        assert!(result.sql.contains("(email)"));
+    }
+
+    #[test]
+    fn test_create_index_with_where() {
+        let result = transpile_with_metadata("CREATE INDEX idx_active ON users(email) WHERE active = 1");
+        assert!(result.sql.contains("create index idx_active"));
+        assert!(result.sql.contains("on users"));
+        assert!(result.sql.contains("(email)"));
+        assert!(result.sql.contains("where"));
+    }
+
+    #[test]
+    fn test_create_table_if_not_exists() {
+        // This should still work via the existing CreateStmt handler
+        let result = transpile_with_metadata("CREATE TABLE IF NOT EXISTS my_table (id INTEGER PRIMARY KEY)");
+        assert!(result.sql.contains("create table"));
+        assert!(result.sql.contains("my_table"));
+    }
 }

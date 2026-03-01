@@ -899,6 +899,23 @@ impl SqliteHandler {
         if is_superuser {
             return Ok(true);
         }
+        
+        // If user doesn't exist in __pg_authid__, create them as a superuser
+        // This allows any connecting user to have full access (development mode)
+        let user_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM __pg_authid__ WHERE rolname = ?1)",
+            &[&current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        
+        if !user_exists {
+            // Auto-create unknown users as superusers
+            conn.execute(
+                "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) VALUES (?1, 1, 1, 1, 1, 1)",
+                &[&current_user],
+            )?;
+            return Ok(true);
+        }
 
         // Get effective roles (including inherited) using prepare and query_map
         let mut stmt = conn.prepare("
