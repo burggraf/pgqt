@@ -355,6 +355,50 @@ SELECT * FROM __pg_meta__ WHERE table_name = 'users';
 
 This enables 100% reversible migrations back to PostgreSQL.
 
+### System Catalogs (pg_catalog)
+
+PGlite Proxy provides comprehensive PostgreSQL-compatible system catalog views for full ORM support:
+
+```sql
+-- List all tables (like \dt in psql)
+SELECT * FROM pg_tables WHERE schemaname = 'public';
+
+-- List all columns for a table
+SELECT a.attname, t.typname, a.attnotnull
+FROM pg_attribute a
+JOIN pg_type t ON a.atttypid = t.oid
+JOIN pg_class c ON a.attrelid = c.oid
+WHERE c.relname = 'my_table';
+
+-- List all indexes
+SELECT * FROM pg_indexes WHERE tablename = 'my_table';
+
+-- Check database version
+SELECT setting FROM pg_settings WHERE name = 'server_version';
+```
+
+**Supported Catalog Views:**
+
+| View | Description |
+|------|-------------|
+| `pg_class` | Tables, indexes, views, sequences |
+| `pg_attribute` | Column definitions |
+| `pg_type` | Data types (100+ PostgreSQL types) |
+| `pg_namespace` | Schemas |
+| `pg_index` | Index metadata |
+| `pg_constraint` | Primary keys, foreign keys, unique constraints |
+| `pg_roles` / `pg_authid` | Users and roles |
+| `pg_database` | Database information |
+| `pg_proc` | Functions |
+| `pg_settings` | Server settings |
+| `pg_tables` | User-friendly table listing |
+| `pg_views` | User-friendly view listing |
+| `pg_indexes` | User-friendly index listing |
+| `pg_extension` | Installed extensions |
+| `pg_enum` | Enum values |
+
+For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
+
 ## Architecture
 
 ```
