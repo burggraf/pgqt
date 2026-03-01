@@ -50,9 +50,16 @@ python3 tests/array_e2e_test.py
 |-----------|----------|-------|---------|
 | Unit tests | `src/*.rs` (embedded) | ~270 | Test individual functions and modules |
 | Integration tests | `tests/*.rs` | ~200 | Test module interactions |
-| E2E tests | `tests/*_e2e_test.py` | 8 | Full wire protocol testing |
+| E2E tests | `tests/*_e2e_test.py` | 9 | Full wire protocol testing |
+
+**Current test files:**
+- Unit: Embedded in `src/array.rs`, `src/catalog.rs`, `src/distinct_on.rs`, `src/fts.rs`, `src/geo.rs`, `src/range.rs`, `src/rls.rs`, `src/rls_inject.rs`, `src/schema.rs`, `src/transpiler.rs`, `src/vector.rs`
+- Integration: `tests/array_tests.rs`, `tests/catalog_tests.rs`, `tests/distinct_on_tests.rs`, `tests/fts_integration_tests.rs`, `tests/integration_test.rs`, `tests/rls_integration_tests.rs`, `tests/schema_tests.rs`, `tests/transpiler_tests.rs`, `tests/vector_tests.rs`, `tests/window_tests.rs`
+- E2E: `tests/array_e2e_test.py`, `tests/distinct_on_e2e_test.py`, `tests/geo_e2e_test.py`, `tests/range_e2e_test.py`, `tests/rls_e2e_test.py`, `tests/schema_e2e_test.py`, `tests/vector_e2e_test.py`, `tests/window_e2e_test.py`
 
 ### Adding New Tests
+
+When adding a new feature, you MUST add corresponding tests. The test suite automatically discovers tests based on naming conventions.
 
 **Unit tests**: Add to the bottom of the source file:
 ```rust
@@ -66,6 +73,8 @@ mod tests {
     }
 }
 ```
+- Run with: `cargo test my_feature`
+- Automatically picked up by `run_tests.sh`
 
 **Integration tests**: Create `tests/my_feature_tests.rs`:
 ```rust
@@ -78,13 +87,79 @@ fn test_transpilation() {
     assert!(result.contains("expected"));
 }
 ```
+- File naming: `tests/<feature>_tests.rs`
+- Run with: `cargo test --test my_feature_tests`
+- Automatically picked up by `run_tests.sh` (any `tests/*.rs` file)
 
 **E2E tests**: Create `tests/my_feature_e2e_test.py`:
 ```python
 #!/usr/bin/env python3
+"""
+End-to-end tests for my feature.
+"""
+import subprocess
+import time
 import psycopg2
-# ... test implementation
+import os
+import sys
+import signal
+
+PROXY_HOST = "127.0.0.1"
+PROXY_PORT = 5434
+DB_PATH = "/tmp/test_myfeature_e2e.db"
+
+def start_proxy():
+    # ... see existing e2e tests for pattern
+    pass
+
+def stop_proxy(proc):
+    # ... see existing e2e tests for pattern
+    pass
+
+def test_my_feature():
+    """Test my feature through wire protocol."""
+    proc = start_proxy()
+    try:
+        conn = psycopg2.connect(
+            host=PROXY_HOST,
+            port=PROXY_PORT,
+            database="postgres",
+            user="postgres",
+            password="postgres"
+        )
+        cur = conn.cursor()
+        
+        # Test implementation
+        cur.execute("SELECT ...")
+        result = cur.fetchall()
+        assert result == expected
+        
+        cur.close()
+        conn.close()
+        print("test_my_feature: PASSED")
+    finally:
+        stop_proxy(proc)
+
+if __name__ == "__main__":
+    test_my_feature()
 ```
+- File naming: `tests/<feature>_e2e_test.py`
+- Must print "PASSED" on success
+- Run with: `python3 tests/my_feature_e2e_test.py`
+- Automatically picked up by `run_tests.sh` (any `tests/*_e2e_test.py` file)
+- Also picked up by `tests/run_all_e2e.py` unified runner
+
+### Test Discovery Summary
+
+The test suite discovers tests automatically:
+
+| Test Type | Discovery Pattern | Location |
+|-----------|------------------|----------|
+| Unit tests | `#[test]` functions in `#[cfg(test)]` modules | `src/*.rs` |
+| Integration tests | `tests/*.rs` files | `tests/` |
+| E2E tests | `tests/*_e2e_test.py` files | `tests/` |
+
+**No registry updates needed** - just create files following the naming conventions and they'll be picked up automatically.
 
 ## Critical Implementation Details
 
