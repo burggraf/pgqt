@@ -990,6 +990,7 @@ dependencies = [
  "clap",
  "dashmap",
  "futures",
+ "libc",
  "pg_query",
  "pgwire",
  "regex",

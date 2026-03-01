@@ -35,10 +35,16 @@ cargo install pglite-proxy
 
 ```bash
 # Start with defaults (test.db on port 5432)
-./target/release/pglite-proxy
+./target/release/postgresqlite
 
 # Or specify custom database and port
-PG_LITE_DB=myapp.db PG_LITE_PORT=5433 ./target/release/pglite-proxy
+PG_LITE_DB=myapp.db PG_LITE_PORT=5433 ./target/release/postgresqlite
+
+# Or use command-line options
+./target/release/postgresqlite --database myapp.db --port 5433
+
+# With output logging to files
+./target/release/postgresqlite -d myapp.db -o server.log -e errors.log
 ```
 
 ### Connecting
@@ -371,12 +377,57 @@ This enables 100% reversible migrations back to PostgreSQL.
 
 ## Configuration
 
+### Command-Line Options
+
+```
+postgresqlite [OPTIONS]
+
+Options:
+  -H, --host <HOST>              Host address to listen on [default: 127.0.0.1]
+  -p, --port <PORT>              Port to listen on [default: 5432]
+  -d, --database <DATABASE>      Path to the SQLite database file [default: test.db]
+  -o, --output <OUTPUT>          Where to send server output [default: STDOUT]
+  -e, --error-output <ERROR>     Where to send error output [default: <db>.error.log]
+  -h, --help                     Print help
+  -V, --version                  Print version
+```
+
+### Output Redirection
+
+The `--output` and `--error-output` options control where server messages are written:
+
+| Value | Description |
+|-------|-------------|
+| `STDOUT` | Send to standard output |
+| `STDERR` | Send to standard error |
+| `NULL` | Suppress output (discard) |
+| `<path>` | Append to file at the given path |
+
+**Examples:**
+
+```bash
+# Default: output to stdout, errors to myapp.db.error.log
+postgresqlite --database myapp.db
+
+# Log everything to files
+postgresqlite -d myapp.db -o /var/log/pglite/server.log -e /var/log/pglite/errors.log
+
+# Suppress server output, send errors to stderr
+postgresqlite -d myapp.db -o NULL -e STDERR
+
+# Swap output streams
+postgresqlite -d myapp.db -o STDERR -e STDOUT
+```
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PG_LITE_DB` | `test.db` | SQLite database file path |
+| `PG_LITE_HOST` | `127.0.0.1` | Host address to listen on |
 | `PG_LITE_PORT` | `5432` | TCP port to listen on |
+| `PG_LITE_DB` | `test.db` | SQLite database file path |
+| `PG_LITE_OUTPUT` | `STDOUT` | Server output destination |
+| `PG_LITE_ERROR_OUTPUT` | `<db>.error.log` | Error output destination |
 
 ### Programmatic Usage
 

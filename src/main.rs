@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -23,6 +24,32 @@ mod vector;
 mod schema;
 mod array;
 
+/// Output destination for server messages
+#[derive(Debug, Clone, PartialEq)]
+enum OutputDest {
+    /// Send to stdout
+    Stdout,
+    /// Send to stderr
+    Stderr,
+    /// Send to a file (path)
+    File(PathBuf),
+    /// Suppress output
+    Null,
+}
+
+impl std::str::FromStr for OutputDest {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "STDOUT" => Ok(OutputDest::Stdout),
+            "STDERR" => Ok(OutputDest::Stderr),
+            "NULL" | "/dev/null" => Ok(OutputDest::Null),
+            _ => Ok(OutputDest::File(PathBuf::from(s))),
+        }
+    }
+}
+
 /// PostgreSQL-to-SQLite proxy server
 #[derive(Parser, Debug)]
 #[command(name = "postgresqlite")]
@@ -40,6 +67,26 @@ struct Cli {
     /// Path to the SQLite database file
     #[arg(short, long, env = "PG_LITE_DB", default_value = "test.db")]
     database: String,
+
+    /// Where to send server output (info messages, query logs).
+    /// Options: STDOUT (default), STDERR, NULL (suppress), or a file path.
+    #[arg(short = 'o', long, env = "PG_LITE_OUTPUT", default_value = "STDOUT")]
+    output: OutputDest,
+
+    /// Where to send server error output (errors, warnings).
+    /// Options: STDERR, STDOUT, NULL (suppress), or a file path.
+    /// Default: <database>.error.log (e.g., test.db.error.log)
+    #[arg(short = 'e', long, env = "PG_LITE_ERROR_OUTPUT")]
+    error_output: Option<OutputDest>,
+}
+
+impl Cli {
+    /// Get the error output destination, defaulting to <database>.error.log
+    fn error_output_dest(&self) -> OutputDest {
+        self.error_output.clone().unwrap_or_else(|| {
+            OutputDest::File(PathBuf::from(format!("{}.error.log", self.database)))
+        })
+    }
 }
 
 use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
@@ -1361,11 +1408,16 @@ impl SimpleQueryHandler for SqliteHandler {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Set up output redirection
+    let error_dest = cli.error_output_dest();
+    setup_output_redirection(&cli.output, &error_dest)?;
+
     let addr = format!("{}:{}", cli.host, cli.port);
 
     let listener = TcpListener::bind(&addr).await?;
-    println!("Server listening on {}", addr);
-    println!("Using database: {}", cli.database);
+    log_output(&format!("Server listening on {}", addr));
+    log_output(&format!("Using database: {}", cli.database));
+    log_error(&format!("Error log started for database: {}", cli.database));
 
     let handler = Arc::new(SqliteHandler::new(&cli.database)?);
     let startup_handler = Arc::new(NoopStartupHandler);
@@ -1373,7 +1425,7 @@ async fn main() -> Result<()> {
 
     loop {
         let (incoming_socket, client_addr) = listener.accept().await?;
-        println!("New connection from {}", client_addr);
+        log_output(&format!("New connection from {}", client_addr));
 
         let handler = handler.clone();
         let startup_handler = startup_handler.clone();
@@ -1390,6 +1442,86 @@ async fn main() -> Result<()> {
             .await;
         });
     }
+}
+
+/// Set up output redirection based on CLI arguments
+fn setup_output_redirection(output: &OutputDest, error_output: &OutputDest) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::os::unix::io::AsRawFd;
+
+    // Handle stdout redirection
+    match output {
+        OutputDest::Stdout => {
+            // Keep stdout as is
+        }
+        OutputDest::Stderr => {
+            // Redirect stdout to stderr
+            unsafe {
+                libc::dup2(libc::STDERR_FILENO, libc::STDOUT_FILENO);
+            }
+        }
+        OutputDest::Null => {
+            // Redirect stdout to /dev/null
+            let null_file = OpenOptions::new()
+                .write(true)
+                .open("/dev/null")?;
+            unsafe {
+                libc::dup2(null_file.as_raw_fd(), libc::STDOUT_FILENO);
+            }
+        }
+        OutputDest::File(path) => {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+            unsafe {
+                libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
+            }
+        }
+    }
+
+    // Handle stderr redirection
+    match error_output {
+        OutputDest::Stderr => {
+            // Keep stderr as is
+        }
+        OutputDest::Stdout => {
+            // Redirect stderr to stdout
+            unsafe {
+                libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO);
+            }
+        }
+        OutputDest::Null => {
+            // Redirect stderr to /dev/null
+            let null_file = OpenOptions::new()
+                .write(true)
+                .open("/dev/null")?;
+            unsafe {
+                libc::dup2(null_file.as_raw_fd(), libc::STDERR_FILENO);
+            }
+        }
+        OutputDest::File(path) => {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+            unsafe {
+                libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Log a message to the configured output destination
+fn log_output(msg: &str) {
+    println!("{}", msg);
+}
+
+/// Log an error message to the configured error output destination
+fn log_error(msg: &str) {
+    eprintln!("{}", msg);
 }
 
 #[cfg(test)]
