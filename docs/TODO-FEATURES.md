@@ -56,7 +56,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 
 | Feature | Support | Difficulty | Comments / Strategy |
 | :--- | :---: | :---: | :--- |
-| **System Catalogs (`pg_catalog`)** | ⚠️ | Medium | Essential tables like `pg_class`, `pg_type`, `pg_attribute` are partially emulated for ORM support. |
+| **System Catalogs (`pg_catalog`)** | ✅ | Medium | Full implementation of pg_class, pg_type, pg_attribute, pg_index, pg_constraint, pg_tables, pg_views, pg_indexes, and more for complete ORM compatibility. |
 | **Shadow Catalog** | ✅ | - | Unique feature: `__pg_meta__` table preserves original PG types for reversibility. |
 | **Row-Level Security (RLS)** | ✅ | Medium | Implemented via AST injection. Supports CREATE POLICY, ALTER TABLE ENABLE/DISABLE RLS, PERMISSIVE (OR) and RESTRICTIVE (AND) policies, USING and WITH CHECK clauses. See [docs/RLS.md](./RLS.md). |
 | **Stored Procedures (PL/pgSQL)** | ❌ | High | Phase 3 Roadmap: Considering a Lua-based runtime to emulate procedural blocks. |

@@ -92,7 +92,7 @@ impl Cli {
     }
 }
 
-use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
+use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata, populate_pg_attribute, populate_pg_index, populate_pg_constraint};
 use transpiler::transpile_with_metadata;
 use schema::{SchemaManager, SearchPath};
 
@@ -1532,6 +1532,11 @@ impl SqliteHandler {
                 ).unwrap_or(10); // Default to postgres (OID 10)
                 
                 store_relation_metadata(&conn, &metadata.table_name, owner_oid)?;
+                
+                // Populate pg_catalog tables for ORM compatibility
+                catalog::populate_pg_attribute(&conn, &metadata.table_name)?;
+                catalog::populate_pg_index(&conn)?;
+                catalog::populate_pg_constraint(&conn)?;
             }
 
             Ok(result)
