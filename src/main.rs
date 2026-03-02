@@ -91,7 +91,7 @@ impl Cli {
     }
 }
 
-use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata, populate_pg_attribute, populate_pg_index, populate_pg_constraint};
+use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
 use transpiler::transpile_with_metadata;
 use schema::{SchemaManager, SearchPath};
 
@@ -674,7 +674,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             crate::array::array_append(&arr, &elem)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
@@ -754,7 +753,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let arr: String = ctx.get(1)?;
             crate::array::array_prepend(&elem, &arr)
@@ -768,7 +766,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let right = match ctx.get_raw(1) {
                 rusqlite::types::ValueRef::Integer(i) => i.to_string(),
@@ -776,7 +773,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             crate::array::array_cat(&left, &right)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
@@ -790,7 +786,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             crate::array::array_remove(&arr, &elem)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
@@ -804,7 +799,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let new = match ctx.get_raw(2) {
                 rusqlite::types::ValueRef::Integer(i) => i.to_string(),
@@ -812,7 +806,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             crate::array::array_replace(&arr, &old, &new)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
@@ -885,7 +878,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             match crate::array::array_position_fn(&arr, &elem, None) {
                 Ok(Some(pos)) => Ok(pos),
@@ -902,7 +894,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let start = match ctx.get_raw(2) {
                 rusqlite::types::ValueRef::Integer(i) => i as i32,
@@ -923,7 +914,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             crate::array::array_positions_fn(&arr, &elem)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
@@ -967,7 +957,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let dimensions: String = ctx.get(1)?;
             crate::array::array_fill_fn(&value, &dimensions, None)
@@ -981,7 +970,6 @@ impl SqliteHandler {
                 rusqlite::types::ValueRef::Text(s) => std::str::from_utf8(s).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Blob(b) => std::str::from_utf8(b).unwrap_or("").to_string(),
                 rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                _ => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Invalid parameter type")))),
             };
             let dimensions: String = ctx.get(1)?;
             let lower_bounds: String = ctx.get(2)?;
