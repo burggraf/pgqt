@@ -89,29 +89,22 @@ run_e2e_tests() {
         return
     fi
     
-    # Note: E2E tests use dynamic port allocation via e2e_helper.py
-    # Each test finds an available port automatically
-    for test_file in tests/*_e2e_test.py; do
-        if [ -f "$test_file" ]; then
-            local test_name=$(basename "$test_file" .py)
-            echo -n "Testing $test_name... "
-            
-            # Each e2e test manages its own proxy server with dynamic port
-            if python3 "$test_file" 2>&1 | grep -q "PASSED\|All tests passed"; then
-                echo -e "${GREEN}✓${NC}"
-                E2E_PASSED=$((E2E_PASSED + 1))
-            else
-                echo -e "${RED}✗${NC}"
-                E2E_FAILED=$((E2E_FAILED + 1))
-            fi
-        fi
-    done
+    # Use unified runner to avoid port conflicts
+    echo "Using unified E2E test runner (tests/run_all_e2e.py)..."
     echo ""
     
-    if [ $E2E_FAILED -gt 0 ]; then
-        echo -e "${YELLOW}Note: E2E tests require the proxy to be built (cargo build --release)${NC}"
-        echo ""
+    if python3 tests/run_all_e2e.py 2>&1 | grep -q "All tests passed"; then
+        E2E_PASSED=9
+        E2E_FAILED=0
+        echo -e "${GREEN}✓ All E2E tests passed${NC}"
+    else
+        # Count passed/failed from output
+        E2E_PASSED=$(python3 tests/run_all_e2e.py 2>&1 | grep "Total:" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
+        E2E_FAILED=$(python3 tests/run_all_e2e.py 2>&1 | grep "Total:" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
+        if [ -z "$E2E_PASSED" ]; then E2E_PASSED=0; fi
+        if [ -z "$E2E_FAILED" ]; then E2E_FAILED=0; fi
     fi
+    echo ""
 }
 
 # Function to print summary

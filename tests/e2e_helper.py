@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 E2E Test Helper Module
 
@@ -17,7 +16,6 @@ import tempfile
 import psycopg2
 from typing import Optional, Tuple
 
-
 def find_free_port(start_port: int = 5432, max_port: int = 5500) -> int:
     """Find a free port in the given range."""
     for port in range(start_port, max_port):
@@ -29,17 +27,40 @@ def find_free_port(start_port: int = 5432, max_port: int = 5500) -> int:
                 continue
     raise RuntimeError(f"No free ports found in range {start_port}-{max_port}")
 
-
 class ProxyManager:
     """Manages the PostgreSQLite proxy lifecycle for E2E tests."""
     
     def __init__(self, db_path: Optional[str] = None, port: Optional[int] = None):
+        # Check if we should use an existing proxy (from run_all_e2e.py)
+        self.use_existing = False
+        self.existing_port = None
+        self.existing_host = "127.0.0.1"
+        
+        if "PROXY_HOST" in os.environ and "PROXY_PORT" in os.environ:
+            # Running under run_all_e2e.py - use existing proxy
+            self.use_existing = True
+            self.existing_host = os.environ["PROXY_HOST"]
+            self.existing_port = int(os.environ["PROXY_PORT"])
+            self.port = self.existing_port
+            self.db_path = None
+            return
+        
+        # Normal mode - start our own proxy
         self.db_path = db_path or tempfile.mktemp(suffix='.db', prefix='pglite_e2e_')
         self.port = port or find_free_port()
         self.process: Optional[subprocess.Popen] = None
         
     def start(self, timeout: int = 30) -> bool:
         """Start the proxy server."""
+        if self.use_existing:
+            # Just verify the existing proxy is ready
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                if self._is_ready():
+                    return True
+                time.sleep(0.5)
+            return False
+        
         # Clean up old database if exists
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
@@ -74,7 +95,7 @@ class ProxyManager:
         """Check if the proxy is ready to accept connections."""
         try:
             conn = psycopg2.connect(
-                host="127.0.0.1",
+                host=self.existing_host if self.use_existing else "127.0.0.1",
                 port=self.port,
                 database="postgres",
                 user="postgres",
@@ -88,6 +109,10 @@ class ProxyManager:
     
     def stop(self, timeout: int = 5):
         """Stop the proxy server."""
+        if self.use_existing:
+            # Don't stop the proxy when using existing one
+            return
+        
         if self.process:
             try:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
@@ -100,7 +125,7 @@ class ProxyManager:
             self.process = None
         
         # Clean up database
-        if os.path.exists(self.db_path):
+        if self.db_path and os.path.exists(self.db_path):
             try:
                 os.remove(self.db_path)
             except:
@@ -108,13 +133,15 @@ class ProxyManager:
     
     def get_connection(self, database: str = "postgres"):
         """Get a database connection."""
-        return psycopg2.connect(
-            host="127.0.0.1",
+        conn = psycopg2.connect(
+            host=self.existing_host if self.use_existing else "127.0.0.1",
             port=self.port,
             database=database,
             user="postgres",
             password="postgres"
         )
+        conn.autocommit = True
+        return conn
     
     def __enter__(self):
         if not self.start():
@@ -124,7 +151,6 @@ class ProxyManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         return False
-
 
 def run_e2e_test(test_name: str, test_func, timeout: int = 60):
     """

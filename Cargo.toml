@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 pgwire = "0.38"
-rusqlite = { version = "0.31", features = ["bundled", "column_decltype", "functions"] }
+rusqlite = { version = "0.38", features = ["bundled", "column_decltype", "functions", "cache"] }
 pg_query = "6.1"
 anyhow = "1.0"
 dashmap = "6.1.0"
