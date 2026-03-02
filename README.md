@@ -1,6 +1,6 @@
 # PostgreSQLite / pgqt
 
-## pronounced P.G.Q.T. (pg Cutie)
+### pronounced P.G.Q.T. (pg Cutie)
 
 A PostgreSQL wire-compatible proxy for SQLite that allows you to use standard PostgreSQL clients, tools, and ORMs with a local SQLite database file.
 
