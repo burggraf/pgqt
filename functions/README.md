@@ -4,44 +4,40 @@
 
 This directory contains comprehensive documentation for implementing PostgreSQL-compatible user-defined functions in PostgreSQLite.
 
-## 📚 Documentation (6 files, ~94KB total)
+## 📚 Core Documentation
 
-### Core Implementation Documents
-
-1. **[FUNCTION_INDEX.md](FUNCTION_INDEX.md)** ⭐ **START HERE**
+### 1. **[FUNCTION_INDEX.md](FUNCTION_INDEX.md)** ⭐ **START HERE**
    - Complete navigation guide
    - Quick reference table
    - Implementation roadmap
    - Status tracking
 
-2. **[FUNCTION_SUMMARY.md](FUNCTION_SUMMARY.md)**
+### 2. **[FUNCTION_SUMMARY.md](FUNCTION_SUMMARY.md)**
    - Executive summary
    - Goals and deliverables
    - Technical architecture
    - Success criteria
-   - Next steps
 
-3. **[FUNCTION_IMPLEMENTATION_PLAN.md](FUNCTION_IMPLEMENTATION_PLAN.md)**
+### 3. **[FUNCTION_IMPLEMENTATION_PLAN.md](FUNCTION_IMPLEMENTATION_PLAN.md)**
    - Complete architectural specification
    - Phase 1: SQL functions (detailed)
    - Phase 2: PL/pgSQL via Lua (planned)
    - Testing strategy
-   - Timeline and risks
 
-4. **[FUNCTION_QUICK_START.md](FUNCTION_QUICK_START.md)**
+### 4. **[FUNCTION_QUICK_START.md](FUNCTION_QUICK_START.md)**
    - Step-by-step implementation checklist
    - File changes required
    - Example test case
    - Common pitfalls
 
-5. **[FUNCTION_CODE_EXAMPLES.md](FUNCTION_CODE_EXAMPLES.md)**
+### 5. **[FUNCTION_CODE_EXAMPLES.md](FUNCTION_CODE_EXAMPLES.md)**
    - Complete code implementations
    - Catalog schema
    - Function execution engine
    - CREATE FUNCTION parsing
    - Integration examples
 
-6. **[FUNCTION_ARCHITECTURE.md](FUNCTION_ARCHITECTURE.md)**
+### 6. **[FUNCTION_ARCHITECTURE.md](FUNCTION_ARCHITECTURE.md)**
    - Visual architecture diagrams
    - Data flow diagrams
    - Component interactions
@@ -49,57 +45,46 @@ This directory contains comprehensive documentation for implementing PostgreSQL-
 
 ## 🚀 Quick Start
 
-### 1. Read the Index
-Start with **[FUNCTION_INDEX.md](FUNCTION_INDEX.md)** to understand the documentation structure.
+1. **Read the Index** - Start with [FUNCTION_INDEX.md](FUNCTION_INDEX.md)
+2. **Understand the Goal** - Read [FUNCTION_SUMMARY.md](FUNCTION_SUMMARY.md)
+3. **Follow the Plan** - Use [FUNCTION_QUICK_START.md](FUNCTION_QUICK_START.md) as your checklist
+4. **Write Code** - Reference [FUNCTION_CODE_EXAMPLES.md](FUNCTION_CODE_EXAMPLES.md)
+5. **Understand Architecture** - Review [FUNCTION_ARCHITECTURE.md](FUNCTION_ARCHITECTURE.md)
+6. **Deep Dive** - Consult [FUNCTION_IMPLEMENTATION_PLAN.md](FUNCTION_IMPLEMENTATION_PLAN.md)
 
-### 2. Understand the Goal
-Read **[FUNCTION_SUMMARY.md](FUNCTION_SUMMARY.md)** for project overview and goals.
-
-### 3. Follow the Plan
-Use **[FUNCTION_QUICK_START.md](FUNCTION_QUICK_START.md)** as your implementation checklist.
-
-### 4. Write Code
-Reference **[FUNCTION_CODE_EXAMPLES.md](FUNCTION_CODE_EXAMPLES.md)** for actual implementation code.
-
-### 5. Understand Architecture
-Use **[FUNCTION_ARCHITECTURE.md](FUNCTION_ARCHITECTURE.md)** for visual understanding of data flows.
-
-### 6. Deep Dive
-Consult **[FUNCTION_IMPLEMENTATION_PLAN.md](FUNCTION_IMPLEMENTATION_PLAN.md)** for complete specification details.
-
-## 📋 Implementation Checklist
+## 📋 Implementation Phases
 
 ### Phase 1: SQL Functions (Current Focus)
 
-- [ ] **Week 1: Catalog**
-  - [ ] Add `__pg_functions__` table to `src/catalog.rs`
-  - [ ] Implement `FunctionMetadata` struct
-  - [ ] Implement storage APIs (store, get, drop)
+**Week 1: Catalog**
+- Add `__pg_functions__` table to `src/catalog.rs`
+- Implement `FunctionMetadata` struct
+- Implement storage APIs (store, get, drop)
 
-- [ ] **Week 2: Execution**
-  - [ ] Create `src/functions.rs`
-  - [ ] Implement parameter substitution
-  - [ ] Implement function execution engine
-  - [ ] Write unit tests
+**Week 2: Execution**
+- Create `src/functions.rs`
+- Implement parameter substitution
+- Implement function execution engine
+- Write unit tests
 
-- [ ] **Week 3: Integration**
-  - [ ] Add CREATE FUNCTION parsing to `src/transpiler.rs`
-  - [ ] Integrate with `src/main.rs`
-  - [ ] Write integration tests
-  - [ ] Write E2E tests
+**Week 3: Integration**
+- Add CREATE FUNCTION parsing to `src/transpiler.rs`
+- Integrate with `src/main.rs`
+- Write integration tests
+- Write E2E tests
 
-- [ ] **Week 4: Polish**
-  - [ ] Review and refactor
-  - [ ] Optimize performance
-  - [ ] Add remaining features
-  - [ ] Write user documentation
+**Week 4: Polish**
+- Review and refactor
+- Optimize performance
+- Add remaining features
+- Write user documentation
 
 ### Phase 2: PL/pgSQL Functions (Future)
 
-- [ ] PL/pgSQL parser
-- [ ] Lua transpiler
-- [ ] Lua runtime
-- [ ] Trigger support
+- PL/pgSQL parser
+- Lua transpiler
+- Lua runtime
+- Trigger support
 
 ## 🎯 Key Features
 
@@ -123,7 +108,7 @@ Consult **[FUNCTION_IMPLEMENTATION_PLAN.md](FUNCTION_IMPLEMENTATION_PLAN.md)** f
 
 | Component | Status |
 |-----------|--------|
-| Documentation | ✅ Complete (6 files) |
+| Documentation | ✅ Complete |
 | Phase 1 Design | ✅ Complete |
 | Phase 2 Design | ✅ Planned |
 | Implementation | ⏳ Ready to start |
@@ -215,25 +200,13 @@ Functions are stored in the `__pg_functions__` table with metadata including:
 
 ## 🤝 Getting Started
 
-1. **Read FUNCTION_INDEX.md** - Understand the documentation
+1. **Read [FUNCTION_INDEX.md](FUNCTION_INDEX.md)** - Understand the documentation
 2. **Create a worktree**: `git worktree add .worktrees/functions feature/functions`
 3. **Start with catalog**: Implement `__pg_functions__` table
 4. **Build execution engine**: Create `src/functions.rs`
 5. **Add parsing**: Extend `src/transpiler.rs`
 6. **Integrate**: Modify `src/main.rs`
 7. **Test**: Write and run all test types
-
-## 📝 Document Versions
-
-All documents created on: **March 2, 2026**
-
-- FUNCTION_INDEX.md: v1.0
-- FUNCTION_SUMMARY.md: v1.0
-- FUNCTION_IMPLEMENTATION_PLAN.md: v1.0
-- FUNCTION_QUICK_START.md: v1.0
-- FUNCTION_CODE_EXAMPLES.md: v1.0
-- FUNCTION_ARCHITECTURE.md: v1.0
-- README.md: v1.0 (this file)
 
 ---
 
