@@ -1,9 +1,10 @@
 # PostgreSQLite / pgqt
+
 ## pronounced P.G.Q.T. (pg Cutie)
 
-![pgqt](pgqt.png)
-
 A PostgreSQL wire-compatible proxy for SQLite that allows you to use standard PostgreSQL clients, tools, and ORMs with a local SQLite database file.
+
+![pgqt](pgqt.png)
 
 ## Overview
 
@@ -68,42 +69,42 @@ postgresql://postgres@127.0.0.1:5432/test.db
 
 ### Type Mapping
 
-| PostgreSQL Type | SQLite Storage | Original Type Preserved |
-|----------------|----------------|------------------------|
-| **Serial Types** |||
-| SERIAL, BIGSERIAL, SMALLSERIAL | INTEGER PRIMARY KEY AUTOINCREMENT | ✅ |
-| **Integer Types** |||
-| INTEGER, BIGINT, SMALLINT, INT2/4/8 | INTEGER | ✅ |
-| **Floating Point** |||
-| REAL, FLOAT4, FLOAT8, DOUBLE PRECISION | REAL | ✅ |
-| NUMERIC, DECIMAL, MONEY | REAL | ✅ |
-| **Character/String** |||
-| VARCHAR(n), CHAR(n), TEXT | TEXT | ✅ |
-| **Binary** |||
-| BYTEA | BLOB | ✅ |
-| **Boolean** |||
-| BOOLEAN, BOOL | INTEGER | ✅ |
-| **Date/Time** |||
-| TIMESTAMP [WITH/WITHOUT TIME ZONE], DATE, TIME | TEXT | ✅ |
-| INTERVAL | TEXT | ✅ |
-| **JSON** |||
-| JSON, JSONB | TEXT | ✅ |
-| **Network Address** |||
-| INET, CIDR, MACADDR, MACADDR8 | TEXT | ✅ |
-| **Geometric** |||
-| POINT, LINE, LSEG, BOX, PATH, POLYGON, CIRCLE | TEXT | ✅ |
-| **Range Types** |||
-| INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE | TEXT | ✅ |
-| **Full-Text Search** |||
-| TSVECTOR, TSQUERY | TEXT | ✅ |
-| **Vector Search** |||
-| VECTOR(N) | TEXT (JSON) | ✅ |
-| **Other** |||
-| UUID | TEXT | ✅ |
-| BIT, VARBIT | TEXT | ✅ |
-| XML | TEXT | ✅ |
-| ARRAY types (INT[], TEXT[], etc.) | TEXT | ✅ |
-| ENUM, DOMAIN | TEXT | ✅ |
+| PostgreSQL Type                                               | SQLite Storage                    | Original Type Preserved |
+| ------------------------------------------------------------- | --------------------------------- | ----------------------- |
+| **Serial Types**                                              |                                   |                         |
+| SERIAL, BIGSERIAL, SMALLSERIAL                                | INTEGER PRIMARY KEY AUTOINCREMENT | ✅                      |
+| **Integer Types**                                             |                                   |                         |
+| INTEGER, BIGINT, SMALLINT, INT2/4/8                           | INTEGER                           | ✅                      |
+| **Floating Point**                                            |                                   |                         |
+| REAL, FLOAT4, FLOAT8, DOUBLE PRECISION                        | REAL                              | ✅                      |
+| NUMERIC, DECIMAL, MONEY                                       | REAL                              | ✅                      |
+| **Character/String**                                          |                                   |                         |
+| VARCHAR(n), CHAR(n), TEXT                                     | TEXT                              | ✅                      |
+| **Binary**                                                    |                                   |                         |
+| BYTEA                                                         | BLOB                              | ✅                      |
+| **Boolean**                                                   |                                   |                         |
+| BOOLEAN, BOOL                                                 | INTEGER                           | ✅                      |
+| **Date/Time**                                                 |                                   |                         |
+| TIMESTAMP [WITH/WITHOUT TIME ZONE], DATE, TIME                | TEXT                              | ✅                      |
+| INTERVAL                                                      | TEXT                              | ✅                      |
+| **JSON**                                                      |                                   |                         |
+| JSON, JSONB                                                   | TEXT                              | ✅                      |
+| **Network Address**                                           |                                   |                         |
+| INET, CIDR, MACADDR, MACADDR8                                 | TEXT                              | ✅                      |
+| **Geometric**                                                 |                                   |                         |
+| POINT, LINE, LSEG, BOX, PATH, POLYGON, CIRCLE                 | TEXT                              | ✅                      |
+| **Range Types**                                               |                                   |                         |
+| INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE | TEXT                              | ✅                      |
+| **Full-Text Search**                                          |                                   |                         |
+| TSVECTOR, TSQUERY                                             | TEXT                              | ✅                      |
+| **Vector Search**                                             |                                   |                         |
+| VECTOR(N)                                                     | TEXT (JSON)                       | ✅                      |
+| **Other**                                                     |                                   |                         |
+| UUID                                                          | TEXT                              | ✅                      |
+| BIT, VARBIT                                                   | TEXT                              | ✅                      |
+| XML                                                           | TEXT                              | ✅                      |
+| ARRAY types (INT[], TEXT[], etc.)                             | TEXT                              | ✅                      |
+| ENUM, DOMAIN                                                  | TEXT                              | ✅                      |
 
 ### SQL Transpilation
 
@@ -241,6 +242,7 @@ The proxy enforces permissions on all DML operations:
 - **DDL**: Requires superuser or table ownership
 
 **Permission Resolution:**
+
 1. Superusers bypass all permission checks
 2. Table owners have implicit all privileges
 3. Privileges are inherited through role membership
@@ -261,8 +263,8 @@ SELECT * FROM pg_auth_members;
 SELECT * FROM has_table_privilege('app_user', 'users', 'SELECT');
 
 -- View table ownership
-SELECT relname, rolname as owner 
-FROM pg_class c 
+SELECT relname, rolname as owner
+FROM pg_class c
 JOIN pg_roles r ON c.relowner = r.oid;
 ```
 
@@ -384,23 +386,23 @@ SELECT setting FROM pg_settings WHERE name = 'server_version';
 
 **Supported Catalog Views:**
 
-| View | Description |
-|------|-------------|
-| `pg_class` | Tables, indexes, views, sequences |
-| `pg_attribute` | Column definitions |
-| `pg_type` | Data types (100+ PostgreSQL types) |
-| `pg_namespace` | Schemas |
-| `pg_index` | Index metadata |
-| `pg_constraint` | Primary keys, foreign keys, unique constraints |
-| `pg_roles` / `pg_authid` | Users and roles |
-| `pg_database` | Database information |
-| `pg_proc` | Functions |
-| `pg_settings` | Server settings |
-| `pg_tables` | User-friendly table listing |
-| `pg_views` | User-friendly view listing |
-| `pg_indexes` | User-friendly index listing |
-| `pg_extension` | Installed extensions |
-| `pg_enum` | Enum values |
+| View                     | Description                                    |
+| ------------------------ | ---------------------------------------------- |
+| `pg_class`               | Tables, indexes, views, sequences              |
+| `pg_attribute`           | Column definitions                             |
+| `pg_type`                | Data types (100+ PostgreSQL types)             |
+| `pg_namespace`           | Schemas                                        |
+| `pg_index`               | Index metadata                                 |
+| `pg_constraint`          | Primary keys, foreign keys, unique constraints |
+| `pg_roles` / `pg_authid` | Users and roles                                |
+| `pg_database`            | Database information                           |
+| `pg_proc`                | Functions                                      |
+| `pg_settings`            | Server settings                                |
+| `pg_tables`              | User-friendly table listing                    |
+| `pg_views`               | User-friendly view listing                     |
+| `pg_indexes`             | User-friendly index listing                    |
+| `pg_extension`           | Installed extensions                           |
+| `pg_enum`                | Enum values                                    |
 
 For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
 
@@ -447,11 +449,11 @@ Options:
 
 The `--output` and `--error-output` options control where server messages are written:
 
-| Value | Description |
-|-------|-------------|
-| `STDOUT` | Send to standard output |
-| `STDERR` | Send to standard error |
-| `NULL` | Suppress output (discard) |
+| Value    | Description                      |
+| -------- | -------------------------------- |
+| `STDOUT` | Send to standard output          |
+| `STDERR` | Send to standard error           |
+| `NULL`   | Suppress output (discard)        |
 | `<path>` | Append to file at the given path |
 
 **Examples:**
@@ -472,13 +474,13 @@ postgresqlite -d myapp.db -o STDERR -e STDOUT
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PG_LITE_HOST` | `127.0.0.1` | Host address to listen on |
-| `PG_LITE_PORT` | `5432` | TCP port to listen on |
-| `PG_LITE_DB` | `test.db` | SQLite database file path |
-| `PG_LITE_OUTPUT` | `STDOUT` | Server output destination |
-| `PG_LITE_ERROR_OUTPUT` | `<db>.error.log` | Error output destination |
+| Variable               | Default          | Description               |
+| ---------------------- | ---------------- | ------------------------- |
+| `PG_LITE_HOST`         | `127.0.0.1`      | Host address to listen on |
+| `PG_LITE_PORT`         | `5432`           | TCP port to listen on     |
+| `PG_LITE_DB`           | `test.db`        | SQLite database file path |
+| `PG_LITE_OUTPUT`       | `STDOUT`         | Server output destination |
+| `PG_LITE_ERROR_OUTPUT` | `<db>.error.log` | Error output destination  |
 
 ### Programmatic Usage
 
@@ -505,12 +507,12 @@ CREATE TABLE users (
 );
 
 -- Insert data
-INSERT INTO users (email, name, metadata) 
+INSERT INTO users (email, name, metadata)
 VALUES ('alice@example.com', 'Alice', '{"role": "admin"}');
 
 -- Query with PostgreSQL syntax
-SELECT * FROM users 
-WHERE email ~~ '%@example.com' 
+SELECT * FROM users
+WHERE email ~~ '%@example.com'
   AND created_at > now() - interval '1 day';
 
 -- Update
@@ -549,17 +551,17 @@ model User {
 
 ```typescript
 // data-source.ts
-import { DataSource } from "typeorm";
+import { DataSource } from 'typeorm'
 
 export const AppDataSource = new DataSource({
-  type: "postgres",
-  host: "127.0.0.1",
-  port: 5432,
-  username: "postgres",
-  database: "myapp.db",
-  entities: ["src/entity/**/*.ts"],
-  synchronize: true,
-});
+	type: 'postgres',
+	host: '127.0.0.1',
+	port: 5432,
+	username: 'postgres',
+	database: 'myapp.db',
+	entities: ['src/entity/**/*.ts'],
+	synchronize: true,
+})
 ```
 
 ### Migration Example
@@ -634,7 +636,7 @@ CREATE TABLE articles (
 );
 
 -- Search using @@ operator
-SELECT * FROM articles 
+SELECT * FROM articles
 WHERE search_vector @@ to_tsquery('postgresql & database');
 
 -- Search with ranking
@@ -653,6 +655,7 @@ FROM articles;
 ```
 
 **Supported FTS Functions:**
+
 - `to_tsvector([config,] text)` - Convert text to tsvector
 - `to_tsquery([config,] text)` - Convert text to tsquery
 - `plainto_tsquery([config,] text)` - Plain text to tsquery
@@ -664,6 +667,7 @@ FROM articles;
 - `strip(tsvector)` - Remove positions
 
 **Supported Operators:**
+
 - `@@` - Match operator
 - `&`, `|`, `!` - Boolean operators in tsquery
 - `<->` - Phrase search
@@ -705,11 +709,13 @@ SELECT array_to_string(tags, ', ') FROM products;
 ```
 
 **Supported Array Operators:**
+
 - `&&` - Overlap (any element in common)
 - `@>` - Contains (left contains all of right)
 - `<@` - Contained by (left is subset of right)
 
 **Supported Array Functions:**
+
 - `array_append(arr, elem)`, `array_prepend(elem, arr)`
 - `array_cat(arr1, arr2)`, `array_remove(arr, elem)`, `array_replace(arr, old, new)`
 - `array_length(arr, dim)`, `array_lower(arr, dim)`, `array_upper(arr, dim)`
@@ -744,18 +750,21 @@ LIMIT 5;
 ```
 
 **Supported Distance Functions:**
+
 - `l2_distance(a, b)` / `vector_l2_distance(a, b)` - L2 (Euclidean) distance
 - `cosine_distance(a, b)` / `vector_cosine_distance(a, b)` - Cosine distance
 - `inner_product(a, b)` / `vector_inner_product(a, b)` - Inner product
 - `l1_distance(a, b)` / `vector_l1_distance(a, b)` - L1 (Manhattan) distance
 
 **Supported Operators:**
+
 - `<->` - L2 distance
 - `<=>` - Cosine distance
 - `<#>` - Inner product
 - `<+>` - L1 distance
 
 **Utility Functions:**
+
 - `vector_dims(vector)` - Get number of dimensions
 - `l2_norm(vector)` - Calculate L2 norm
 - `l2_normalize(vector)` - Normalize to unit vector
@@ -777,7 +786,7 @@ FROM employees;
 
 -- Running total
 SELECT order_date, amount,
-       sum(amount) OVER (ORDER BY order_date 
+       sum(amount) OVER (ORDER BY order_date
                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_total
 FROM orders;
 
@@ -793,14 +802,17 @@ FROM stocks;
 ```
 
 **Supported Window Functions:**
+
 - `row_number()`, `rank()`, `dense_rank()`, `percent_rank()`, `cume_dist()`, `ntile(n)`
 - `lag(value [, offset [, default]])`, `lead(value [, offset [, default]])`
 - `first_value(value)`, `last_value(value)`, `nth_value(value, n)`
 
 **Aggregate Functions as Window Functions:**
+
 - `sum()`, `avg()`, `count()`, `min()`, `max()`, and all other aggregate functions
 
 **Frame Specifications:**
+
 - `ROWS`, `RANGE`, `GROUPS` frame modes
 - `UNBOUNDED PRECEDING/FOLLOWING`, `CURRENT ROW`, `offset PRECEDING/FOLLOWING` bounds
 - Full `BETWEEN ... AND ...` syntax
@@ -824,6 +836,7 @@ ORDER BY department, role, salary DESC;
 ```
 
 **Supported DISTINCT ON Features:**
+
 - Single and multiple column expressions
 - Expression-based DISTINCT ON (e.g., `DISTINCT ON (DATE(created_at))`)
 - ORDER BY with different sort columns for tie-breaking
@@ -833,6 +846,7 @@ ORDER BY department, role, salary DESC;
 
 **Transformation:**
 `SELECT DISTINCT ON (a) x, y FROM t ORDER BY a, b` is transformed to:
+
 ```sql
 SELECT x, y FROM (
     SELECT x, y, ROW_NUMBER() OVER (PARTITION BY a ORDER BY a, b) as __rn
@@ -849,6 +863,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 ## Roadmap
 
 ### Phase 3 (In Progress)
+
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [x] **Schemas (Namespaces)** - Full schema support using SQLite ATTACH DATABASE
 - [x] **Window Functions** - Full support for all PostgreSQL window functions with frame specifications
@@ -858,6 +873,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
 
 ### Phase 4 (In Progress)
+
 - [x] **Vector Search** - pgvector-compatible vector search for embeddings
 - [x] **Geometric Types** - 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
 - [ ] Connection pooling and load balancing
