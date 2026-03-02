@@ -26,6 +26,7 @@ mod schema;
 mod array;
 mod range;
 mod geo;
+mod functions;
 
 /// Output destination for server messages
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +112,8 @@ struct SqliteHandler {
     sessions: Arc<DashMap<u32, SessionContext>>,
     schema_manager: SchemaManager,
     copy_handler: copy::CopyHandler,
+    // Registry of user-defined functions for runtime interception
+    functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>,
 }
 
 /// Factory for creating pgwire protocol handlers
@@ -1201,6 +1204,7 @@ impl SqliteHandler {
             sessions: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
+            functions: Arc::new(DashMap::new()),
         })
     }
 
@@ -1560,7 +1564,243 @@ impl SqliteHandler {
         let conn = self.conn.lock().unwrap();
         catalog::store_function(&conn, &metadata)?;
         
+        // Also register as a SQLite custom function for runtime interception
+        self.register_sqlite_function(&conn, &metadata)?;
+        
         Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
+    }
+    
+    /// Register a user-defined function as a SQLite custom function
+    fn register_sqlite_function(&self, conn: &Connection, metadata: &catalog::FunctionMetadata) -> Result<()> {
+        use rusqlite::functions::FunctionFlags;
+        use crate::catalog::ReturnTypeKind;
+        
+        // Determine the number of parameters (excluding OUT params for now)
+        let num_params = metadata.arg_types.len();
+        
+        // Create a closure that will execute the function
+        let func_name = metadata.name.clone();
+        let func_body = metadata.function_body.clone();
+        let arg_count = num_params;
+        let is_strict = metadata.strict;
+        let return_type_kind = metadata.return_type_kind.clone();
+        
+        // Register as a scalar function
+        // Note: This is a simplified approach - we register it once per connection
+        // In a real implementation, we might need to handle this differently for connection pooling
+        conn.create_scalar_function(
+            &func_name[..],
+            arg_count as i32,
+            FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                use rusqlite::types::Value;
+                
+                // Collect arguments
+                let mut args = Vec::new();
+                for i in 0..arg_count {
+                    let arg = ctx.get::<Value>(i)?;
+                    args.push(arg);
+                }
+                
+                // If STRICT and any NULL args, return NULL
+                if is_strict && args.iter().any(|v| matches!(v, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                
+                // Execute the function
+                // Note: We need a way to get the catalog connection here
+                // For now, we'll use a simple approach - in reality we'd need to share the catalog
+                // This is a placeholder - the real implementation needs access to the catalog
+                
+                // For now, just return a placeholder
+                // The real implementation would:
+                // 1. Look up function metadata from catalog
+                // 2. Substitute parameters in function body
+                // 3. Transpile and execute
+                // 4. Return result
+                
+                // Simple placeholder implementation for scalar functions
+                if return_type_kind == ReturnTypeKind::Scalar {
+                    // This is where we'd actually execute the function body
+                    // For now, return NULL as a placeholder
+                    Ok(Value::Null)
+                } else {
+                    // For non-scalar functions, return NULL
+                    Ok(Value::Null)
+                }
+            }
+        )?;
+        
+        Ok(())
+    }
+    
+    /// Try to execute a simple function call like SELECT func(arg1, arg2)
+    /// Returns Ok(response) if it was a simple function call, Err if not
+    fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
+        use rusqlite::types::Value;
+        
+        // Parse the SQL
+        let result = pg_query::parse(sql)?;
+        
+        // Check if this is a simple SELECT with a function call
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                if let Some(NodeEnum::SelectStmt(ref select_stmt)) = &stmt_node.node {
+                    // Check if the SELECT list has exactly one item and it's a function call
+                    if select_stmt.target_list.len() == 1 {
+                        if let Some(NodeEnum::ResTarget(ref target)) = &select_stmt.target_list[0].node {
+                            if let Some(ref val_node) = target.val {
+                                if let Some(NodeEnum::FuncCall(ref func_call)) = &val_node.node {
+                                    // This is a simple function call! Execute it.
+                                    return self.execute_function_call(func_call, sql);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Not a simple function call
+        anyhow::bail!("Not a simple function call")
+    }
+    
+    /// Execute a function call
+    fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, original_sql: &str) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
+        use rusqlite::types::Value;
+        
+        // Extract function name
+        let func_name = func_call
+            .funcname
+            .iter()
+            .filter_map(|n| {
+                if let Some(ref inner) = n.node {
+                    if let NodeEnum::String(s) = inner {
+                        return Some(s.sval.to_lowercase());
+                    }
+                }
+                None
+            })
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("Could not extract function name"))?;
+        
+        // Get connection and look up function
+        let conn = self.conn.lock().unwrap();
+        let metadata = catalog::get_function(&conn, &func_name, None)?
+            .ok_or_else(|| anyhow::anyhow!("Function {} not found", func_name))?;
+        
+        // Extract arguments (only handle simple literals for now)
+        let mut args = Vec::new();
+        for arg_node in &func_call.args {
+            if let Some(ref inner) = arg_node.node {
+                match inner {
+                    NodeEnum::AConst(ref aconst) => {
+                        // Handle literal values
+                        if let Some(ref val) = aconst.val {
+                            match val {
+                                pg_query::protobuf::a_const::Val::Ival(iv) => {
+                                    args.push(Value::Integer(iv.ival as i64));
+                                }
+                                pg_query::protobuf::a_const::Val::Fval(fv) => {
+                                    // fval is a string representation of the float
+                                    let parsed = fv.fval.parse::<f64>().unwrap_or(0.0);
+                                    args.push(Value::Real(parsed));
+                                }
+                                pg_query::protobuf::a_const::Val::Sval(sv) => {
+                                    args.push(Value::Text(sv.sval.clone()));
+                                }
+                                _ => {
+                                    // Unsupported argument type
+                                    anyhow::bail!("Unsupported argument type in function call");
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // Non-literal argument (column ref, etc.) - not supported yet
+                        anyhow::bail!("Only literal arguments supported in function calls");
+                    }
+                }
+            }
+        }
+        
+        // Execute the function
+        let result = crate::functions::execute_sql_function(&conn, &metadata, &args)?;
+        
+        // Convert result to Response
+        self.convert_function_result_to_response(result)
+    }
+    
+    /// Convert function execution result to pgwire Response
+    fn convert_function_result_to_response(&self, result: crate::functions::FunctionResult) -> Result<Vec<Response>> {
+        use crate::functions::FunctionResult;
+        use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
+        use std::sync::Arc;
+        
+        match result {
+            FunctionResult::Scalar(Some(value)) => {
+                // Return single value
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+                
+                let mut encoder = DataRowEncoder::new(fields.clone());
+                encoder.encode_field(&Some(format!("{:?}", value)))?;
+                let data_rows = vec![Ok(encoder.take_row())];
+                
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::Scalar(None) => {
+                // Return NULL
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+                
+                let mut encoder = DataRowEncoder::new(fields.clone());
+                encoder.encode_field(&None::<String>)?;
+                let data_rows = vec![Ok(encoder.take_row())];
+                
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::Null => {
+                // Return NULL
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+                
+                let mut encoder = DataRowEncoder::new(fields.clone());
+                encoder.encode_field(&None::<String>)?;
+                let data_rows = vec![Ok(encoder.take_row())];
+                
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            _ => {
+                anyhow::bail!("Unsupported function result type for simple function calls");
+            }
+        }
     }
 
     /// Handle DROP FUNCTION statement
@@ -1650,6 +1890,12 @@ impl SqliteHandler {
         // Handle DROP FUNCTION
         if upper_sql.starts_with("DROP FUNCTION") {
             return self.handle_drop_function(sql);
+        }
+        
+        // Try to handle simple function calls like SELECT func(arg1, arg2)
+        // This intercepts user-defined function calls before normal execution
+        if let Ok(result) = self.try_execute_simple_function_call(sql) {
+            return Ok(result);
         }
 
         let transpile_result = transpile_with_metadata(sql);
