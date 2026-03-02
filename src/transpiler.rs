@@ -4,7 +4,7 @@ use pg_query::protobuf::{
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
-    RangeFunction, CopyStmt,
+    RangeFunction, CopyStmt, TruncateStmt,
 };
 
 // COPY command support
@@ -249,6 +249,16 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                         operation_type: OperationType::OTHER,
                         errors: Vec::new(),
                     }
+                }
+            }
+            NodeEnum::TruncateStmt(ref truncate_stmt) => {
+                let sql = reconstruct_truncate_stmt(truncate_stmt, ctx);
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None, copy_metadata: None,
+                    referenced_tables: ctx.referenced_tables.clone(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
                 }
             }
             _ => TranspileResult {
@@ -2573,17 +2583,42 @@ fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String 
         return "-- DROP statement with no objects".to_string();
     }
 
-    // Build the DROP statement
-    // SQLite syntax: DROP [TABLE|INDEX|VIEW|TRIGGER] [IF EXISTS] name
-    // Note: SQLite doesn't support CASCADE/RESTRICT, so we ignore the behavior field
+    // SQLite doesn't support multiple objects in a single DROP statement
+    // Generate separate DROP statements for each object
     let if_exists = if stmt.missing_ok { " if exists " } else { " " };
 
-    format!(
-        "drop {}{}{}",
-        type_keyword,
-        if_exists,
-        object_names.join(", ")
-    )
+    let drop_statements: Vec<String> = object_names
+        .iter()
+        .map(|name| format!("drop {}{}{}", type_keyword, if_exists, name))
+        .collect();
+
+    drop_statements.join("; ")
+}
+
+/// Reconstruct TRUNCATE statement for SQLite compatibility
+/// SQLite doesn't support TRUNCATE, so we convert it to DELETE FROM statements
+fn reconstruct_truncate_stmt(stmt: &TruncateStmt, ctx: &mut TranspileContext) -> String {
+    let mut delete_statements: Vec<String> = Vec::new();
+
+    for rel in &stmt.relations {
+        if let Some(ref inner) = rel.node {
+            if let NodeEnum::RangeVar(rv) = inner {
+                let table_name = if rv.schemaname.is_empty() || rv.schemaname == "public" {
+                    rv.relname.to_lowercase()
+                } else {
+                    format!("{}.{}", rv.schemaname.to_lowercase(), rv.relname.to_lowercase())
+                };
+                ctx.referenced_tables.push(rv.relname.to_lowercase());
+                delete_statements.push(format!("delete from {}", table_name));
+            }
+        }
+    }
+
+    if delete_statements.is_empty() {
+        return "-- TRUNCATE statement with no tables".to_string();
+    }
+
+    delete_statements.join("; ")
 }
 
 /// Reconstruct CREATE INDEX statement for SQLite compatibility

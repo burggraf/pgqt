@@ -1698,7 +1698,21 @@ impl SqliteHandler {
         } else if is_select {
             self.execute_select(&conn, &sqlite_sql)
         } else {
-            self.execute_statement(&conn, &sqlite_sql)
+            // Handle multiple statements (e.g., from TRUNCATE or DROP with multiple tables)
+            let statements: Vec<&str> = sqlite_sql.split("; ").collect();
+            if statements.len() > 1 {
+                let mut all_responses = Vec::new();
+                for stmt in statements {
+                    let stmt = stmt.trim();
+                    if !stmt.is_empty() {
+                        let responses = self.execute_statement(&conn, stmt)?;
+                        all_responses.extend(responses);
+                    }
+                }
+                Ok(all_responses)
+            } else {
+                self.execute_statement(&conn, &sqlite_sql)
+            }
         }
     }
 
