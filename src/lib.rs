@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod copy;
 pub mod distinct_on;
 pub mod fts;
+pub mod functions;
 pub mod geo;
 pub mod plpgsql;
 pub mod range;

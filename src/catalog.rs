@@ -5,6 +5,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use serde_json;
 
 /// Represents column metadata for a table
 #[derive(Debug, Clone)]
@@ -13,6 +15,46 @@ pub struct ColumnMetadata {
     pub column_name: String,
     pub original_type: String,
     pub constraints: Option<String>,
+}
+
+/// Function parameter mode
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ParamMode {
+    In,
+    Out,
+    InOut,
+    Variadic,
+}
+
+/// Function return type category
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ReturnTypeKind {
+    Scalar,
+    SetOf,
+    Table,
+    Void,
+}
+
+/// Function metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionMetadata {
+    pub oid: i64,
+    pub name: String,
+    pub schema: String,
+    pub arg_types: Vec<String>,
+    pub arg_names: Vec<String>,
+    pub arg_modes: Vec<ParamMode>,
+    pub return_type: String,
+    pub return_type_kind: ReturnTypeKind,
+    pub return_table_cols: Option<Vec<(String, String)>>, // (name, type)
+    pub function_body: String,
+    pub language: String,
+    pub volatility: String,
+    pub strict: bool,
+    pub security_definer: bool,
+    pub parallel: String,
+    pub owner_oid: i64,
+    pub created_at: Option<String>,
 }
 
 /// Ensures the `__pg_meta__` and RBAC tables exist
@@ -343,6 +385,43 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_enum__ table")?;
 
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_functions__ (
+            oid INTEGER PRIMARY KEY AUTOINCREMENT,
+            funcname TEXT NOT NULL,
+            schema_name TEXT DEFAULT 'public',
+            arg_types TEXT,                    -- JSON array: [\"text\", \"integer\"]
+            arg_names TEXT,                    -- JSON array: [\"arg1\", \"arg2\"]
+            arg_modes TEXT,                    -- JSON array: [\"IN\", \"OUT\", \"INOUT\", \"VARIADIC\"]
+            return_type TEXT NOT NULL,         -- e.g., \"integer\", \"SETOF users\"
+            return_type_kind TEXT NOT NULL,    -- \"SCALAR\", \"SETOF\", \"TABLE\", \"VOID\"
+            return_table_cols TEXT,            -- JSON: [{\"name\":\"id\",\"type\":\"int\"},...]
+            function_body TEXT NOT NULL,       -- The SQL body
+            language TEXT DEFAULT 'sql',
+            volatility TEXT DEFAULT 'VOLATILE',-- 'IMMUTABLE', 'STABLE', 'VOLATILE'
+            strict BOOLEAN DEFAULT FALSE,
+            security_definer BOOLEAN DEFAULT FALSE,
+            parallel TEXT DEFAULT 'UNSAFE',    -- 'UNSAFE', 'RESTRICTED', 'SAFE'
+            owner_oid INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )
+    .context("Failed to create __pg_functions__ table")?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pg_functions_name ON __pg_functions__(funcname)",
+        [],
+    )
+    .context("Failed to create index on __pg_functions__")?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pg_functions_schema ON __pg_functions__(schema_name)",
+        [],
+    )
+    .context("Failed to create schema index on __pg_functions__")?;
+
     Ok(())
 }
 
@@ -508,6 +587,181 @@ pub fn store_relation_metadata(
     )
     .context("Failed to store relation metadata")?;
     Ok(())
+}
+
+/// Store a function definition in the catalog
+pub fn store_function(conn: &Connection, metadata: &FunctionMetadata) -> Result<i64> {
+    let arg_types_json = serde_json::to_string(&metadata.arg_types)?;
+    let arg_names_json = serde_json::to_string(&metadata.arg_names)?;
+    let arg_modes_json = serde_json::to_string(&metadata.arg_modes)?;
+    let return_table_cols_json = match &metadata.return_table_cols {
+        Some(cols) => serde_json::to_string(cols)?,
+        None => "null".to_string(),
+    };
+
+    conn.execute(
+        "INSERT INTO __pg_functions__ 
+         (funcname, schema_name, arg_types, arg_names, arg_modes, 
+          return_type, return_type_kind, return_table_cols,
+          function_body, language, volatility, strict, security_definer, parallel, owner_oid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            &metadata.name,
+            &metadata.schema,
+            &arg_types_json,
+            &arg_names_json,
+            &arg_modes_json,
+            &metadata.return_type,
+            &format!("{:?}", metadata.return_type_kind),
+            &return_table_cols_json,
+            &metadata.function_body,
+            &metadata.language,
+            &metadata.volatility,
+            metadata.strict,
+            metadata.security_definer,
+            &metadata.parallel,
+            &metadata.owner_oid,
+        ),
+    )?;
+
+    // Get the assigned OID
+    let oid: i64 = conn.query_row(
+        "SELECT last_insert_rowid()",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(oid)
+}
+
+/// Retrieve function metadata by name
+pub fn get_function(
+    conn: &Connection,
+    name: &str,
+    arg_types: Option<&[String]>
+) -> Result<Option<FunctionMetadata>> {
+    let query = if arg_types.is_some() {
+        "SELECT * FROM __pg_functions__ WHERE funcname = ? AND arg_types = ?"
+    } else {
+        "SELECT * FROM __pg_functions__ WHERE funcname = ? ORDER BY oid LIMIT 1"
+    };
+
+    let arg_types_json = arg_types.map(|types| serde_json::to_string(types).unwrap());
+
+    let mut stmt = conn.prepare(query)?;
+    
+    let row_result = if let Some(json) = &arg_types_json {
+        stmt.query_row([name, json], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,        // oid
+                row.get::<_, String>(1)?,     // funcname
+                row.get::<_, String>(3)?,     // arg_types
+                row.get::<_, String>(4)?,     // arg_names
+                row.get::<_, String>(5)?,     // arg_modes
+                row.get::<_, String>(6)?,     // return_type
+                row.get::<_, String>(7)?,     // return_type_kind
+                row.get::<_, Option<String>>(8)?, // return_table_cols
+                row.get::<_, String>(9)?,     // function_body
+                row.get::<_, String>(10)?,    // language
+                row.get::<_, String>(11)?,    // volatility
+                row.get::<_, bool>(12)?,      // strict
+                row.get::<_, bool>(13)?,      // security_definer
+                row.get::<_, String>(14)?,    // parallel
+                row.get::<_, i64>(15)?,       // owner_oid
+                row.get::<_, Option<String>>(16)?, // created_at
+            ))
+        })
+    } else {
+        stmt.query_row([name], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,        // oid
+                row.get::<_, String>(1)?,     // funcname
+                row.get::<_, String>(3)?,     // arg_types
+                row.get::<_, String>(4)?,     // arg_names
+                row.get::<_, String>(5)?,     // arg_modes
+                row.get::<_, String>(6)?,     // return_type
+                row.get::<_, String>(7)?,     // return_type_kind
+                row.get::<_, Option<String>>(8)?, // return_table_cols
+                row.get::<_, String>(9)?,     // function_body
+                row.get::<_, String>(10)?,    // language
+                row.get::<_, String>(11)?,    // volatility
+                row.get::<_, bool>(12)?,      // strict
+                row.get::<_, bool>(13)?,      // security_definer
+                row.get::<_, String>(14)?,    // parallel
+                row.get::<_, i64>(15)?,       // owner_oid
+                row.get::<_, Option<String>>(16)?, // created_at
+            ))
+        })
+    };
+
+    match row_result {
+        Ok((oid, name, arg_types_json, arg_names_json, arg_modes_json, return_type, return_type_kind_str, 
+            return_table_cols_json, function_body, language, volatility, strict, security_definer, 
+            parallel, owner_oid, created_at)) => 
+        {
+            let arg_types: Vec<String> = serde_json::from_str(&arg_types_json)?;
+            let arg_names: Vec<String> = serde_json::from_str(&arg_names_json)?;
+            let arg_modes: Vec<ParamMode> = serde_json::from_str(&arg_modes_json)?;
+            let return_type_kind: ReturnTypeKind = 
+                match return_type_kind_str.as_str() {
+                    "Scalar" => ReturnTypeKind::Scalar,
+                    "SetOf" => ReturnTypeKind::SetOf,
+                    "Table" => ReturnTypeKind::Table,
+                    "Void" => ReturnTypeKind::Void,
+                    _ => ReturnTypeKind::Scalar,
+                };
+            let return_table_cols: Option<Vec<(String, String)>> = 
+                return_table_cols_json
+                .and_then(|s| serde_json::from_str(&s).ok());
+
+            Ok(Some(FunctionMetadata {
+                oid,
+                name: name.clone(),
+                schema: name,
+                arg_types,
+                arg_names,
+                arg_modes,
+                return_type,
+                return_type_kind,
+                return_table_cols,
+                function_body,
+                language,
+                volatility,
+                strict,
+                security_definer,
+                parallel,
+                owner_oid,
+                created_at,
+            }))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Drop a function from the catalog
+pub fn drop_function(
+    conn: &Connection,
+    name: &str,
+    arg_types: Option<&[String]>
+) -> Result<bool> {
+    let query = if arg_types.is_some() {
+        "DELETE FROM __pg_functions__ WHERE funcname = ? AND arg_types = ?"
+    } else {
+        "DELETE FROM __pg_functions__ WHERE funcname = ?"
+    };
+
+    let arg_types_json = arg_types.map(|types| serde_json::to_string(types).unwrap());
+
+    let mut stmt = conn.prepare(query)?;
+    
+    let changes = if let Some(json) = &arg_types_json {
+        stmt.execute([name, json])?
+    } else {
+        stmt.execute([name])?
+    };
+
+    Ok(changes > 0)
 }
 
 #[allow(dead_code)]

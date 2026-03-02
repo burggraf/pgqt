@@ -1551,6 +1551,35 @@ impl SqliteHandler {
         ))])
     }
 
+    /// Handle CREATE FUNCTION statement
+    fn handle_create_function(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse CREATE FUNCTION
+        let metadata = transpiler::parse_create_function(sql)?;
+        
+        // Store in catalog
+        let conn = self.conn.lock().unwrap();
+        catalog::store_function(&conn, &metadata)?;
+        
+        Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
+    }
+
+    /// Handle DROP FUNCTION statement
+    fn handle_drop_function(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse function name from DROP FUNCTION
+        // For now, simple parsing - extract name between "DROP FUNCTION" and "(" or end
+        let upper_sql = sql.trim().to_uppercase();
+        let name_part = upper_sql.trim_start_matches("DROP FUNCTION").trim();
+        let name = name_part.split_whitespace().next().unwrap_or("");
+        let name = name.trim_start_matches("IF EXISTS").trim();
+        let name = name.split('(').next().unwrap_or(name).trim();
+        
+        // Remove from catalog
+        let conn = self.conn.lock().unwrap();
+        catalog::drop_function(&conn, name, None)?;
+        
+        Ok(vec![Response::Execution(Tag::new("DROP FUNCTION"))])
+    }
+
     /// Handle COPY statement
     fn handle_copy_statement(&self,
         copy_stmt: crate::copy::CopyStatement,
@@ -1611,6 +1640,16 @@ impl SqliteHandler {
         // Handle SHOW search_path
         if upper_sql == "SHOW SEARCH_PATH" {
             return self.handle_show_search_path();
+        }
+
+        // Handle CREATE FUNCTION
+        if upper_sql.starts_with("CREATE FUNCTION") || upper_sql.starts_with("CREATE OR REPLACE FUNCTION") {
+            return self.handle_create_function(sql);
+        }
+
+        // Handle DROP FUNCTION
+        if upper_sql.starts_with("DROP FUNCTION") {
+            return self.handle_drop_function(sql);
         }
 
         let transpile_result = transpile_with_metadata(sql);
@@ -1763,7 +1802,14 @@ impl SqliteHandler {
 
     fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
         println!("Executing statement: {}", sql);
-        let changes = conn.execute(sql, [])?;
+        
+        // Split multiple statements and execute them sequentially
+        let statements: Vec<&str> = sql.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let mut total_changes = 0;
+        
+        for stmt in statements {
+            total_changes += conn.execute(stmt, [])?;
+        }
 
         let upper_sql = sql.trim().to_uppercase();
         let tag = if upper_sql.starts_with("CREATE TABLE") {
@@ -1771,11 +1817,11 @@ impl SqliteHandler {
         } else if upper_sql.starts_with("INSERT") {
             // PostgreSQL format: INSERT oid rows
             // oid is 0 for tables without OIDs (most modern tables)
-            Tag::new("INSERT 0").with_rows(changes)
+            Tag::new("INSERT 0").with_rows(total_changes)
         } else if upper_sql.starts_with("UPDATE") {
-            Tag::new("UPDATE").with_rows(changes)
+            Tag::new("UPDATE").with_rows(total_changes)
         } else if upper_sql.starts_with("DELETE") {
-            Tag::new("DELETE").with_rows(changes)
+            Tag::new("DELETE").with_rows(total_changes)
         } else {
             Tag::new("OK")
         };

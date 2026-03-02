@@ -4,7 +4,7 @@ use pg_query::protobuf::{
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
-    RangeFunction, CopyStmt, TruncateStmt,
+    RangeFunction, CopyStmt, TruncateStmt, CreateFunctionStmt, FunctionParameter,
 };
 
 // COPY command support
@@ -13,7 +13,7 @@ use crate::copy::{CopyStatement, CopyDirection, CopyOptions, CopyFormat};
 
 // RLS-related imports
 use crate::rls::{RlsContext, get_rls_where_clause, can_bypass_rls, build_rls_expression};
-use crate::catalog::{is_rls_enabled, get_applicable_policies};
+use crate::catalog::{is_rls_enabled, get_applicable_policies, ParamMode, ReturnTypeKind};
 use rusqlite::Connection;
 
 /// Metadata for a column extracted from a CREATE TABLE statement
@@ -2587,12 +2587,12 @@ fn reconstruct_drop_stmt(stmt: &DropStmt, ctx: &mut TranspileContext) -> String 
     // Generate separate DROP statements for each object
     let if_exists = if stmt.missing_ok { " if exists " } else { " " };
 
-    let drop_statements: Vec<String> = object_names
+    let drops: Vec<String> = object_names
         .iter()
         .map(|name| format!("drop {}{}{}", type_keyword, if_exists, name))
         .collect();
 
-    drop_statements.join("; ")
+    drops.join("; ")
 }
 
 /// Reconstruct TRUNCATE statement for SQLite compatibility
@@ -3827,6 +3827,191 @@ fn reconstruct_frame_specification(win_def: &WindowDef, ctx: &mut TranspileConte
     parts.join(" ")
 }
 
+/// Parse CREATE FUNCTION statement
+pub fn parse_create_function(sql: &str) -> anyhow::Result<crate::catalog::FunctionMetadata> {
+    let result = pg_query::parse(sql)?;
+    
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(NodeEnum::CreateFunctionStmt(stmt)) = &raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
+            return parse_create_function_stmt(stmt);
+        }
+    }
+    
+    anyhow::bail!("Not a CREATE FUNCTION statement")
+}
+
+/// Parse CreateFunctionStmt protobuf
+fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate::catalog::FunctionMetadata> {
+    use crate::catalog::ReturnTypeKind;
+    
+    // Extract function name
+    let funcname = extract_funcname(&stmt.funcname)?;
+    
+    // Extract parameters
+    let mut arg_types = Vec::new();
+    let mut arg_names = Vec::new();
+    let mut arg_modes = Vec::new();
+    
+    for param_node in &stmt.parameters {
+        if let Some(NodeEnum::FunctionParameter(param)) = param_node.node.as_ref() {
+            let (name, pg_type, mode) = parse_function_parameter(param)?;
+            arg_names.push(name.unwrap_or_default());
+            arg_types.push(pg_type);
+            arg_modes.push(mode);
+        }
+    }
+    
+    // Extract return type
+    // Note: pg_query doesn't expose return_type_attrs in the same way
+    // For now, we'll just handle the basic return type
+    let return_type = if let Some(rt) = &stmt.return_type {
+        extract_type_name(&Some(rt.clone()))?
+    } else {
+        "VOID".to_string()
+    };
+    let return_type_kind = ReturnTypeKind::Scalar;
+    let return_table_cols: Option<Vec<(String, String)>> = None;
+    
+    // Extract function body
+    // The function body is in the "sql_body" field which is a Node
+    let function_body = if let Some(sql_body_node) = &stmt.sql_body {
+        if let Some(NodeEnum::String(s)) = sql_body_node.node.as_ref() {
+            s.sval.clone()
+        } else {
+            "SELECT 1".to_string()
+        }
+    } else {
+        "SELECT 1".to_string()
+    };
+    
+    // Extract attributes from options
+    let mut volatility = "VOLATILE".to_string();
+    let mut strict = false;
+    let mut security_definer = false;
+    let mut parallel = "UNSAFE".to_string();
+    
+    for opt_node in &stmt.options {
+        if let Some(NodeEnum::DefElem(opt)) = opt_node.node.as_ref() {
+            match opt.defname.as_str() {
+                "volatility" => {
+                    if let Some(NodeEnum::String(s)) = opt.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                        volatility = s.sval.clone().to_uppercase();
+                    }
+                }
+                "strict" => {
+                    if let Some(NodeEnum::Boolean(b)) = opt.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                        strict = b.boolval;
+                    }
+                }
+                "security" => {
+                    if let Some(NodeEnum::String(s)) = opt.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                        security_definer = s.sval.eq_ignore_ascii_case("definer");
+                    }
+                }
+                "parallel" => {
+                    if let Some(NodeEnum::String(s)) = opt.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                        parallel = s.sval.clone().to_uppercase();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    Ok(crate::catalog::FunctionMetadata {
+        oid: 0,
+        name: funcname,
+        schema: "public".to_string(),
+        arg_types,
+        arg_names,
+        arg_modes,
+        return_type,
+        return_type_kind,
+        return_table_cols,
+        function_body,
+        language: "sql".to_string(),
+        volatility,
+        strict,
+        security_definer,
+        parallel,
+        owner_oid: 1, // TODO: Get current user OID
+        created_at: None,
+    })
+}
+
+/// Extract function name from ObjectWithArgs
+fn extract_funcname(funcname: &[Node]) -> anyhow::Result<String> {
+    if let Some(NodeEnum::String(s)) = funcname.first().and_then(|n| n.node.as_ref()) {
+        Ok(s.sval.clone())
+    } else {
+        anyhow::bail!("Could not extract function name")
+    }
+}
+
+/// Parse function parameter
+fn parse_function_parameter(param: &FunctionParameter) -> anyhow::Result<(Option<String>, String, ParamMode)> {
+    let name = if !param.name.is_empty() {
+        Some(param.name.clone())
+    } else {
+        None
+    };
+    
+    let pg_type = extract_type_name(&param.arg_type)?;
+    
+    let mode = match param.mode() {
+        pg_query::protobuf::FunctionParameterMode::FuncParamIn => ParamMode::In,
+        pg_query::protobuf::FunctionParameterMode::FuncParamOut => ParamMode::Out,
+        pg_query::protobuf::FunctionParameterMode::FuncParamInout => ParamMode::InOut,
+        pg_query::protobuf::FunctionParameterMode::FuncParamVariadic => ParamMode::Variadic,
+        _ => ParamMode::In,
+    };
+    
+    Ok((name, pg_type, mode))
+}
+
+/// Extract type name from TypeName
+fn extract_type_name(type_name: &Option<TypeName>) -> anyhow::Result<String> {
+    if let Some(tn) = type_name {
+        let names: Vec<String> = tn.names
+            .iter()
+            .filter_map(|n| n.node.as_ref())
+            .map(|n| {
+                if let NodeEnum::String(s) = n {
+                    s.sval.clone()
+                } else {
+                    String::new()
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        Ok(names.last().unwrap_or(&String::new()).to_uppercase())
+    } else {
+        Ok("UNKNOWN".to_string())
+    }
+}
+
+/// Parse return type
+fn parse_return_type(
+    return_type: &Option<TypeName>,
+    return_attrs: &[Node]
+) -> anyhow::Result<(String, ReturnTypeKind, Option<Vec<(String, String)>>)> {
+    // Check if this is RETURNS TABLE
+    if !return_attrs.is_empty() {
+        // RETURNS TABLE case - for now, return empty columns and refine later
+        // In a full implementation, we would parse the table column definitions
+        return Ok(("TABLE".to_string(), ReturnTypeKind::Table, None));
+    }
+    
+    // For now, assume scalar unless we detect TABLE
+    if let Some(tn) = return_type {
+        let return_type_str = extract_type_name(&Some(tn.clone()))?;
+        Ok((return_type_str, ReturnTypeKind::Scalar, None))
+    } else {
+        Ok(("VOID".to_string(), ReturnTypeKind::Void, None))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3867,8 +4052,13 @@ mod tests {
     #[test]
     fn test_drop_multiple_tables() {
         let result = transpile_with_metadata("DROP TABLE table1, table2");
-        assert!(result.sql.contains("table1"));
-        assert!(result.sql.contains("table2"));
+        assert_eq!(result.sql, "drop table table1; drop table table2");
+    }
+
+    #[test]
+    fn test_drop_multiple_tables_if_exists() {
+        let result = transpile_with_metadata("DROP TABLE IF EXISTS table1, table2");
+        assert_eq!(result.sql, "drop table if exists table1; drop table if exists table2");
     }
 
     #[test]

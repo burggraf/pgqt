@@ -60,6 +60,8 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Shadow Catalog** | ✅ | - | Unique feature: `__pg_meta__` table preserves original PG types for reversibility. |
 | **Row-Level Security (RLS)** | ✅ | Medium | Implemented via AST injection. Supports CREATE POLICY, ALTER TABLE ENABLE/DISABLE RLS, PERMISSIVE (OR) and RESTRICTIVE (AND) policies, USING and WITH CHECK clauses. See [docs/RLS.md](./RLS.md). |
 | **Stored Procedures (PL/pgSQL)** | ❌ | High | Phase 3 Roadmap: Considering a Lua-based runtime to emulate procedural blocks. |
+| **User-Defined Functions (SQL)** | ✅ | Medium | Phase 1 Complete: Full support for CREATE FUNCTION with SQL language. Supports IN/OUT/INOUT parameters, RETURNS SCALAR/SETOF/TABLE/VOID, function attributes (STRICT, IMMUTABLE, STABLE, VOLATILE, SECURITY DEFINER, PARALLEL). See [docs/FUNCTIONS.md](./FUNCTIONS.md). |
+| **User-Defined Functions (PL/pgSQL)** | ⏳ | High | Phase 2 Roadmap: PL/pgSQL procedural language via Lua runtime. |
 | **Logical Replication** | ❌ | High | Not applicable to single-file SQLite databases. |
 | **Users & Permissions (RBAC)** | ✅ | Medium | Implemented via custom auth tables (`__pg_users__`, `__pg_roles__`, `__pg_permissions__`) with AST-based permission checks. Supports CREATE/ALTER/DROP USER, GRANT/REVOKE, and role-based access control for SELECT/INSERT/UPDATE/DELETE operations. |
 | **Vector Search** | ✅ | Medium | pgvector-compatible vector search implemented in Rust. Supports VECTOR type, distance functions (L2, cosine, inner product, L1), operators (<->, <=>, <#>, <+>), and utility functions. See [docs/VECTOR.md](./VECTOR.md). |

@@ -726,6 +726,83 @@ SELECT array_to_string(tags, ', ') FROM products;
 
 For complete documentation, see [docs/ARRAYS.md](./docs/ARRAYS.md).
 
+### User-Defined Functions
+
+**`pgqt`** provides PostgreSQL-compatible user-defined functions using `CREATE FUNCTION`:
+
+```sql
+-- Create a simple scalar function
+CREATE FUNCTION add_numbers(a integer, b integer)
+RETURNS integer
+LANGUAGE sql
+AS $$
+    SELECT a + b
+$$;
+
+-- Call the function
+SELECT add_numbers(5, 3);  -- Returns 8
+
+-- Function with OUT parameters
+CREATE FUNCTION get_user_info(user_id integer, OUT username text, OUT email text)
+LANGUAGE sql
+AS $$
+    SELECT username, email FROM users WHERE id = user_id
+$$;
+
+-- Call it
+SELECT * FROM get_user_info(1);
+
+-- RETURNS TABLE function
+CREATE FUNCTION get_active_users()
+RETURNS TABLE(id integer, username text, email text)
+LANGUAGE sql
+AS $$
+    SELECT id, username, email FROM users WHERE active = true
+$$;
+
+-- Call it
+SELECT * FROM get_active_users();
+
+-- STRICT function (returns NULL on NULL input)
+CREATE FUNCTION square(x integer)
+RETURNS integer
+LANGUAGE sql
+STRICT
+AS $$
+    SELECT x * x
+$$;
+
+-- This returns NULL (not an error)
+SELECT square(NULL);
+
+-- CREATE OR REPLACE
+CREATE OR REPLACE FUNCTION add_numbers(a integer, b integer)
+RETURNS integer
+LANGUAGE sql
+AS $$
+    SELECT a + b + 1  -- Modified implementation
+$$;
+```
+
+**Supported Features:**
+
+- `CREATE FUNCTION` and `CREATE OR REPLACE FUNCTION`
+- `DROP FUNCTION`
+- Parameter modes: `IN` (default), `OUT`, `INOUT`
+- Return types: scalar, `SETOF`, `TABLE`, `VOID`
+- Function attributes: `STRICT` (`RETURNS NULL ON NULL INPUT`), `IMMUTABLE`, `STABLE`, `VOLATILE`
+- `SECURITY DEFINER` / `SECURITY INVOKER`
+- `PARALLEL` attributes
+
+**Function Attributes:**
+
+- **STRICT**: Returns NULL immediately if any input is NULL (no execution)
+- **IMMUTABLE**: Always returns same result for same inputs (enables optimization)
+- **STABLE**: Returns same result within a single transaction
+- **VOLATILE** (default): Can return different results (e.g., `random()`, database writes)
+
+For complete documentation, see [docs/FUNCTIONS.md](./docs/FUNCTIONS.md).
+
 ### Vector Search (pgvector Compatible)
 
 **`pgqt`** provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:

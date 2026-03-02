@@ -1142,6 +1142,7 @@ dependencies = [
  "clap",
  "dashmap",
  "futures",
+ "hex",
  "libc",
  "pg_query",
  "pgwire",
