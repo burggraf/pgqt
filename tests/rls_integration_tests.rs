@@ -5,10 +5,10 @@
 //! - Creating and applying policies
 //! - RLS enforcement for SELECT, INSERT, UPDATE, DELETE
 
-use postgresqlite::catalog::{self, RlsPolicy};
-use postgresqlite::rls::{self, RlsContext};
-use postgresqlite::rls_inject;
-use postgresqlite::transpiler;
+use pgqt::catalog::{self, RlsPolicy};
+use pgqt::rls::{self, RlsContext};
+use pgqt::rls_inject;
+use pgqt::transpiler;
 use rusqlite::Connection;
 
 fn setup_test_db() -> Connection {

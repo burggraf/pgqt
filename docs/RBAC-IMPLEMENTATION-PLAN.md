@@ -1,6 +1,6 @@
-# Implementation Plan: Users & Permissions (RBAC) in PostgreSQLite
+# Implementation Plan: Users & Permissions (RBAC) in PGQT
 
-This plan outlines the steps to emulate PostgreSQL's Role-Based Access Control (RBAC) in SQLite via the `postgresqlite` proxy.
+This plan outlines the steps to emulate PostgreSQL's Role-Based Access Control (RBAC) in SQLite via the `pgqt` proxy.
 
 ## Goals
 - Support `CREATE ROLE`, `DROP ROLE`, `ALTER ROLE`.

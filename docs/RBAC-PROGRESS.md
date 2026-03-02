@@ -1,7 +1,7 @@
 # Users & Permissions (RBAC) Implementation Status
 
 ## Overview
-This document tracks the progress of implementing PostgreSQL-compatible Role-Based Access Control (RBAC) in PostgreSQLite.
+This document tracks the progress of implementing PostgreSQL-compatible Role-Based Access Control (RBAC) in PGQT.
 
 ## Completed Tasks
 

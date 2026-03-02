@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# PostgreSQLite Test Runner
+# PGQT Test Runner
 # Runs all unit tests, integration tests, and e2e tests
 #
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "PostgreSQLite Test Suite"
+echo "PGQT Test Suite"
 echo "=========================================="
 echo ""
 

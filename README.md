@@ -1,4 +1,4 @@
-# PostgreSQLite / pgqt
+# PGQT / pgqt
 
 ### pronounced P.G.Q.T. (pg Cutie)
 
@@ -31,28 +31,28 @@ A PostgreSQL wire-compatible proxy for SQLite that allows you to use standard Po
 
 ```bash
 # Clone and build
-git clone https://github.com/yourusername/pglite-proxy
-cd pglite-proxy
+git clone https://github.com/yourusername/pgqt
+cd pgqt
 cargo build --release
 
 # Or install via cargo
-cargo install pglite-proxy
+cargo install pgqt
 ```
 
 ### Running the Proxy
 
 ```bash
 # Start with defaults (test.db on port 5432)
-./target/release/postgresqlite
+./target/release/pgqt
 
 # Or specify custom database and port
-PG_LITE_DB=myapp.db PG_LITE_PORT=5433 ./target/release/postgresqlite
+PGQT_DB=myapp.db PGQT_PORT=5433 ./target/release/pgqt
 
 # Or use command-line options
-./target/release/postgresqlite --database myapp.db --port 5433
+./target/release/pgqt --database myapp.db --port 5433
 
 # With output logging to files
-./target/release/postgresqlite -d myapp.db -o server.log -e errors.log
+./target/release/pgqt -d myapp.db -o server.log -e errors.log
 ```
 
 ### Connecting
@@ -433,7 +433,7 @@ For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
 ### Command-Line Options
 
 ```
-postgresqlite [OPTIONS]
+pgqt [OPTIONS]
 
 Options:
   -H, --host <HOST>              Host address to listen on [default: 127.0.0.1]
@@ -460,27 +460,27 @@ The `--output` and `--error-output` options control where server messages are wr
 
 ```bash
 # Default: output to stdout, errors to myapp.db.error.log
-postgresqlite --database myapp.db
+pgqt --database myapp.db
 
 # Log everything to files
-postgresqlite -d myapp.db -o /var/log/pglite/server.log -e /var/log/pglite/errors.log
+pgqt -d myapp.db -o /var/log/pglite/server.log -e /var/log/pglite/errors.log
 
 # Suppress server output, send errors to stderr
-postgresqlite -d myapp.db -o NULL -e STDERR
+pgqt -d myapp.db -o NULL -e STDERR
 
 # Swap output streams
-postgresqlite -d myapp.db -o STDERR -e STDOUT
+pgqt -d myapp.db -o STDERR -e STDOUT
 ```
 
 ### Environment Variables
 
 | Variable               | Default          | Description               |
 | ---------------------- | ---------------- | ------------------------- |
-| `PG_LITE_HOST`         | `127.0.0.1`      | Host address to listen on |
-| `PG_LITE_PORT`         | `5432`           | TCP port to listen on     |
-| `PG_LITE_DB`           | `test.db`        | SQLite database file path |
-| `PG_LITE_OUTPUT`       | `STDOUT`         | Server output destination |
-| `PG_LITE_ERROR_OUTPUT` | `<db>.error.log` | Error output destination  |
+| `PGQT_HOST`         | `127.0.0.1`      | Host address to listen on |
+| `PGQT_PORT`         | `5432`           | TCP port to listen on     |
+| `PGQT_DB`           | `test.db`        | SQLite database file path |
+| `PGQT_OUTPUT`       | `STDOUT`         | Server output destination |
+| `PGQT_ERROR_OUTPUT` | `<db>.error.log` | Error output destination  |
 
 ### Programmatic Usage
 
@@ -571,7 +571,7 @@ export const AppDataSource = new DataSource({
 pg_dump -h prod.db.com -U postgres myapp > myapp.sql
 
 # Start proxy with new SQLite file
-PG_LITE_DB=myapp.db ./pglite-proxy
+PGQT_DB=myapp.db ./pgqt
 
 # Import (transpiles automatically)
 psql -h 127.0.0.1 -p 5432 -U postgres < myapp.sql

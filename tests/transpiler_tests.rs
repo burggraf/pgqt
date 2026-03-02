@@ -1,6 +1,6 @@
 //! Unit tests for SQL transpilation
 
-use postgresqlite::transpiler::{transpile, transpile_with_metadata};
+use pgqt::transpiler::{transpile, transpile_with_metadata};
 
 #[test]
 fn test_transpile_simple_select() {

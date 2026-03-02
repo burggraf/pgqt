@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-End tests for PostgreSQL DISTINCT ON transpilation to SQLite.
+End-to-End tests for PGQT DISTINCT ON transpilation to SQLite.
 
 This test suite verifies that DISTINCT ON is correctly transpiled
 from PostgreSQL syntax to SQLite using ROW_NUMBER() and produces correct results.
@@ -34,7 +34,7 @@ def proxy_server():
     env["PG_LITE_PORT"] = str(TEST_PORT)
     
     proc = subprocess.Popen(
-        ["./target/release/postgresqlite"],
+        ["./target/release/pgqt"],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

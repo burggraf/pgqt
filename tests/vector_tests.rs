@@ -1,4 +1,4 @@
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 // =====================================================
 // Vector Type Tests

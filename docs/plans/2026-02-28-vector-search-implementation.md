@@ -618,7 +618,7 @@ git commit -m "chore: add vector module to main.rs"
 **Step 1: Create vector transpilation tests**
 
 ```rust
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 #[test]
 fn test_transpile_vector_type() {
@@ -722,7 +722,7 @@ git commit -m "test: add vector transpilation unit tests"
 **Step 1: Create integration tests**
 
 ```rust
-use postgresqlite::vector::*;
+use pgqt::vector::*;
 
 #[test]
 fn test_l2_distance_basic() {

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified E2E Test Runner for PostgreSQLite
+Unified E2E Test Runner for PGQT
 
 This script runs all Python e2e tests in sequence, managing the proxy
 lifecycle efficiently by starting it once and running all tests against it.
@@ -22,7 +22,7 @@ PROXY_TIMEOUT = 30  # seconds
 
 
 class ProxyManager:
-    """Manages the PostgreSQLite proxy lifecycle."""
+    """Manages the PGQT proxy lifecycle."""
     
     def __init__(self, db_path: str, port: int = PROXY_PORT):
         self.db_path = db_path
@@ -180,7 +180,7 @@ def run_subprocess_test(test_path: str, proxy_host: str, proxy_port: int) -> Tup
 def main():
     """Main entry point."""
     print("=" * 60)
-    print("PostgreSQLite E2E Test Runner")
+    print("PGQT E2E Test Runner")
     print("=" * 60)
     print()
     
@@ -201,7 +201,7 @@ def main():
     
     try:
         # Start proxy
-        print("Starting PostgreSQLite proxy...")
+        print("Starting PGQT proxy...")
         proxy = ProxyManager(db_path, PROXY_PORT)
         if not proxy.start():
             print("Failed to start proxy!")

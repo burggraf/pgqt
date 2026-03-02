@@ -53,9 +53,9 @@ impl std::str::FromStr for OutputDest {
     }
 }
 
-/// PostgreSQL-to-SQLite proxy server
+/// PGQT proxy server
 #[derive(Parser, Debug)]
-#[command(name = "postgresqlite")]
+#[command(name = "pgqt")]
 #[command(about = "A PostgreSQL wire protocol proxy for SQLite")]
 #[command(version)]
 struct Cli {
@@ -186,7 +186,7 @@ impl SqliteHandler {
         })?;
 
         conn.create_scalar_function("version", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
-            Ok("PostgreSQL 15.0 (PostgresLite)".to_string())
+            Ok("PostgreSQL 15.0 (pgqt)".to_string())
         })?;
 
         conn.create_scalar_function("current_schema", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {

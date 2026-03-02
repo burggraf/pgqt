@@ -1,5 +1,5 @@
 fn main() {
-    use postgresqlite::transpiler::transpile;
+    use pgqt::transpiler::transpile;
     
     let tests = vec![
         "SELECT sum(salary) OVER (PARTITION BY department) FROM employees",

@@ -28,7 +28,7 @@ def find_free_port(start_port: int = 5432, max_port: int = 5500) -> int:
     raise RuntimeError(f"No free ports found in range {start_port}-{max_port}")
 
 class ProxyManager:
-    """Manages the PostgreSQLite proxy lifecycle for E2E tests."""
+    """Manages the PGQT proxy lifecycle for E2E tests."""
     
     def __init__(self, db_path: Optional[str] = None, port: Optional[int] = None):
         # Check if we should use an existing proxy (from run_all_e2e.py)

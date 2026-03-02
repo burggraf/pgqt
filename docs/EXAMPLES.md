@@ -203,7 +203,7 @@ app.listen(3000, () => console.log("Server running on port 3000"));
 **Usage:**
 ```bash
 # Terminal 1: Start proxy
-$ PG_LITE_DB=blog.db ./pglite-proxy
+$ PGQT_DB=blog.db ./pglite-proxy
 
 # Terminal 2: Start app
 $ npm run dev
@@ -329,7 +329,7 @@ def pglite_proxy():
     """Start PGlite Proxy for testing"""
     proc = subprocess.Popen(
         ["./pglite-proxy"],
-        env={"PG_LITE_DB": ":memory:", "PG_LITE_PORT": "15432"},
+        env={"PGQT_DB": ":memory:", "PGQT_PORT": "15432"},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -454,7 +454,7 @@ pg_dump --schema-only --no-owner --no-privileges "$SOURCE_DB" > schema.sql
 
 # 2. Start proxy with fresh database
 echo "Starting PGlite Proxy..."
-PG_LITE_DB="$TARGET_DB" ./pglite-proxy &
+PGQT_DB="$TARGET_DB" ./pglite-proxy &
 PROXY_PID=$!
 sleep 2
 

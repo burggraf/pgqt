@@ -1197,7 +1197,7 @@ def start_proxy():
         os.remove(DB_PATH)
     
     proc = subprocess.Popen(
-        ["./target/release/postgresqlite", "-d", DB_PATH, "-p", str(PROXY_PORT)],
+        ["./target/release/pgqt", "-d", DB_PATH, "-p", str(PROXY_PORT)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

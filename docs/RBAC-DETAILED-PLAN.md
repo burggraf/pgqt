@@ -1,6 +1,6 @@
 # Detailed Implementation Plan: Users & Permissions (RBAC)
 
-This plan details the architecture and steps to implement a robust Role-Based Access Control (RBAC) system in PostgreSQLite.
+This plan details the architecture and steps to implement a robust Role-Based Access Control (RBAC) system in PGQT.
 
 ## 1. Internal Storage Schema
 

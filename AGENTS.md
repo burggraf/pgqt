@@ -1,10 +1,10 @@
-# PostgreSQLite Agent Guide
+# PGQT Agent Guide
 
-This document contains critical information for AI agents working on the PostgreSQLite project.
+This document contains critical information for AI agents working on the PGQT project.
 
 ## Project Overview
 
-PostgreSQLite is a PostgreSQL-compatible proxy that translates PostgreSQL wire protocol queries to SQLite. It enables PostgreSQL clients to connect to SQLite databases, supporting many PostgreSQL-specific features through transpilation.
+PGQT is a PostgreSQL-compatible proxy that translates PostgreSQL wire protocol queries to SQLite. It enables PostgreSQL clients to connect to SQLite databases, supporting many PostgreSQL-specific features through transpilation.
 
 ## Testing Infrastructure
 
@@ -78,7 +78,7 @@ mod tests {
 
 **Integration tests**: Create `tests/my_feature_tests.rs`:
 ```rust
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 #[test]
 fn test_transpilation() {

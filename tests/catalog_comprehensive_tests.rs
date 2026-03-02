@@ -1,6 +1,6 @@
 //! Comprehensive tests for PostgreSQL system catalog (pg_catalog) implementation
 
-use postgresqlite::catalog::{init_catalog, init_system_views, populate_pg_attribute, populate_pg_index, populate_pg_constraint};
+use pgqt::catalog::{init_catalog, init_system_views, populate_pg_attribute, populate_pg_index, populate_pg_constraint};
 use rusqlite::Connection;
 
 fn setup_test_db() -> Connection {

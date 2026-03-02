@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-End tests for PostgreSQL Window Functions transpilation to SQLite.
+End-to-End tests for PGQT Window Functions transpilation to SQLite.
 
 This test suite verifies that window functions are correctly transpiled
 from PostgreSQL syntax to SQLite syntax and produce correct results.
@@ -35,7 +35,7 @@ def proxy_server():
     env["PG_LITE_PORT"] = str(TEST_PORT)
     
     proc = subprocess.Popen(
-        ["./target/release/postgresqlite"],
+        ["./target/release/pgqt"],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

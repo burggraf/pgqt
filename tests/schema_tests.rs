@@ -1,7 +1,7 @@
 //! Unit tests for schema/namespace support
 
-use postgresqlite::schema::{SearchPath, SchemaManager, SchemaMetadata, init_schema_catalog, create_schema, drop_schema, schema_exists, list_schemas};
-use postgresqlite::transpiler::transpile;
+use pgqt::schema::{SearchPath, SchemaManager, SchemaMetadata, init_schema_catalog, create_schema, drop_schema, schema_exists, list_schemas};
+use pgqt::transpiler::transpile;
 use rusqlite::Connection;
 use std::path::Path;
 

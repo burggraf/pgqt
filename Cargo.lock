@@ -1132,6 +1132,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "pgqt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap",
+ "dashmap",
+ "futures",
+ "libc",
+ "pg_query",
+ "pgwire",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "pgwire"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1207,27 +1228,6 @@ dependencies = [
  "postgres-protocol",
  "serde_core",
  "serde_json",
-]
-
-[[package]]
-name = "postgresqlite"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "clap",
- "dashmap",
- "futures",
- "libc",
- "pg_query",
- "pgwire",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

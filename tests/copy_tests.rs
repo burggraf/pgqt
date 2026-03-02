@@ -1,4 +1,4 @@
-use postgresqlite::transpiler::transpile_with_metadata;
+use pgqt::transpiler::transpile_with_metadata;
 
 #[test]
 fn test_copy_from_transpilation() {

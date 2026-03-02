@@ -1,5 +1,5 @@
 """
-End-to-End tests for Row-Level Security (RLS) in postgresqlite.
+End-to-End tests for Row-Level Security (RLS) in pgqt.
 
 These tests verify RLS behavior via the PostgreSQL wire protocol.
 """
@@ -322,7 +322,7 @@ def cleanup(proxy):
 def main():
     """Run all RLS E2E tests."""
     print("=" * 60)
-    print("PostgreSQLite RLS E2E Tests")
+    print("PGQT RLS E2E Tests")
     print("=" * 60)
     
     with ProxyManager() as proxy:

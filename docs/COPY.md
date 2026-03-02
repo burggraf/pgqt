@@ -1,6 +1,6 @@
 # COPY Command Support
 
-PostgreSQLite provides full support for the PostgreSQL `COPY` command, allowing efficient data import and export between PostgreSQL clients and the underlying SQLite database.
+PGQT provides full support for the PostgreSQL `COPY` command, allowing efficient data import and export between PostgreSQL clients and the underlying SQLite database.
 
 ## Supported Commands
 
@@ -52,7 +52,7 @@ COPY table_name FROM STDIN WITH (
 
 ## Implementation Details
 
-The `COPY` command is implemented as a special sub-protocol within the PostgreSQL wire protocol. PostgreSQLite handles the state transitions and data streaming required by the protocol:
+The `COPY` command is implemented as a special sub-protocol within the PostgreSQL wire protocol. PGQT handles the state transitions and data streaming required by the protocol:
 
 1. **Transpilation**: The `COPY` statement is parsed by `pg_query` to extract options, table names, and column lists.
 2. **Protocol Negotiation**: The proxy sends a `CopyInResponse` or `CopyOutResponse` message to the client to initiate data transfer.

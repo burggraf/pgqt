@@ -2,7 +2,7 @@
 //!
 //! Tests array operators and functions through the SQLite handler
 
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 /// Test array overlap operator transpilation
 #[test]

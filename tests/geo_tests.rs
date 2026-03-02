@@ -3,7 +3,7 @@
 //! These tests verify that geometric type SQL is properly transpiled
 //! from PostgreSQL syntax to SQLite function calls.
 
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 // ============================================================================
 // Point Type Tests

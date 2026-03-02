@@ -1,7 +1,7 @@
 # PostgreSQL Array Support Implementation Plan
 
 ## Overview
-Implement full PostgreSQL array compatibility for PostgreSQLite by emulating arrays via JSON strings in SQLite with transpilation for array operators and functions.
+Implement full PostgreSQL array compatibility for PGQT by emulating arrays via JSON strings in SQLite with transpilation for array operators and functions.
 
 ## Storage Strategy
 - **Format**: Store arrays as JSON arrays in SQLite TEXT columns: `[1,2,3]` or `["a","b","c"]`

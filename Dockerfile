@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/postgresqlite /usr/local/bin/pglite-proxy
+COPY --from=builder /app/target/release/pgqt /usr/local/bin/pglite-proxy
 
 # Create directory for databases
 RUN mkdir -p /data

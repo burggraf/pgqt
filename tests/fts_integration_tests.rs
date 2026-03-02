@@ -3,8 +3,8 @@
 //! These tests verify that PostgreSQL FTS syntax is properly transpiled and
 //! executed against SQLite.
 
-use postgresqlite::fts::*;
-use postgresqlite::transpiler::transpile;
+use pgqt::fts::*;
+use pgqt::transpiler::transpile;
 
 // ========== Transpiler Tests ==========
 

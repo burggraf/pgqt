@@ -594,7 +594,7 @@ git commit -m "feat(distinct_on): integrate DISTINCT ON transformation into tran
 **Step 1: Create unit test file**
 
 ```rust
-use postgresqlite::transpiler::transpile;
+use pgqt::transpiler::transpile;
 
 // ============================================================================
 // Basic DISTINCT ON Tests
@@ -796,11 +796,11 @@ def proxy_server():
     
     # Start the proxy server
     env = os.environ.copy()
-    env["PG_LITE_DB"] = TEST_DB
-    env["PG_LITE_PORT"] = str(TEST_PORT)
+    env["PGQT_DB"] = TEST_DB
+    env["PGQT_PORT"] = str(TEST_PORT)
     
     proc = subprocess.Popen(
-        ["./target/release/postgresqlite"],
+        ["./target/release/pgqt"],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

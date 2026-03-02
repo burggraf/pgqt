@@ -1,7 +1,7 @@
 # Implementation Plan: Row-Level Security (RLS) via AST Injection
 
 ## 1. Overview
-The goal is to implement PostgreSQL-compatible Row-Level Security (RLS) in `postgresqlite` by injecting `WHERE` clauses into the AST during transpilation. This avoids the need for table renaming and views, providing a more robust and transparent implementation.
+The goal is to implement PostgreSQL-compatible Row-Level Security (RLS) in `pgqt` by injecting `WHERE` clauses into the AST during transpilation. This avoids the need for table renaming and views, providing a more robust and transparent implementation.
 
 ## 2. Research Phase
 - **PostgreSQL Compatibility**:
@@ -51,7 +51,7 @@ The goal is to implement PostgreSQL-compatible Row-Level Security (RLS) in `post
   - Test the full RLS lifecycle: Enable RLS -> Create Policy -> Execute DML.
   - Test multi-user scenarios.
 - **E2E Tests**:
-  - Use a PostgreSQL client (e.g., `psql` or a library) to connect to `postgresqlite` and verify RLS behavior against expected PG results.
+  - Use a PostgreSQL client (e.g., `psql` or a library) to connect to `pgqt` and verify RLS behavior against expected PG results.
 
 ## 6. Documentation
 - Update `README.md` with RLS support details.

@@ -1,6 +1,6 @@
 //! Unit tests for shadow catalog
 
-use postgresqlite::catalog::{init_catalog, store_column_metadata, get_column_metadata, ColumnMetadata};
+use pgqt::catalog::{init_catalog, store_column_metadata, get_column_metadata, ColumnMetadata};
 use rusqlite::Connection;
 
 fn setup_test_db() -> Connection {
