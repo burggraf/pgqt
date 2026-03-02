@@ -18,6 +18,7 @@ PGlite Proxy acts as a middleware server that translates the PostgreSQL wire pro
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
 - **Geometric Types**: 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
+- **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats for efficient data transfer. See [docs/COPY.md](./docs/COPY.md).
 
 ## Quick Start
 

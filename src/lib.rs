@@ -1,5 +1,6 @@
 pub mod array;
 pub mod catalog;
+pub mod copy;
 pub mod distinct_on;
 pub mod fts;
 pub mod geo;

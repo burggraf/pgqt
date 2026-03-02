@@ -4,8 +4,12 @@ use pg_query::protobuf::{
     RangeVar, ResTarget, SelectStmt, TypeCast, TypeName, InsertStmt, UpdateStmt, DeleteStmt,
     JoinExpr, NullTest, SubLink, CaseExpr, CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
     AlterTableStmt, WindowDef, RangeSubselect, CoalesceExpr, DropStmt, IndexStmt, SqlValueFunction,
-    RangeFunction,
+    RangeFunction, CopyStmt,
 };
+
+// COPY command support
+#[allow(unused_imports)]
+use crate::copy::{CopyStatement, CopyDirection, CopyOptions, CopyFormat};
 
 // RLS-related imports
 use crate::rls::{RlsContext, get_rls_where_clause, can_bypass_rls, build_rls_expression};
@@ -25,6 +29,7 @@ pub struct ColumnTypeInfo {
 pub struct TranspileResult {
     pub sql: String,
     pub create_table_metadata: Option<CreateTableMetadata>,
+    pub copy_metadata: Option<crate::copy::CopyStatement>,
     pub referenced_tables: Vec<String>,
     pub operation_type: OperationType,
 }
@@ -75,6 +80,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
             TranspileResult {
                 sql: sql.to_lowercase(),
                 create_table_metadata: None,
+                copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
             }
@@ -84,6 +90,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
             TranspileResult {
                 sql: sql.to_lowercase().replace("now()", "datetime('now')"),
                 create_table_metadata: None,
+                copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
             }
@@ -103,7 +110,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
         match inner {
             NodeEnum::SelectStmt(ref select_stmt) => TranspileResult {
                 sql: reconstruct_select_stmt(select_stmt, ctx),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::SELECT,
             },
@@ -114,19 +121,19 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             }
             NodeEnum::InsertStmt(ref insert_stmt) => TranspileResult {
                 sql: reconstruct_insert_stmt(insert_stmt, ctx),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::INSERT,
             },
             NodeEnum::UpdateStmt(ref update_stmt) => TranspileResult {
                 sql: reconstruct_update_stmt(update_stmt, ctx),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::UPDATE,
             },
             NodeEnum::DeleteStmt(ref delete_stmt) => TranspileResult {
                 sql: reconstruct_delete_stmt(delete_stmt, ctx),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::DELETE,
             },
@@ -139,7 +146,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                                 if let pg_query::protobuf::a_const::Val::Sval(ref s) = val {
                                     return TranspileResult {
                                         sql: format!("-- SET ROLE {}", s.sval),
-                                        create_table_metadata: None,
+                                        create_table_metadata: None, copy_metadata: None,
                                         referenced_tables: Vec::new(),
                                         operation_type: OperationType::OTHER,
                                     };
@@ -150,38 +157,38 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 }
                 TranspileResult {
                     sql: "select 1".to_string(), // Safely ignore other SET statements
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
                 }
             }
             NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
                 sql: format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::SELECT,
             },
             NodeEnum::CreateRoleStmt(ref create_role_stmt) => TranspileResult {
                 sql: reconstruct_create_role_stmt(create_role_stmt, ctx),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
                 sql: reconstruct_drop_role_stmt(drop_role_stmt),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
             NodeEnum::GrantStmt(ref grant_stmt) => TranspileResult {
                 sql: reconstruct_grant_stmt(grant_stmt),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
             NodeEnum::GrantRoleStmt(ref grant_role_stmt) => TranspileResult {
                 sql: reconstruct_grant_role_stmt(grant_role_stmt),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
             },
@@ -189,7 +196,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 let sql = reconstruct_alter_table_stmt(alter_stmt, ctx);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                 }
@@ -198,7 +205,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 let sql = reconstruct_drop_stmt(drop_stmt, ctx);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                 }
@@ -207,14 +214,26 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 let sql = reconstruct_index_stmt(index_stmt, ctx);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                 }
             }
+            NodeEnum::CopyStmt(ref copy_stmt) => {
+                // Handle COPY statement - return metadata for the COPY handler
+                match reconstruct_copy_stmt(copy_stmt, ctx) {
+                    Ok(result) => result,
+                    Err(e) => TranspileResult {
+                        sql: format!("-- COPY ERROR: {}", e),
+                        create_table_metadata: None, copy_metadata: None,
+                        referenced_tables: Vec::new(),
+                        operation_type: OperationType::OTHER,
+                    }
+                }
+            }
             _ => TranspileResult {
                 sql: node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
-                create_table_metadata: None,
+                create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
             },
@@ -222,7 +241,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
     } else {
         TranspileResult {
             sql: String::new(),
-            create_table_metadata: None,
+            create_table_metadata: None, copy_metadata: None,
             referenced_tables: Vec::new(),
             operation_type: OperationType::OTHER,
         }
@@ -286,6 +305,7 @@ fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileC
     TranspileResult {
         sql,
         create_table_metadata: metadata,
+        copy_metadata: None,
         referenced_tables: ctx.referenced_tables.clone(),
         operation_type: OperationType::DDL,
     }
@@ -2598,6 +2618,165 @@ fn reconstruct_index_stmt(stmt: &IndexStmt, ctx: &mut TranspileContext) -> Strin
     parts.join(" ")
 }
 
+/// Reconstruct a COPY statement
+fn reconstruct_copy_stmt(stmt: &CopyStmt, ctx: &mut TranspileContext) -> Result<TranspileResult, anyhow::Error> {
+    use crate::copy::{CopyStatement, CopyDirection, CopyOptions, CopyFormat};
+
+    // Get table name
+    let table_name = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .unwrap_or_default();
+
+    if !table_name.is_empty() {
+        ctx.referenced_tables.push(table_name.to_lowercase());
+    }
+
+    // Determine direction
+    let is_from = stmt.is_from;
+    let direction = if is_from {
+        CopyDirection::From
+    } else {
+        CopyDirection::To
+    };
+
+    // Extract column list
+    let mut columns = Vec::new();
+    for att_elem in &stmt.attlist {
+        if let Some(ref node) = att_elem.node {
+            if let NodeEnum::String(s) = node {
+                columns.push(s.sval.clone());
+            }
+        }
+    }
+
+    // Parse options from options field
+    let mut options = CopyOptions::default();
+    for def_elem in &stmt.options {
+        if let Some(ref node) = def_elem.node {
+            if let NodeEnum::DefElem(def) = node {
+                let def_name = def.defname.to_uppercase();
+                match def_name.as_str() {
+                    "FORMAT" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    let format_str = s.sval.to_uppercase();
+                                    match format_str.as_str() {
+                                        "TEXT" => {
+                                            options.format = CopyFormat::Text;
+                                            options.delimiter = '\t';
+                                            options.null_string = "\\N".to_string();
+                                        }
+                                        "CSV" => {
+                                            options.format = CopyFormat::Csv;
+                                            options.delimiter = ',';
+                                            options.null_string = "".to_string();
+                                        }
+                                        "BINARY" => {
+                                            options.format = CopyFormat::Binary;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "DELIMITER" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    let delim = &s.sval;
+                                    if !delim.is_empty() {
+                                        options.delimiter = delim.chars().next().unwrap_or('\t');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "QUOTE" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    let quote = &s.sval;
+                                    if !quote.is_empty() {
+                                        options.quote = quote.chars().next().unwrap_or('"');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "ESCAPE" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    let escape = &s.sval;
+                                    if !escape.is_empty() {
+                                        options.escape = escape.chars().next().unwrap_or('\\');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "NULL" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    options.null_string = s.sval.clone();
+                                }
+                            }
+                        }
+                    }
+                    "HEADER" => {
+                        options.header = true;
+                    }
+                    "ENCODING" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref inner) = arg.node {
+                                if let NodeEnum::String(s) = inner {
+                                    options.encoding = s.sval.clone();
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Get query for COPY TO
+    let query = if !is_from {
+        stmt.query.as_ref().map(|q| {
+            // Reconstruct the query
+            reconstruct_node(q, ctx)
+        })
+    } else {
+        None
+    };
+
+    // Build the COPY statement metadata
+    let copy_stmt = CopyStatement {
+        table_name: if table_name.is_empty() { None } else { Some(table_name) },
+        columns,
+        direction,
+        options,
+        query,
+    };
+
+    // Return a special marker SQL that the main handler will recognize
+    let marker_sql = format!("-- COPY {:?} {:?}", direction, copy_stmt.table_name.as_deref().unwrap_or("QUERY"));
+
+    Ok(TranspileResult {
+        sql: marker_sql,
+        create_table_metadata: None,
+        copy_metadata: Some(copy_stmt),
+        referenced_tables: ctx.referenced_tables.clone(),
+        operation_type: OperationType::OTHER,
+    })
+}
+
 /// Reconstruct an IndexElem (column in an index)
 fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: &mut TranspileContext) -> String {
     use pg_query::protobuf::{SortByDir, SortByNulls};
@@ -2851,7 +3030,7 @@ pub fn transpile_with_rls(
         let sqlite_sql = reconstruct_create_policy_stmt(sql);
         return TranspileResult {
             sql: sqlite_sql,
-            create_table_metadata: None,
+            create_table_metadata: None, copy_metadata: None,
             referenced_tables: vec![extract_policy_table_name(sql)],
             operation_type: OperationType::DDL,
         };
@@ -2862,7 +3041,7 @@ pub fn transpile_with_rls(
         let sqlite_sql = reconstruct_drop_policy_stmt(sql);
         return TranspileResult {
             sql: sqlite_sql,
-            create_table_metadata: None,
+            create_table_metadata: None, copy_metadata: None,
             referenced_tables: vec![extract_drop_policy_table_name(sql)],
             operation_type: OperationType::DDL,
         };
@@ -2901,7 +3080,7 @@ fn transpile_with_rls_ast(
                 let sql = reconstruct_select_stmt_with_rls(select_stmt, &mut ctx, conn, rls_ctx, &table_name);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::SELECT,
                 }
@@ -2911,7 +3090,7 @@ fn transpile_with_rls_ast(
                 let sql = reconstruct_insert_stmt_with_rls(insert_stmt, &mut ctx, conn, rls_ctx, &table_name);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::INSERT,
                 }
@@ -2921,7 +3100,7 @@ fn transpile_with_rls_ast(
                 let sql = reconstruct_update_stmt_with_rls(update_stmt, &mut ctx, conn, rls_ctx, &table_name);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::UPDATE,
                 }
@@ -2931,7 +3110,7 @@ fn transpile_with_rls_ast(
                 let sql = reconstruct_delete_stmt_with_rls(delete_stmt, &mut ctx, conn, rls_ctx, &table_name);
                 TranspileResult {
                     sql,
-                    create_table_metadata: None,
+                    create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DELETE,
                 }

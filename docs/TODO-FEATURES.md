@@ -50,7 +50,7 @@ This document tracks PostgreSQL features and their current support status in PGl
 | **Simple Query Protocol** | ✅ | - | Fully supported. |
 | **Extended Query Protocol** | ✅ | Medium | Support for `Parse`, `Bind`, `Describe`, `Execute` (Prepared Statements). |
 | **SSL/TLS Connections** | ✅ | Low | Supported via `rustls` or `native-tls`. |
-| **Copy Command** | ⚠️ | Medium | Basic `COPY FROM STDIN` works; advanced options (binary, encoding) need work. |
+| **Copy Command** | ✅ | Medium | Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats. See [docs/COPY.md](./COPY.md). |
 
 ## Advanced & Administrative
 

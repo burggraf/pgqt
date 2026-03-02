@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use dashmap::DashMap;
@@ -15,6 +15,7 @@ use rusqlite::Connection;
 use tokio::net::TcpListener;
 
 mod catalog;
+mod copy;
 mod distinct_on;
 mod rls;
 mod rls_inject;
@@ -109,6 +110,7 @@ struct SqliteHandler {
     conn: Arc<Mutex<Connection>>,
     sessions: Arc<DashMap<u32, SessionContext>>,
     schema_manager: SchemaManager,
+    copy_handler: copy::CopyHandler,
 }
 
 /// Factory for creating pgwire protocol handlers
@@ -130,7 +132,7 @@ impl PgWireServerHandlers for HandlerFactory {
     }
 
     fn copy_handler(&self) -> Arc<impl pgwire::api::copy::CopyHandler> {
-        Arc::new(pgwire::api::NoopHandler)
+        Arc::new(self.handler.copy_handler.clone())
     }
 }
 
@@ -1191,10 +1193,14 @@ impl SqliteHandler {
             Ok(rv.to_postgres_string())
         })?;
 
+        let conn_arc = Arc::new(Mutex::new(conn));
+        let copy_handler = copy::CopyHandler::new(conn_arc.clone());
+
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: conn_arc,
             sessions: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
+            copy_handler,
         })
     }
 
@@ -1545,6 +1551,44 @@ impl SqliteHandler {
         ))])
     }
 
+    /// Handle COPY statement
+    fn handle_copy_statement(&self,
+        copy_stmt: crate::copy::CopyStatement,
+    ) -> Result<Vec<Response>> {
+        use crate::copy::{CopyDirection};
+
+        match copy_stmt.direction {
+            CopyDirection::From => {
+                // COPY FROM STDIN - start the COPY operation
+                let table_name = copy_stmt.table_name.ok_or_else(|| anyhow!("COPY FROM requires table name"))?;
+                let options = copy_stmt.options;
+
+                // Return CopyInResponse to start the COPY protocol
+                let response = self.copy_handler.start_copy_from(
+                    table_name,
+                    copy_stmt.columns,
+                    options,
+                )?;
+                Ok(vec![response])
+            }
+            CopyDirection::To => {
+                // COPY TO STDOUT
+                let query = if let Some(q) = copy_stmt.query {
+                    q
+                } else if let Some(t) = copy_stmt.table_name {
+                    format!("SELECT * FROM {}", t)
+                } else {
+                    return Err(anyhow!("COPY TO requires table name or query"));
+                };
+
+                self.copy_handler.start_copy_to(
+                    query,
+                    copy_stmt.options,
+                ).map(|r| vec![r])
+            }
+        }
+    }
+
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         let upper_sql = sql.trim().to_uppercase();
@@ -1569,11 +1613,11 @@ impl SqliteHandler {
             return self.handle_show_search_path();
         }
 
-        let mut transpile_result = transpile_with_metadata(sql);
+        let transpile_result = transpile_with_metadata(sql);
         
-        // GLOBAL PATCH FOR RANGES
-        if transpile_result.sql.contains(" r integer") {
-            transpile_result.sql = transpile_result.sql.replace(" r integer", " r text");
+        // Handle COPY statements
+        if let Some(copy_stmt) = transpile_result.copy_metadata {
+            return self.handle_copy_statement(copy_stmt);
         }
         
         // Handle SET ROLE specially
@@ -1594,6 +1638,8 @@ impl SqliteHandler {
             // Return success without executing
             return Ok(vec![Response::Execution(Tag::new("SET"))]);
         }
+
+        // GLOBAL PATCH FOR RANGES
         
         // Check permissions before executing
         if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type)? {
