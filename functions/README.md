@@ -79,12 +79,17 @@ This directory contains comprehensive documentation for implementing PostgreSQL-
 - Add remaining features
 - Write user documentation
 
-### Phase 2: PL/pgSQL Functions (Future)
+### Phase 2: PL/pgSQL Functions (Ready to Implement)
 
-- PL/pgSQL parser
-- Lua transpiler
-- Lua runtime
-- Trigger support
+**📋 Complete detailed plan available in: [PLPGSQL_PHASE2_PLAN.md](PLPGSQL_PHASE2_PLAN.md)**
+
+- ✅ PL/pgSQL parser design (`pg_parse` integration)
+- ✅ Lua transpiler specification (complete AST → Lua mapping)
+- ✅ Lua runtime architecture (`mlua` with Luau sandbox)
+- ✅ Trigger support design (OLD/NEW, TG_* variables)
+- ✅ SQLSTATE error handling
+- ✅ Security sandboxing model
+- ✅ 4-week implementation timeline
 
 ## 🎯 Key Features
 

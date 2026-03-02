@@ -2,7 +2,7 @@
 
 ## 📚 Documentation Files
 
-This project includes **5 comprehensive documentation files** totaling **~65KB** of detailed implementation guidance.
+This project includes **6 comprehensive documentation files** totaling **~120KB** of detailed implementation guidance.
 
 ### 1. **FUNCTION_IMPLEMENTATION_PLAN.md** (23KB)
 **Purpose**: Complete architectural and implementation specification
@@ -16,10 +16,8 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
   - AST parsing
   - Function execution engine
   - Integration with main handler
-- Phase 2: PL/pgSQL functions (future)
-  - Lua runtime design
-  - Transpiler architecture
-  - Trigger support
+- Phase 2: PL/pgSQL functions (overview)
+  - Links to detailed Phase 2 plan
 - Testing strategy (unit, integration, E2E)
 - Documentation plan
 - Implementation timeline
@@ -27,11 +25,40 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 - Technical risks and mitigations
 - Dependencies
 
-**When to use**: When you need the complete specification, architecture decisions, or Phase 2 planning.
+**When to use**: When you need the complete specification, architecture decisions, or Phase 2 overview.
 
 ---
 
-### 2. **FUNCTION_QUICK_START.md** (5KB)
+### 2. **PLPGSQL_PHASE2_PLAN.md** (57KB) ⭐ **NEW - DETAILED PHASE 2**
+**Purpose**: Complete implementation-ready specification for PL/pgSQL support
+
+**Contents**:
+- Architecture overview with detailed diagrams
+- PL/pgSQL parser integration (`pg_parse` crate)
+- Complete AST type definitions (all 25+ statement types)
+- AST to Lua transpiler (full implementation)
+- Lua runtime environment (`mlua` with Luau)
+- PGQT API for Lua (database access, special variables)
+- Built-in functions: RAISE, PERFORM, EXECUTE, GET DIAGNOSTICS
+- Exception handling with SQLSTATE mapping
+- Trigger support with OLD/NEW rows and TG_* variables
+- Type mapping (PostgreSQL ↔ SQLite ↔ Lua)
+- 4-week implementation timeline (Phases 2A-2D)
+- Testing strategy with code examples
+- Performance considerations
+- Security model and sandboxing
+
+**When to use**: When implementing PL/pgSQL support. This is the definitive reference for Phase 2.
+
+**Key Technical Decisions**:
+- Parser: `pg_parse::parse_plpgsql()` returns JSON AST
+- Runtime: `mlua` with Luau backend for sandboxing
+- Transpilation: PL/pgSQL → Lua → execution
+- Security: Luau sandbox + resource limits
+
+---
+
+### 3. **FUNCTION_QUICK_START.md** (5KB)
 **Purpose**: Rapid implementation reference
 
 **Contents**:
@@ -46,7 +73,7 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 
 ---
 
-### 3. **FUNCTION_CODE_EXAMPLES.md** (27KB)
+### 4. **FUNCTION_CODE_EXAMPLES.md** (27KB)
 **Purpose**: Detailed code implementation examples
 
 **Contents**:
@@ -62,7 +89,7 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 
 ---
 
-### 4. **FUNCTION_SUMMARY.md** (10KB)
+### 5. **FUNCTION_SUMMARY.md** (10KB)
 **Purpose**: Executive summary and project overview
 
 **Contents**:
@@ -81,7 +108,7 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 
 ---
 
-### 5. **FUNCTION_ARCHITECTURE.md** (16KB)
+### 6. **FUNCTION_ARCHITECTURE.md** (16KB)
 **Purpose**: Visual architecture diagrams and data flows
 
 **Contents**:
@@ -119,7 +146,10 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 | How do I implement catalog storage? | FUNCTION_CODE_EXAMPLES.md (Section 1) |
 | How does function execution work? | FUNCTION_ARCHITECTURE.md (Execution Flow) |
 | What tests are needed? | FUNCTION_IMPLEMENTATION_PLAN.md (Testing) |
-| What about Phase 2 (PL/pgSQL)? | FUNCTION_IMPLEMENTATION_PLAN.md (Phase 2) |
+| What about Phase 2 (PL/pgSQL)? | **PLPGSQL_PHASE2_PLAN.md** (Complete specification) |
+| How do I parse PL/pgSQL? | **PLPGSQL_PHASE2_PLAN.md** (Section 2) |
+| How do I transpile to Lua? | **PLPGSQL_PHASE2_PLAN.md** (Section 3) |
+| How do I implement triggers? | **PLPGSQL_PHASE2_PLAN.md** (Section 7) |
 | What are the risks? | FUNCTION_SUMMARY.md (Technical Risks) |
 | How does CREATE FUNCTION flow? | FUNCTION_ARCHITECTURE.md (Data Flow) |
 | What's the catalog schema? | FUNCTION_CODE_EXAMPLES.md (Section 1) |
@@ -162,10 +192,10 @@ This project includes **5 comprehensive documentation files** totaling **~65KB**
 - [ ] Optimize performance (caching, etc.)
 - [ ] Add remaining features (VARIADIC, attributes)
 - [ ] Update README.md
-- [ ] Plan Phase 2 (PL/pgSQL)
+- [ ] Read **PLPGSQL_PHASE2_PLAN.md** completely
 - [ ] Create Phase 2 worktree
 
-**Primary Documents**: FUNCTION_IMPLEMENTATION_PLAN.md (Phase 2 section)
+**Primary Documents**: **PLPGSQL_PHASE2_PLAN.md** (Complete Phase 2 specification)
 
 ---
 
@@ -288,9 +318,9 @@ cargo test && ./run_tests.sh --no-e2e
 | Aspect | Status |
 |--------|--------|
 | Planning | ✅ Complete |
-| Documentation | ✅ Complete (5 files, ~65KB) |
+| Documentation | ✅ Complete (6 files, ~120KB) |
 | Phase 1 Design | ✅ Complete |
-| Phase 2 Design | ✅ Planned |
+| Phase 2 Design | ✅ Complete (detailed spec ready) |
 | Implementation | ⏳ Ready to start |
 | Testing Strategy | ✅ Defined |
 
@@ -311,13 +341,14 @@ cargo test && ./run_tests.sh --no-e2e
 ## 📝 Document Versions
 
 - **FUNCTION_IMPLEMENTATION_PLAN.md**: v1.0 (Complete)
+- **PLPGSQL_PHASE2_PLAN.md**: v1.0 (Complete - NEW!)
 - **FUNCTION_QUICK_START.md**: v1.0 (Complete)
 - **FUNCTION_CODE_EXAMPLES.md**: v1.0 (Complete)
 - **FUNCTION_SUMMARY.md**: v1.0 (Complete)
 - **FUNCTION_ARCHITECTURE.md**: v1.0 (Complete)
-- **FUNCTION_INDEX.md**: v1.0 (This file)
+- **FUNCTION_INDEX.md**: v1.1 (Updated with Phase 2)
 
-All documents created on: March 2, 2026
+All documents created/updated on: March 2, 2026
 
 ---
 

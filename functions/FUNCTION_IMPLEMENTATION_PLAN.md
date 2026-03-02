@@ -622,81 +622,111 @@ SELECT * FROM get_active_users();
 - PL/pgSQL functions not yet supported (Phase 2)
 ```
 
-## Phase 2: PL/pgSQL Functions (Future)
+## Phase 2: PL/pgSQL Functions (Detailed)
 
 ### Overview
 Implement full PL/pgSQL support using Lua as the execution runtime.
 
+**📋 Complete implementation plan available in:** [`PLPGSQL_PHASE2_PLAN.md`](PLPGSQL_PHASE2_PLAN.md)
+
+This document contains the high-level overview. For detailed specifications including:
+- Complete AST type definitions
+- Lua transpilation algorithms
+- Runtime API design
+- SQLSTATE error code mapping
+- Trigger variable handling
+- Security sandboxing
+- 4-week implementation timeline
+
+See the detailed Phase 2 plan document.
+
 ### Key Components
 
-1. **PL/pgSQL Parser** (`src/plpgsql.rs`)
-   - Parse PL/pgSQL syntax (DECLARE, BEGIN, END blocks)
-   - Extract control structures (IF, LOOP, WHILE, FOR)
-   - Parse variable declarations
+1. **PL/pgSQL Parser** (`src/plpgsql/parser.rs`)
+   - Uses `pg_parse::parse_plpgsql()` to get JSON AST
+   - Deserializes to Rust AST types
+   - Full coverage of PL/pgSQL statements
 
-2. **Lua Transpiler**
-   - Convert PL/pgSQL to Lua code
-   - Map PostgreSQL types to Lua types
-   - Handle PL/pgSQL-specific constructs:
-     - Variable assignments
-     - Control flow (IF/THEN/ELSE, CASE)
-     - Loops (LOOP, WHILE, FOR)
-     - Exception handling (BEGIN/EXCEPTION/END)
-     - RETURN statements
-     - RAISE statements
+2. **Lua Transpiler** (`src/plpgsql/transpiler.rs`)
+   - Converts PL/pgSQL AST to Lua source code
+   - Maps SQL expressions to `_ctx.scalar()` calls
+   - Transforms control flow (IF, LOOP, WHILE, FOR)
+   - Handles exception blocks via `pcall/xpcall`
 
-3. **Lua Runtime**
-   - Embed Lua interpreter (using `mlua` crate)
-   - Create safe execution sandbox
-   - Provide PostgreSQL-compatible API:
-     - `RAISE NOTICE`, `RAISE EXCEPTION`
-     - Access to function parameters
-     - Access to database via SQLite connection
-     - Support for cursors and dynamic SQL
+3. **Lua Runtime** (`src/plpgsql/runtime.rs`)
+   - Uses `mlua` with Luau backend for sandboxing
+   - Provides PGQT API for database access
+   - Manages special variables (SQLSTATE, SQLERRM)
+   - Caches compiled functions
 
-4. **Trigger Support**
-   - Support `CREATE TRIGGER` with PL/pgSQL functions
-   - Provide OLD and NEW row access
-   - Support trigger-specific variables (TG_NAME, TG_OP, etc.)
+4. **Trigger Support** (`src/plpgsql/trigger.rs`)
+   - Populates TG_* variables
+   - Handles OLD/NEW row data
+   - Returns modified rows
 
-### Example Implementation
+### Architecture Summary
 
-```rust
-// src/plpgsql.rs
-pub fn transpile_plpgsql_to_lua(pgsql_code: &str) -> Result<String> {
-    // Parse PL/pgSQL
-    let ast = parse_plpgsql(pgsql_code)?;
-    
-    // Convert to Lua
-    let lua_code = convert_to_lua(&ast)?;
-    
-    Ok(lua_code)
-}
-
-pub struct PlPgSqlRuntime {
-    lua: mlua::Lua,
-}
-
-impl PlPgSqlRuntime {
-    pub fn execute_function(
-        &self,
-        conn: &Connection,
-        func_metadata: &FunctionMetadata,
-        args: &[Value]
-    ) -> Result<Value> {
-        // Get Lua code from catalog
-        let lua_code = &func_metadata.function_body;
-        
-        // Execute in Lua sandbox
-        let result = self.lua
-            .load(lua_code)
-            .set_name(&func_metadata.name)?
-            .call::<_, Value>((conn, args))?;
-        
-        Ok(result)
-    }
-}
 ```
+PL/pgSQL Source
+      │
+      ▼
+pg_parse::parse_plpgsql()
+      │
+      ▼
+JSON AST ──► Rust AST (serde)
+      │
+      ▼
+Transpile to Lua
+      │
+      ▼
+Store Lua code in __pg_functions__
+      │
+      ▼ (Function Call)
+mlua::Lua::load() ──► sandboxed execution
+      │
+      ▼
+Return result
+```
+
+### Dependencies
+
+Add to `Cargo.toml`:
+```toml
+pg_parse = "0.16"  # PL/pgSQL parsing
+mlua = { version = "0.10", features = ["luau", "serialize", "send"] }
+```
+
+### Quick Example
+
+**PL/pgSQL Input:**
+```sql
+CREATE FUNCTION add(a int, b int) RETURNS int AS $$
+BEGIN
+    RETURN a + b;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**Generated Lua:**
+```lua
+local function add(_ctx, ...)
+  local a = select(1, ...)
+  local b = select(2, ...)
+  return _ctx.scalar("SELECT $1 + $2", {a, b})
+end
+return add
+```
+
+### Implementation Timeline
+
+| Phase | Duration | Focus |
+|-------|----------|-------|
+| 2A | Week 1 | Parser, basic transpiler |
+| 2B | Week 2 | Control flow, runtime API |
+| 2C | Week 3 | Advanced features, exceptions |
+| 2D | Week 4 | Trigger support |
+
+**📖 See [PLPGSQL_PHASE2_PLAN.md](PLPGSQL_PHASE2_PLAN.md) for complete details.**
 
 ## Implementation Timeline
 
