@@ -32,6 +32,7 @@ pub struct TranspileResult {
     pub copy_metadata: Option<crate::copy::CopyStatement>,
     pub referenced_tables: Vec<String>,
     pub operation_type: OperationType,
+    pub errors: Vec<String>,
 }
 
 /// Type of SQL operation
@@ -55,12 +56,14 @@ pub struct CreateTableMetadata {
 /// Context for the transpilation process
 pub struct TranspileContext {
     pub referenced_tables: Vec<String>,
+    pub errors: Vec<String>,
 }
 
 impl TranspileContext {
     pub fn new() -> Self {
         Self {
             referenced_tables: Vec::new(),
+            errors: Vec::new(),
         }
     }
 }
@@ -83,6 +86,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
+                errors: ctx.errors.clone(),
             }
         }
         Err(_) => {
@@ -93,6 +97,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
+                errors: Vec::new(),
             }
         }
     }
@@ -106,13 +111,14 @@ pub fn transpile(sql: &str) -> String {
 
 /// Reconstruct SQL from a parsed AST node, returning both SQL and metadata
 fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> TranspileResult {
-    if let Some(ref inner) = node.node {
+    let mut result = if let Some(ref inner) = node.node {
         match inner {
             NodeEnum::SelectStmt(ref select_stmt) => TranspileResult {
                 sql: reconstruct_select_stmt(select_stmt, ctx),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::SELECT,
+                errors: Vec::new(),
             },
             NodeEnum::CreateStmt(ref create_stmt) => {
                 let mut res = reconstruct_create_stmt_with_metadata(create_stmt, ctx);
@@ -124,18 +130,21 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::INSERT,
+                errors: Vec::new(),
             },
             NodeEnum::UpdateStmt(ref update_stmt) => TranspileResult {
                 sql: reconstruct_update_stmt(update_stmt, ctx),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::UPDATE,
+                errors: Vec::new(),
             },
             NodeEnum::DeleteStmt(ref delete_stmt) => TranspileResult {
                 sql: reconstruct_delete_stmt(delete_stmt, ctx),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::DELETE,
+                errors: Vec::new(),
             },
             NodeEnum::VariableSetStmt(ref set_stmt) => {
                 // Handle SET ROLE specially
@@ -149,6 +158,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                                         create_table_metadata: None, copy_metadata: None,
                                         referenced_tables: Vec::new(),
                                         operation_type: OperationType::OTHER,
+                                        errors: Vec::new(),
                                     };
                                 }
                             }
@@ -160,6 +170,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
+                    errors: Vec::new(),
                 }
             }
             NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
@@ -167,30 +178,35 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::SELECT,
+                errors: Vec::new(),
             },
             NodeEnum::CreateRoleStmt(ref create_role_stmt) => TranspileResult {
                 sql: reconstruct_create_role_stmt(create_role_stmt, ctx),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
+                errors: Vec::new(),
             },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
                 sql: reconstruct_drop_role_stmt(drop_role_stmt),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
+                errors: Vec::new(),
             },
             NodeEnum::GrantStmt(ref grant_stmt) => TranspileResult {
                 sql: reconstruct_grant_stmt(grant_stmt),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
+                errors: Vec::new(),
             },
             NodeEnum::GrantRoleStmt(ref grant_role_stmt) => TranspileResult {
                 sql: reconstruct_grant_role_stmt(grant_role_stmt),
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
+                errors: Vec::new(),
             },
             NodeEnum::AlterTableStmt(ref alter_stmt) => {
                 let sql = reconstruct_alter_table_stmt(alter_stmt, ctx);
@@ -199,6 +215,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
+                    errors: Vec::new(),
                 }
             }
             NodeEnum::DropStmt(ref drop_stmt) => {
@@ -208,6 +225,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
+                    errors: Vec::new(),
                 }
             }
             NodeEnum::IndexStmt(ref index_stmt) => {
@@ -217,6 +235,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
+                    errors: Vec::new(),
                 }
             }
             NodeEnum::CopyStmt(ref copy_stmt) => {
@@ -228,6 +247,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                         create_table_metadata: None, copy_metadata: None,
                         referenced_tables: Vec::new(),
                         operation_type: OperationType::OTHER,
+                        errors: Vec::new(),
                     }
                 }
             }
@@ -236,6 +256,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 create_table_metadata: None, copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
+                errors: Vec::new(),
             },
         }
     } else {
@@ -244,8 +265,12 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             create_table_metadata: None, copy_metadata: None,
             referenced_tables: Vec::new(),
             operation_type: OperationType::OTHER,
+            errors: Vec::new(),
         }
-    }
+    };
+
+    result.errors.extend(ctx.errors.clone());
+    result
 }
 
 /// Reconstruct a CREATE TABLE statement and extract metadata
@@ -308,6 +333,7 @@ fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileC
         copy_metadata: None,
         referenced_tables: ctx.referenced_tables.clone(),
         operation_type: OperationType::DDL,
+        errors: Vec::new(),
     }
 }
 
@@ -1750,6 +1776,10 @@ fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileContext) -> St
 
 /// Reconstruct a RangeSubselect node (subquery in FROM clause)
 fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut TranspileContext) -> String {
+    if range_subselect.lateral {
+        ctx.errors.push("LATERAL joins for subqueries are not supported in SQLite. Consider using window functions or CTEs.".to_string());
+    }
+
     let subquery = range_subselect
         .subquery
         .as_ref()
@@ -2774,6 +2804,7 @@ fn reconstruct_copy_stmt(stmt: &CopyStmt, ctx: &mut TranspileContext) -> Result<
         copy_metadata: Some(copy_stmt),
         referenced_tables: ctx.referenced_tables.clone(),
         operation_type: OperationType::OTHER,
+        errors: Vec::new(),
     })
 }
 
@@ -3033,6 +3064,7 @@ pub fn transpile_with_rls(
             create_table_metadata: None, copy_metadata: None,
             referenced_tables: vec![extract_policy_table_name(sql)],
             operation_type: OperationType::DDL,
+            errors: Vec::new(),
         };
     }
 
@@ -3044,6 +3076,7 @@ pub fn transpile_with_rls(
             create_table_metadata: None, copy_metadata: None,
             referenced_tables: vec![extract_drop_policy_table_name(sql)],
             operation_type: OperationType::DDL,
+            errors: Vec::new(),
         };
     }
 
@@ -3083,6 +3116,7 @@ fn transpile_with_rls_ast(
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::SELECT,
+                    errors: ctx.errors.clone(),
                 }
             }
             NodeEnum::InsertStmt(ref insert_stmt) => {
@@ -3093,6 +3127,7 @@ fn transpile_with_rls_ast(
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::INSERT,
+                    errors: ctx.errors.clone(),
                 }
             }
             NodeEnum::UpdateStmt(ref update_stmt) => {
@@ -3103,6 +3138,7 @@ fn transpile_with_rls_ast(
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::UPDATE,
+                    errors: ctx.errors.clone(),
                 }
             }
             NodeEnum::DeleteStmt(ref delete_stmt) => {
@@ -3113,6 +3149,7 @@ fn transpile_with_rls_ast(
                     create_table_metadata: None, copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DELETE,
+                    errors: ctx.errors.clone(),
                 }
             }
             _ => reconstruct_sql_with_metadata(node, &mut ctx),
@@ -3909,7 +3946,16 @@ VALUES
         let result = transpile_with_metadata("SELECT id, name, key, value FROM test_jsonb, LATERAL jsonb_each(props) AS x(key, value)");
         println!("Transpiled LATERAL: {}", result.sql);
         // Should translate jsonb_each to json_each and handle LATERAL
-        assert!(!result.sql.is_empty(), "Should produce some SQL");
+        assert!(result.sql.contains("json_each"), "Should use json_each: {}", result.sql);
+        assert!(!result.sql.to_uppercase().contains("LATERAL"), "Should not contain LATERAL keyword: {}", result.sql);
+        assert!(result.errors.is_empty(), "Should have no errors for function lateral: {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_lateral_subquery_error() {
+        let result = transpile_with_metadata("SELECT * FROM (SELECT 1 as x) a, LATERAL (SELECT a.x + 1 as y) b");
+        assert!(!result.errors.is_empty(), "Should have errors for lateral subquery");
+        assert!(result.errors[0].contains("LATERAL joins for subqueries are not supported"), "Error message should be correct: {}", result.errors[0]);
     }
 
     #[test]
