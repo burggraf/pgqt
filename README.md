@@ -8,7 +8,7 @@ A PostgreSQL wire-compatible proxy for SQLite that allows you to use standard Po
 
 ## Overview
 
-PGlite Proxy acts as a middleware server that translates the PostgreSQL wire protocol into SQLite operations. It provides:
+`pgqt` acts as a middleware server that translates the PostgreSQL wire protocol into SQLite operations. It provides:
 
 - **Full PostgreSQL Compatibility**: Connect using `psql`, `pgAdmin`, DBeaver, or any PostgreSQL driver
 - **Type Preservation**: Original PostgreSQL types (SERIAL, VARCHAR, TIMESTAMPTZ, etc.) are stored in a shadow catalog for reversible migrations
@@ -127,7 +127,7 @@ WHERE name ~~ 'alice%';    -- → WHERE name LIKE 'alice%'
 
 ### Schemas (Namespaces)
 
-PGlite Proxy implements PostgreSQL schema support using SQLite's ATTACH DATABASE feature. Each schema maps to a separate SQLite database file.
+`pgqt` implements PostgreSQL schema support using SQLite's ATTACH DATABASE feature. Each schema maps to a separate SQLite database file.
 
 #### Creating Schemas
 
@@ -179,7 +179,7 @@ For complete documentation, see [docs/SCHEMAS.md](./docs/SCHEMAS.md).
 
 ### Role-Based Access Control (RBAC)
 
-PGlite Proxy implements PostgreSQL-compatible role-based access control, allowing you to manage users, roles, and permissions:
+`pgqt` implements PostgreSQL-compatible role-based access control, allowing you to manage users, roles, and permissions:
 
 #### Creating Roles
 
@@ -300,7 +300,7 @@ DELETE FROM users WHERE id = 1;         -- ❌ Permission denied
 
 ### Row-Level Security (RLS)
 
-PGlite Proxy implements PostgreSQL-compatible Row-Level Security (RLS), enabling fine-grained access control at the row level based on the current user or session context.
+`pgqt` implements PostgreSQL-compatible Row-Level Security (RLS), enabling fine-grained access control at the row level based on the current user or session context.
 
 #### Enabling RLS
 
@@ -364,7 +364,7 @@ This enables 100% reversible migrations back to PostgreSQL.
 
 ### System Catalogs (pg_catalog)
 
-PGlite Proxy provides comprehensive PostgreSQL-compatible system catalog views for full ORM support:
+`pgqt` provides comprehensive PostgreSQL-compatible system catalog views for full ORM support:
 
 ```sql
 -- List all tables (like \dt in psql)
@@ -410,7 +410,7 @@ For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  PostgreSQL     │────▶│   PGlite Proxy   │────▶│   SQLite        │
+│  PostgreSQL     │────▶│   `pgqt`   │────▶│   SQLite        │
 │  Client (psql)  │     │   (Rust/Tokio)   │     │   Database      │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                │
@@ -624,7 +624,7 @@ src/
 
 ### Full-Text Search (FTS)
 
-PGlite Proxy provides PostgreSQL-compatible full-text search functionality using SQLite's FTS5 extension:
+`pgqt` provides PostgreSQL-compatible full-text search functionality using SQLite's FTS5 extension:
 
 ```sql
 -- Create a table with tsvector column
@@ -677,7 +677,7 @@ For complete documentation, see [docs/FTS.md](./docs/FTS.md).
 
 ### Array Support
 
-PGlite Proxy provides PostgreSQL-compatible array support with full operator and function coverage:
+`pgqt` provides PostgreSQL-compatible array support with full operator and function coverage:
 
 ```sql
 -- Create table with array columns
@@ -728,7 +728,7 @@ For complete documentation, see [docs/ARRAYS.md](./docs/ARRAYS.md).
 
 ### Vector Search (pgvector Compatible)
 
-PGlite Proxy provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:
+`pgqt` provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:
 
 ```sql
 -- Create table with vector column
@@ -776,7 +776,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
 ### Window Functions
 
-PGlite Proxy provides full PostgreSQL-compatible window function support:
+`pgqt` provides full PostgreSQL-compatible window function support:
 
 ```sql
 -- Ranking within groups
@@ -821,7 +821,7 @@ For complete documentation, see [docs/WINDOW.md](./docs/WINDOW.md).
 
 ### DISTINCT ON
 
-PGlite Proxy provides PostgreSQL-compatible DISTINCT ON support using ROW_NUMBER() window function polyfill:
+`pgqt` provides PostgreSQL-compatible DISTINCT ON support using ROW_NUMBER() window function polyfill:
 
 ```sql
 -- Get the latest order for each customer
