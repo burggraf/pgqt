@@ -6,10 +6,9 @@ use async_trait::async_trait;
 use clap::Parser;
 use dashmap::DashMap;
 use futures::stream;
-use pgwire::api::auth::noop::NoopStartupHandler;
-use pgwire::api::query::{PlaceholderExtendedQueryHandler, SimpleQueryHandler};
+use pgwire::api::query::SimpleQueryHandler;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
-use pgwire::api::{ClientInfo, Type};
+use pgwire::api::{ClientInfo, PgWireServerHandlers, Type};
 use pgwire::error::{ErrorInfo, PgWireResult};
 use pgwire::tokio::process_socket;
 use rusqlite::Connection;
@@ -110,6 +109,29 @@ struct SqliteHandler {
     conn: Arc<Mutex<Connection>>,
     sessions: Arc<DashMap<u32, SessionContext>>,
     schema_manager: SchemaManager,
+}
+
+/// Factory for creating pgwire protocol handlers
+struct HandlerFactory {
+    handler: Arc<SqliteHandler>,
+}
+
+impl PgWireServerHandlers for HandlerFactory {
+    fn startup_handler(&self) -> Arc<impl pgwire::api::auth::StartupHandler> {
+        Arc::new(pgwire::api::NoopHandler)
+    }
+
+    fn simple_query_handler(&self) -> Arc<impl pgwire::api::query::SimpleQueryHandler> {
+        self.handler.clone()
+    }
+
+    fn extended_query_handler(&self) -> Arc<impl pgwire::api::query::ExtendedQueryHandler> {
+        Arc::new(pgwire::api::NoopHandler)
+    }
+
+    fn copy_handler(&self) -> Arc<impl pgwire::api::copy::CopyHandler> {
+        Arc::new(pgwire::api::NoopHandler)
+    }
 }
 
 impl SqliteHandler {
@@ -1274,7 +1296,7 @@ impl SqliteHandler {
     }
 
     /// Handle CREATE SCHEMA statement
-    fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response>> {
         // Parse schema name from CREATE SCHEMA [IF NOT EXISTS] name [AUTHORIZATION user]
         let upper_sql = sql.to_uppercase();
         let if_not_exists = upper_sql.contains("IF NOT EXISTS");
@@ -1316,7 +1338,7 @@ impl SqliteHandler {
     }
 
     /// Handle DROP SCHEMA statement
-    fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response>> {
         // Parse schema name from DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]
         let upper_sql = sql.to_uppercase();
         let if_exists = upper_sql.contains("IF EXISTS");
@@ -1375,7 +1397,7 @@ impl SqliteHandler {
     }
 
     /// Handle SET search_path statement
-    fn handle_set_search_path(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn handle_set_search_path(&self, sql: &str) -> Result<Vec<Response>> {
         // Parse search_path from SET search_path TO value or SET search_path = value
         let path_str = sql
             .to_lowercase()
@@ -1404,7 +1426,7 @@ impl SqliteHandler {
     }
 
     /// Handle SHOW search_path statement
-    fn handle_show_search_path(&self) -> Result<Vec<Response<'_>>> {
+    fn handle_show_search_path(&self) -> Result<Vec<Response>> {
         let session = self.sessions.get(&0).unwrap_or_else(|| {
             self.sessions.insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
@@ -1426,7 +1448,7 @@ impl SqliteHandler {
 
         let mut encoder = DataRowEncoder::new(fields.clone());
         encoder.encode_field(&Some(path))?;
-        let data_rows = vec![encoder.finish()];
+        let data_rows = vec![Ok(encoder.take_row())];
 
         let row_stream = stream::iter(data_rows);
 
@@ -1437,7 +1459,7 @@ impl SqliteHandler {
     }
 
     /// Execute a SQL query and return the results
-    fn execute_query(&self, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         let upper_sql = sql.trim().to_uppercase();
 
         // Handle CREATE SCHEMA
@@ -1547,7 +1569,7 @@ impl SqliteHandler {
         }
     }
 
-    fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
         let mut stmt = conn.prepare(sql)?;
         let col_count = stmt.column_count();
 
@@ -1581,7 +1603,7 @@ impl SqliteHandler {
                 }
             }
 
-            data_rows.push(encoder.finish());
+            data_rows.push(Ok(encoder.take_row()));
         }
 
         let row_stream = stream::iter(data_rows);
@@ -1592,7 +1614,7 @@ impl SqliteHandler {
         ))])
     }
 
-    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response<'_>>> {
+    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
         println!("Executing statement: {}", sql);
         let changes = conn.execute(sql, [])?;
 
@@ -1617,7 +1639,7 @@ impl SqliteHandler {
 
 #[async_trait]
 impl SimpleQueryHandler for SqliteHandler {
-    async fn do_query<'a, 'b: 'a, C>(&'b self, client: &mut C, query: &'a str) -> PgWireResult<Vec<Response<'a>>>
+    async fn do_query<C>(&self, client: &mut C, query: &str) -> PgWireResult<Vec<Response>>
     where
         C: ClientInfo + Unpin + Send + Sync,
     {
@@ -1663,24 +1685,19 @@ async fn main() -> Result<()> {
     log_error(&format!("Error log started for database: {}", cli.database));
 
     let handler = Arc::new(SqliteHandler::new(&cli.database)?);
-    let startup_handler = Arc::new(NoopStartupHandler);
-    let extended_handler = Arc::new(PlaceholderExtendedQueryHandler);
+    let factory = Arc::new(HandlerFactory { handler: handler.clone() });
 
     loop {
         let (incoming_socket, client_addr) = listener.accept().await?;
         log_output(&format!("New connection from {}", client_addr));
 
-        let handler = handler.clone();
-        let startup_handler = startup_handler.clone();
-        let extended_handler = extended_handler.clone();
+        let factory = factory.clone();
 
         tokio::spawn(async move {
             let _ = process_socket(
                 incoming_socket,
                 None,
-                startup_handler,
-                handler,
-                extended_handler,
+                factory,
             )
             .await;
         });
