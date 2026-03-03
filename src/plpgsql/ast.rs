@@ -166,12 +166,45 @@ pub struct PlPgSQLStmtBlock {
 }
 
 /// Variable assignment
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PlPgSQLStmtAssign {
-    #[serde(rename = "varname")]
     pub varname: String,
-    #[serde(rename = "expr")]
     pub expr: PlPgSQLExpr,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLStmtAssign {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        if let Some(obj) = value.as_object() {
+            // varname can be a string or we might need to look up varno
+            let varname = match obj.get("varname") {
+                Some(Value::String(s)) => s.clone(),
+                _ => {
+                    // If varname is not present, use varno as placeholder
+                    // In a real implementation, we'd look up the variable name from datums
+                    obj.get("varno")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| format!("var_{}", n))
+                        .ok_or_else(|| serde::de::Error::missing_field("varname or varno"))?
+                }
+            };
+            
+            let expr = obj.get("expr")
+                .ok_or_else(|| serde::de::Error::missing_field("expr"))
+                .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| serde::de::Error::custom(e.to_string())))?;
+            
+            return Ok(PlPgSQLStmtAssign {
+                varname,
+                expr,
+            });
+        }
+        
+        Err(serde::de::Error::custom("Expected object for assignment"))
+    }
 }
 
 /// IF/THEN/ELSE statement
@@ -213,20 +246,69 @@ pub struct PlPgSQLStmtWhile {
 }
 
 /// FOR i IN start..end loop
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PlPgSQLStmtForI {
-    #[serde(rename = "varname")]
     pub varname: String,
-    #[serde(rename = "lower")]
     pub lower: PlPgSQLExpr,
-    #[serde(rename = "upper")]
     pub upper: PlPgSQLExpr,
-    #[serde(default)]
     pub byval: Option<PlPgSQLExpr>,
-    #[serde(default)]
     pub reverse: bool,
-    #[serde(rename = "body")]
     pub body: Vec<PlPgSQLStmt>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLStmtForI {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        if let Some(obj) = value.as_object() {
+            // var can be a string (varname) or an object (PLpgSQL_var)
+            let varname = match obj.get("var") {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Object(var_obj)) => {
+                    // Extract from PLpgSQL_var
+                    var_obj.get("PLpgSQL_var")
+                        .and_then(|v| v.get("refname"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| serde::de::Error::missing_field("refname"))?
+                }
+                _ => return Err(serde::de::Error::missing_field("var")),
+            };
+            
+            let lower = obj.get("lower")
+                .ok_or_else(|| serde::de::Error::missing_field("lower"))
+                .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| serde::de::Error::custom(e.to_string())))?;
+            
+            let upper = obj.get("upper")
+                .ok_or_else(|| serde::de::Error::missing_field("upper"))
+                .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| serde::de::Error::custom(e.to_string())))?;
+            
+            let byval = obj.get("byval")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            
+            let reverse = obj.get("reverse")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            
+            let body = obj.get("body")
+                .ok_or_else(|| serde::de::Error::missing_field("body"))
+                .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| serde::de::Error::custom(e.to_string())))?;
+            
+            return Ok(PlPgSQLStmtForI {
+                varname,
+                lower,
+                upper,
+                byval,
+                reverse,
+                body,
+            });
+        }
+        
+        Err(serde::de::Error::custom("Expected object for FOR loop"))
+    }
 }
 
 /// FOR row IN SELECT loop
@@ -264,16 +346,72 @@ pub struct PlPgSQLStmtReturnNext {
 }
 
 /// RAISE statement
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PlPgSQLStmtRaise {
-    #[serde(rename = "elog_level")]
     pub elog_level: String,
-    #[serde(default)]
     pub message: Option<String>,
-    #[serde(default)]
     pub params: Option<Vec<PlPgSQLExpr>>,
-    #[serde(default)]
     pub options: Option<Vec<PlPgSQLRaiseOption>>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLStmtRaise {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        if let Some(obj) = value.as_object() {
+            // elog_level can be integer or string
+            let elog_level = match obj.get("elog_level") {
+                Some(Value::Number(n)) => {
+                    // Map integer levels to string names
+                    // PostgreSQL log levels: DEBUG=10, LOG=14, INFO=17, NOTICE=18, WARNING=19
+                    match n.as_i64() {
+                        Some(10) => "DEBUG",
+                        Some(14) => "LOG",
+                        Some(17) => "INFO",
+                        Some(18) => "NOTICE",
+                        Some(19) => "WARNING",
+                        _ => "NOTICE", // default
+                    }.to_string()
+                }
+                Some(Value::String(s)) => s.clone(),
+                _ => "NOTICE".to_string(),
+            };
+            
+            let message = obj.get("message")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            
+            // Parse params if present
+            let params = obj.get("params")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                        .collect::<Vec<PlPgSQLExpr>>()
+                });
+            
+            // Parse options if present
+            let options = obj.get("options")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                        .collect::<Vec<PlPgSQLRaiseOption>>()
+                });
+            
+            return Ok(PlPgSQLStmtRaise {
+                elog_level,
+                message,
+                params,
+                options,
+            });
+        }
+        
+        Err(serde::de::Error::custom("Expected object for RAISE statement"))
+    }
 }
 
 /// RAISE option (ERRCODE, MESSAGE, etc.)

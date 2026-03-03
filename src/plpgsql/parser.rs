@@ -5,10 +5,23 @@
 
 use anyhow::{Result, Context};
 use crate::plpgsql::ast::PlpgsqlFunction;
+use pg_query::protobuf::node::Node as NodeEnum;
+
+/// Function metadata extracted from CREATE FUNCTION statement
+#[derive(Debug, Clone)]
+pub struct FunctionMetadata {
+    pub name: String,
+    pub arg_names: Vec<String>,
+    pub arg_types: Vec<String>,
+    pub return_type: String,
+}
 
 /// Parse a single PL/pgSQL function and return its AST
 pub fn parse_plpgsql_function(sql: &str) -> Result<PlpgsqlFunction> {
-    // Use pg_parse to get JSON AST
+    // First, extract function metadata using pg_query
+    let metadata = extract_function_metadata(sql)?;
+    
+    // Use pg_parse to get JSON AST for the function body
     let json = pg_parse::parse_plpgsql(sql)
         .map_err(|e| anyhow::anyhow!("Failed to parse PL/pgSQL: {:?}", e))?;
     
@@ -25,10 +38,48 @@ pub fn parse_plpgsql_function(sql: &str) -> Result<PlpgsqlFunction> {
         .ok_or_else(|| anyhow::anyhow!("Expected PLpgSQL_function in AST: {:?}", func_array[0]))?;
     
     // Deserialize to our Rust types
-    let function: PlpgsqlFunction = serde_json::from_value(func_json.clone())
+    let mut function: PlpgsqlFunction = serde_json::from_value(func_json.clone())
         .context("Failed to deserialize PL/pgSQL AST")?;
     
+    // Set the function name from metadata
+    function.fn_name = Some(metadata.name);
+    
     Ok(function)
+}
+
+/// Extract function metadata from CREATE FUNCTION statement using pg_query
+fn extract_function_metadata(sql: &str) -> Result<FunctionMetadata> {
+    // Parse the SQL to get function metadata
+    let result = pg_query::parse(sql)
+        .map_err(|e| anyhow::anyhow!("Failed to parse CREATE FUNCTION: {}", e))?;
+    
+    // Get the first statement
+    let stmt = result.protobuf.stmts.get(0)
+        .and_then(|s| s.stmt.as_ref())
+        .ok_or_else(|| anyhow::anyhow!("No statement found in SQL"))?;
+    
+    // Check if it's a CREATE FUNCTION statement
+    if let Some(NodeEnum::CreateFunctionStmt(func_stmt)) = &stmt.node {
+        // Extract function name
+        let name = func_stmt.funcname.first()
+            .and_then(|n| n.node.as_ref())
+            .and_then(|n| match n {
+                NodeEnum::String(s) => Some(s.sval.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "anonymous".to_string());
+        
+        // For now, return basic metadata
+        // In a full implementation, we'd extract parameters and return type too
+        return Ok(FunctionMetadata {
+            name,
+            arg_names: Vec::new(),
+            arg_types: Vec::new(),
+            return_type: "void".to_string(),
+        });
+    }
+    
+    Err(anyhow::anyhow!("Expected CREATE FUNCTION statement"))
 }
 
 /// Parse multiple functions (e.g., from CREATE OR REPLACE FUNCTION batch)
