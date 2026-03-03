@@ -20,8 +20,10 @@ pub struct PlpgsqlFunction {
     pub fn_name: Option<String>,
     #[serde(rename = "fn_argnames")]
     pub fn_argnames: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(rename = "fn_argtypes")]
     pub fn_argtypes: Option<Vec<i64>>,
+    #[allow(dead_code)]
     #[serde(rename = "fn_rettype")]
     pub fn_rettype: Option<i64>,
     /// The main action/body of the function
@@ -31,6 +33,7 @@ pub struct PlpgsqlFunction {
 
 impl PlpgsqlFunction {
     /// Get the function body statements (convenience method)
+    #[allow(dead_code)]
     pub fn fn_body(&self) -> &Vec<PlPgSQLStmt> {
         &self.action.block.body
     }
@@ -275,6 +278,7 @@ pub struct PlPgSQLStmtForI {
     pub varname: String,
     pub lower: PlPgSQLExpr,
     pub upper: PlPgSQLExpr,
+    #[allow(dead_code)]
     pub byval: Option<PlPgSQLExpr>,
     pub reverse: bool,
     pub body: Vec<PlPgSQLStmt>,
@@ -351,6 +355,7 @@ pub struct PlPgSQLStmtForS {
 pub struct PlPgSQLStmtExit {
     #[serde(default)]
     pub cond: Option<PlPgSQLExpr>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub label: Option<String>,
 }
@@ -452,6 +457,7 @@ pub struct PlPgSQLRaiseOption {
 #[derive(Debug, Clone)]
 pub struct PlPgSQLExpr {
     pub query: String,
+    #[allow(dead_code)]
     pub parse_mode: Option<i64>,
 }
 
@@ -517,10 +523,13 @@ pub struct PlPgSQLStmtPerform {
 pub struct PlPgSQLStmtDynExecute {
     #[serde(rename = "query")]
     pub query: PlPgSQLExpr,
+    #[allow(dead_code)]
     #[serde(default)]
     pub params: Option<Vec<PlPgSQLExpr>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub into: bool,
+    #[allow(dead_code)]
     #[serde(default)]
     pub target: Option<PlPgSQLVariable>,
 }
@@ -528,6 +537,7 @@ pub struct PlPgSQLStmtDynExecute {
 /// GET DIAGNOSTICS statement
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlPgSQLStmtGetDiag {
+    #[allow(dead_code)]
     #[serde(rename = "is_stacked")]
     pub is_stacked: bool,
     #[serde(rename = "diag_items")]
@@ -546,6 +556,7 @@ pub struct PlPgSQLDiagItem {
 /// CASE statement
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlPgSQLStmtCase {
+    #[allow(dead_code)]
     #[serde(default)]
     pub expr: Option<PlPgSQLExpr>,
     #[serde(rename = "case_when_list")]

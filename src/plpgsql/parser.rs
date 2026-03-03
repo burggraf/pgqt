@@ -9,6 +9,7 @@ use pg_query::protobuf::node::Node as NodeEnum;
 
 /// Function metadata extracted from CREATE FUNCTION statement
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FunctionMetadata {
     pub name: String,
     pub arg_names: Vec<String>,
@@ -83,6 +84,7 @@ fn extract_function_metadata(sql: &str) -> Result<FunctionMetadata> {
 }
 
 /// Parse multiple functions (e.g., from CREATE OR REPLACE FUNCTION batch)
+#[allow(dead_code)]
 pub fn parse_plpgsql_batch(sql: &str) -> Result<Vec<PlpgsqlFunction>> {
     let json = pg_parse::parse_plpgsql(sql)
         .map_err(|e| anyhow::anyhow!("Failed to parse PL/pgSQL batch: {:?}", e))?;

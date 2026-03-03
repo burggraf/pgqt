@@ -39,8 +39,8 @@ pub mod sqlstate;
 pub mod transpiler;
 
 // Re-export main types and functions
-pub use ast::PlpgsqlFunction;
-pub use parser::{parse_plpgsql_function, parse_plpgsql_batch};
+// pub use ast::PlpgsqlFunction;
+pub use parser::parse_plpgsql_function; // , parse_plpgsql_batch};
 pub use runtime::PlPgSqlRuntime;
 pub use transpiler::transpile_to_lua;
 
@@ -49,6 +49,7 @@ use rusqlite::{Connection, types::Value};
 use std::collections::HashMap;
 
 /// Execute a PL/pgSQL function by name (looks up in catalog)
+#[allow(dead_code)]
 pub fn execute_plpgsql_function(
     _conn: &Connection,
     _function_name: &str,
@@ -59,6 +60,7 @@ pub fn execute_plpgsql_function(
 }
 
 /// Execute a PL/pgSQL trigger function
+#[allow(dead_code)]
 pub fn execute_plpgsql_trigger(
     _conn: &Connection,
     _function_name: &str,

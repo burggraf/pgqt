@@ -7,33 +7,58 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 /// SQLSTATE error codes
+#[allow(dead_code)]
 pub const SQLSTATE_SUCCESSFUL_COMPLETION: &str = "00000";
+#[allow(dead_code)]
 pub const SQLSTATE_WARNING: &str = "01000";
+#[allow(dead_code)]
 pub const SQLSTATE_NO_DATA: &str = "02000";
+#[allow(dead_code)]
 pub const SQLSTATE_TOO_MANY_ROWS: &str = "P0003";
+#[allow(dead_code)]
 pub const SQLSTATE_DIVISION_BY_ZERO: &str = "22012";
+#[allow(dead_code)]
 pub const SQLSTATE_NUMERIC_VALUE_OUT_OF_RANGE: &str = "22003";
+#[allow(dead_code)]
 pub const SQLSTATE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
+#[allow(dead_code)]
 pub const SQLSTATE_FOREIGN_KEY_VIOLATION: &str = "23503";
+#[allow(dead_code)]
 pub const SQLSTATE_UNIQUE_VIOLATION: &str = "23505";
+#[allow(dead_code)]
 pub const SQLSTATE_CHECK_VIOLATION: &str = "23514";
+#[allow(dead_code)]
 pub const SQLSTATE_NOT_NULL_VIOLATION: &str = "23502";
+#[allow(dead_code)]
 pub const SQLSTATE_EXCLUSION_VIOLATION: &str = "23P01";
+#[allow(dead_code)]
 pub const SQLSTATE_INVALID_PARAMETER_VALUE: &str = "22023";
+#[allow(dead_code)]
 pub const SQLSTATE_UNDEFINED_COLUMN: &str = "42703";
+#[allow(dead_code)]
 pub const SQLSTATE_UNDEFINED_TABLE: &str = "42P01";
+#[allow(dead_code)]
 pub const SQLSTATE_UNDEFINED_FUNCTION: &str = "42883";
+#[allow(dead_code)]
 pub const SQLSTATE_DUPLICATE_TABLE: &str = "42P07";
+#[allow(dead_code)]
 pub const SQLSTATE_DUPLICATE_COLUMN: &str = "42701";
+#[allow(dead_code)]
 pub const SQLSTATE_AMBIGUOUS_COLUMN: &str = "42702";
+#[allow(dead_code)]
 pub const SQLSTATE_SYNTAX_ERROR: &str = "42601";
+#[allow(dead_code)]
 pub const SQLSTATE_FEATURE_NOT_SUPPORTED: &str = "0A000";
+#[allow(dead_code)]
 pub const SQLSTATE_IN_FAILED_SQL_TRANSACTION: &str = "25P02";
+#[allow(dead_code)]
 pub const SQLSTATE_RAISE_EXCEPTION: &str = "P0001";
+#[allow(dead_code)]
 pub const SQLSTATE_NO_DATA_FOUND: &str = "P0002";
+#[allow(dead_code)]
 pub const SQLSTATE_ASSERT_FAILURE: &str = "P0004";
 
-/// Mapping from condition names to SQLSTATE codes
+// Mapping from condition names to SQLSTATE codes
 lazy_static! {
     pub static ref CONDITION_MAP: HashMap<&'static str, &'static str> = {
         let mut m = HashMap::new();
@@ -67,11 +92,13 @@ lazy_static! {
 }
 
 /// Get SQLSTATE code for a condition name
+#[allow(dead_code)]
 pub fn get_sqlstate(condition: &str) -> Option<&'static str> {
     CONDITION_MAP.get(condition).copied()
 }
 
 /// Check if a SQLSTATE matches a condition (handles class matching)
+#[allow(dead_code)]
 pub fn sqlstate_matches(sqlstate: &str, condition: &str) -> bool {
     if let Some(expected) = get_sqlstate(condition) {
         // Exact match
@@ -89,6 +116,7 @@ pub fn sqlstate_matches(sqlstate: &str, condition: &str) -> bool {
 }
 
 /// Get error class from SQLSTATE (first 2 characters)
+#[allow(dead_code)]
 pub fn get_error_class(sqlstate: &str) -> &str {
     if sqlstate.len() >= 2 {
         &sqlstate[0..2]
@@ -98,6 +126,7 @@ pub fn get_error_class(sqlstate: &str) -> &str {
 }
 
 /// Get error category description
+#[allow(dead_code)]
 pub fn get_error_category(sqlstate: &str) -> &'static str {
     let class = get_error_class(sqlstate);
     match class {

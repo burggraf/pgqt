@@ -24,6 +24,7 @@ pub struct ExecutionContext {
     /// Row count from last operation
     pub row_count: i64,
     /// Result set for RETURN NEXT
+    #[allow(dead_code)]
     pub result_set: Vec<Vec<SqliteValue>>,
     /// Return OID from last INSERT (if applicable)
     pub return_oid: Option<i64>,

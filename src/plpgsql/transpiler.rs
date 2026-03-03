@@ -145,6 +145,7 @@ impl TranspileContext {
         writeln!(self.output, "{}{}", indent, line).unwrap();
     }
     
+    #[allow(dead_code)]
     fn emit(&mut self, text: &str) {
         self.output.push_str(text);
     }
