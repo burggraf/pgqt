@@ -72,17 +72,32 @@ class ProxyManager:
         env["PG_LITE_DB"] = self.db_path
         env["PG_LITE_PORT"] = str(self.port)
 
-        # Start proxy in release mode for faster execution
-        self.process = subprocess.Popen(
-            ["cargo", "run", "--release", "--quiet", "--",
-             "--port", str(self.port),
-             "--database", self.db_path],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            preexec_fn=os.setsid,
-        )
+        # Start proxy using debug binary (release build may have linking issues)
+        # First check if debug binary exists, fall back to cargo run if not
+        debug_binary = "./target/debug/pgqt"
+        if os.path.exists(debug_binary):
+            self.process = subprocess.Popen(
+                [debug_binary,
+                 "--port", str(self.port),
+                 "--database", self.db_path],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                preexec_fn=os.setsid,
+            )
+        else:
+            # Fall back to cargo run in debug mode
+            self.process = subprocess.Popen(
+                ["cargo", "run", "--quiet", "--",
+                 "--port", str(self.port),
+                 "--database", self.db_path],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                preexec_fn=os.setsid,
+            )
 
         # Wait for proxy to be ready
         start_time = time.time()
