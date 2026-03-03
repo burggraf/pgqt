@@ -35,6 +35,7 @@
 pub mod ast;
 pub mod parser;
 pub mod runtime;
+pub mod sqlstate;
 pub mod transpiler;
 
 // Re-export main types and functions

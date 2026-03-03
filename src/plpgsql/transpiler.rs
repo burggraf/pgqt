@@ -107,7 +107,7 @@ fn emit_statement(ctx: &mut TranspileContext, stmt: &PlPgSQLStmt) -> Result<()> 
 
 /// Emit BEGIN/END block
 fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock) -> Result<()> {
-    if let Some(_exceptions) = &block.exceptions {
+    if let Some(exceptions) = &block.exceptions {
         // Block with exception handler - use pcall
         ctx.emit_line("local _ok, _err = pcall(function()");
         ctx.indent();
@@ -120,8 +120,33 @@ fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock) -> Result<()
         ctx.indent();
         ctx.emit_line("local _sqlstate = _err and _err.sqlstate or 'P0001'");
         ctx.emit_line("local _sqlerrm = _err and _err.message or tostring(_err)");
-        // TODO: Handle specific exception types
-        ctx.emit_line("error(_err)");
+        ctx.emit_line("_ctx.SQLSTATE = _sqlstate");
+        ctx.emit_line("_ctx.SQLERRM = _sqlerrm");
+        
+        // Emit WHEN clauses
+        for (i, exc) in exceptions.iter().enumerate() {
+            let sqlstate = &exc.sqlstate;
+            if i == 0 {
+                ctx.emit_line(&format!("if _sqlstate == '{}' then", sqlstate));
+            } else {
+                ctx.emit_line(&format!("elseif _sqlstate == '{}' then", sqlstate));
+            }
+            ctx.indent();
+            for stmt in &exc.stmts {
+                emit_statement(ctx, stmt)?;
+            }
+            ctx.dedent();
+        }
+        
+        // Add OTHERS catch-all if not present
+        if !exceptions.iter().any(|e| e.sqlstate == "OTHERS") {
+            ctx.emit_line("else");
+            ctx.indent();
+            ctx.emit_line("error(_err)");
+            ctx.dedent();
+        }
+        
+        ctx.emit_line("end");
         ctx.dedent();
         ctx.emit_line("end");
     } else {

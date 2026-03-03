@@ -1245,6 +1245,7 @@ dependencies = [
  "dashmap",
  "futures",
  "hex",
+ "lazy_static",
  "libc",
  "mlua",
  "pg_parse",
