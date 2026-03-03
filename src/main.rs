@@ -1403,7 +1403,11 @@ impl SqliteHandler {
             .split_whitespace()
             .skip_while(|w| *w == "create" || *w == "schema" || *w == "if" || *w == "not" || *w == "exists")
             .next()
-            .map(|s| s.trim_matches('"').to_string())
+            .map(|s| {
+                let s = s.trim_matches('"');
+                let s = s.trim_end_matches(|c| c == ';' || c == '"');
+                s.to_string()
+            })
             .ok_or_else(|| anyhow::anyhow!("invalid CREATE SCHEMA syntax"))?;
 
         // Check for reserved names
@@ -1446,7 +1450,11 @@ impl SqliteHandler {
             .split_whitespace()
             .skip_while(|w| *w == "drop" || *w == "schema" || *w == "if" || *w == "exists")
             .next()
-            .map(|s| s.trim_matches('"').to_string())
+            .map(|s| {
+                let s = s.trim_matches('"');
+                let s = s.trim_end_matches(|c| c == ';' || c == '"');
+                s.to_string()
+            })
             .ok_or_else(|| anyhow::anyhow!("invalid DROP SCHEMA syntax"))?;
 
         // Cannot drop system schemas
