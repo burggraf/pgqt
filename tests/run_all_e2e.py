@@ -31,7 +31,7 @@ class ProxyManager:
         
     def start(self) -> bool:
         """Start the proxy server."""
-        # Clean up old database if exists
+        
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
         
@@ -40,8 +40,10 @@ class ProxyManager:
         env["PG_LITE_PORT"] = str(self.port)
         
         # Start proxy in release mode for faster execution
+        # Explicitly pass --port and --database to ensure it listens where we expect
+        # We don't use --host here to let it default to localhost:5434
         self.process = subprocess.Popen(
-            ["cargo", "run", "--release", "--quiet"],
+            ["cargo", "run", "--release", "--quiet", "--", "--port", str(self.port), "--database", self.db_path],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

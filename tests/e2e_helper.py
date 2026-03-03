@@ -29,13 +29,13 @@ def find_free_port(start_port: int = 5432, max_port: int = 5500) -> int:
 
 class ProxyManager:
     """Manages the PGQT proxy lifecycle for E2E tests."""
-    
+
     def __init__(self, db_path: Optional[str] = None, port: Optional[int] = None):
         # Check if we should use an existing proxy (from run_all_e2e.py)
         self.use_existing = False
         self.existing_port = None
         self.existing_host = "127.0.0.1"
-        
+
         if "PROXY_HOST" in os.environ and "PROXY_PORT" in os.environ:
             # Running under run_all_e2e.py - use existing proxy
             self.use_existing = True
@@ -44,12 +44,12 @@ class ProxyManager:
             self.port = self.existing_port
             self.db_path = None
             return
-        
+
         # Normal mode - start our own proxy
         self.db_path = db_path or tempfile.mktemp(suffix='.db', prefix='pglite_e2e_')
         self.port = port or find_free_port()
         self.process: Optional[subprocess.Popen] = None
-        
+
     def start(self, timeout: int = 30) -> bool:
         """Start the proxy server."""
         if self.use_existing:
@@ -59,20 +59,23 @@ class ProxyManager:
                 if self._is_ready():
                     return True
                 time.sleep(0.5)
+            
+            # Diagnostic: print if it fails
+            print(f"DEBUG: Proxy at {self.existing_host}:{self.port} not ready after {timeout}s")
             return False
-        
+
         # Clean up old database if exists
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
-        
+
         env = os.environ.copy()
         env["PG_LITE_DB"] = self.db_path
         env["PG_LITE_PORT"] = str(self.port)
-        
+
         # Start proxy in release mode for faster execution
         self.process = subprocess.Popen(
-            ["cargo", "run", "--release", "--quiet", "--", 
-             "--port", str(self.port), 
+            ["cargo", "run", "--release", "--quiet", "--",
+             "--port", str(self.port),
              "--database", self.db_path],
             env=env,
             stdout=subprocess.PIPE,
@@ -80,17 +83,17 @@ class ProxyManager:
             text=True,
             preexec_fn=os.setsid,
         )
-        
+
         # Wait for proxy to be ready
         start_time = time.time()
         while time.time() - start_time < timeout:
             if self._is_ready():
                 return True
             time.sleep(0.5)
-        
+
         self.stop()
         return False
-    
+
     def _is_ready(self) -> bool:
         """Check if the proxy is ready to accept connections."""
         try:
@@ -106,13 +109,13 @@ class ProxyManager:
             return True
         except:
             return False
-    
+
     def stop(self, timeout: int = 5):
         """Stop the proxy server."""
         if self.use_existing:
             # Don't stop the proxy when using existing one
             return
-        
+
         if self.process:
             try:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
@@ -123,14 +126,14 @@ class ProxyManager:
                 except:
                     pass
             self.process = None
-        
+
         # Clean up database
         if self.db_path and os.path.exists(self.db_path):
             try:
                 os.remove(self.db_path)
             except:
                 pass
-    
+
     def get_connection(self, database: str = "postgres"):
         """Get a database connection."""
         conn = psycopg2.connect(
@@ -142,12 +145,12 @@ class ProxyManager:
         )
         conn.autocommit = True
         return conn
-    
+
     def __enter__(self):
         if not self.start():
             raise RuntimeError("Failed to start proxy")
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         return False
@@ -155,20 +158,20 @@ class ProxyManager:
 def run_e2e_test(test_name: str, test_func, timeout: int = 60):
     """
     Run an E2E test with proper setup and teardown.
-    
+
     Usage:
         def test_my_feature(proxy):
             conn = proxy.get_connection()
             # ... test code ...
             conn.close()
-        
+
         if __name__ == "__main__":
             run_e2e_test("my_feature", test_my_feature)
     """
     import sys
-    
+
     print(f"Starting E2E test: {test_name}")
-    
+
     with ProxyManager() as proxy:
         print(f"Proxy ready on port {proxy.port}")
         try:

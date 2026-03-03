@@ -89,21 +89,28 @@ run_e2e_tests() {
         return
     fi
     
-    # Use unified runner to avoid port conflicts
-    echo "Using unified E2E test runner (tests/run_all_e2e.py)..."
+        # Run tests one by one to avoid complex proxy management issues
+    echo "Running tests individually..."
     echo ""
     
-    if python3 tests/run_all_e2e.py 2>&1 | grep -q "All tests passed"; then
-        E2E_PASSED=9
-        E2E_FAILED=0
-        echo -e "${GREEN}✓ All E2E tests passed${NC}"
-    else
-        # Count passed/failed from output
-        E2E_PASSED=$(python3 tests/run_all_e2e.py 2>&1 | grep "Total:" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
-        E2E_FAILED=$(python3 tests/run_all_e2e.py 2>&1 | grep "Total:" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
-        if [ -z "$E2E_PASSED" ]; then E2E_PASSED=0; fi
-        if [ -z "$E2E_FAILED" ]; then E2E_FAILED=0; fi
-    fi
+    for test_file in tests/*_e2e_test.py; do
+        if [ -f "$test_file" ]; then
+            test_name=$(basename "$test_file")
+            echo -n "Testing $test_name... "
+            
+            # Ensure no stale proxy is running
+            pkill -f pgqt > /dev/null 2>&1 || true
+            
+            if python3 "$test_file" > /tmp/e2e_out.log 2>&1; then
+                echo -e "${GREEN}✓${NC}"
+                E2E_PASSED=$((E2E_PASSED + 1))
+            else
+                echo -e "${RED}✗${NC}"
+                cat /tmp/e2e_out.log
+                E2E_FAILED=$((E2E_FAILED + 1))
+            fi
+        fi
+    done
     echo ""
 }
 
