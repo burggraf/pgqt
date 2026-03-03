@@ -1167,8 +1167,8 @@ fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
                             !trimmed.contains("]") &&
                             comma_count == 3;
                         let is_circle = trimmed.starts_with("<") && trimmed.ends_with(">");
-                        // Check if it looks like a JSON array (contains quotes)
-                        let is_json_array = trimmed.starts_with("[") && trimmed.contains('"');
+                        // Check if it looks like a JSON array (contains quotes or brackets)
+                        let is_json_array = trimmed.starts_with("[") && (trimmed.contains('"') || trimmed.chars().any(|c| c == '[' || c == ']'));
                         if is_point || is_box_or_lseg || is_circle || is_json_array {
                             return val; // Don't canonicalize geometric types or JSON arrays
                         }

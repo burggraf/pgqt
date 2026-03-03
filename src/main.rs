@@ -2049,6 +2049,7 @@ impl SqliteHandler {
                 return Ok(result);
             }
             Err(_) => {
+                // Fall through to normal transpilation
             }
         }
 

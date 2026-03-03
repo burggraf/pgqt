@@ -292,6 +292,33 @@ SELECT '[1,10)' && '[5,15)';
 └── README.md
 ```
 
+## Important: Using the Proxy Server
+
+**DO NOT** manually start/stop the proxy with `pkill` and background processes like:
+```bash
+./target/release/pgqt --port 5434 --database /tmp/test.db &
+# ... run tests ...
+pkill -f pgqt
+```
+
+**INSTEAD** use the `process` tool which properly manages background processes:
+```bash
+# Start a managed process
+process(action="start", name="pgqt-proxy", command="./target/release/pgqt --port 5434 --database /tmp/test.db")
+
+# Check its status and output
+process(action="output", id="pgqt-proxy")
+
+# Kill it when done
+process(action="kill", id="pgqt-proxy")
+```
+
+This ensures:
+- Proper error handling and notifications (alertOnFailure, alertOnSuccess)
+- Clean process management without zombies
+- Access to stdout/stderr outputs via `process(action="output", id=...)`
+- Integration with pi's process lifecycle management
+
 ## Dependencies
 
 **Core**:
