@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use dashmap::DashMap;
 use futures::stream;
 
-use crate::catalog::{store_table_metadata, store_relation_metadata, FunctionMetadata};
+use crate::catalog::FunctionMetadata;
 use crate::schema::{SchemaManager, SearchPath};
 use crate::handler::SessionContext;
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
@@ -370,7 +370,7 @@ pub trait HandlerUtils {
         )]);
 
         let mut encoder = DataRowEncoder::new(fields.clone());
-        encoder.encode_field(&Some(path)).unwrap();
+        encoder.encode_field(&Some(path))?;
         let data_rows = vec![Ok(encoder.take_row())];
 
         let row_stream = stream::iter(data_rows);
@@ -397,7 +397,7 @@ pub trait HandlerUtils {
     }
 
     /// Register a user-defined function as a SQLite custom function
-    fn register_sqlite_function(&self, conn: &Connection, metadata: &FunctionMetadata) -> Result<()> {
+    fn register_sqlite_function(&self, conn: &Connection, metadata: &crate::catalog::FunctionMetadata) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
         use crate::catalog::ReturnTypeKind;
         use rusqlite::types::Value;
@@ -562,7 +562,7 @@ pub trait HandlerUtils {
     /// Convert function execution result to pgwire Response
     fn convert_function_result_to_response(&self, result: crate::functions::FunctionResult) -> Result<Vec<Response>> {
         use crate::functions::FunctionResult;
-        use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse};
+        use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
         use std::sync::Arc;
         use rusqlite::types::Value;
 

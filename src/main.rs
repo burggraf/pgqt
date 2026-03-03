@@ -53,6 +53,7 @@ mod handler;
 use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
 use schema::{SchemaManager, SearchPath};
 use handler::{SqliteHandler, SessionContext};
+use handler::query::QueryExecution;
 
 #[derive(Debug, Clone, PartialEq)]
 enum OutputDest {
