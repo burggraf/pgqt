@@ -1,0 +1,706 @@
+//! Handler utility functions
+//!
+//! This module contains helper methods for the SqliteHandler including:
+//! - Permission checking
+//! - RLS (Row-Level Security) application
+//! - Schema management (CREATE SCHEMA, DROP SCHEMA)
+//! - Search path handling
+//! - User-defined function management
+
+use std::sync::{Arc, Mutex};
+use anyhow::{anyhow, Result};
+use rusqlite::Connection;
+use dashmap::DashMap;
+use futures::stream;
+
+use crate::catalog::{store_table_metadata, store_relation_metadata, FunctionMetadata};
+use crate::schema::{SchemaManager, SearchPath};
+use crate::handler::SessionContext;
+use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
+use pgwire::api::Type;
+
+/// Trait for utility methods that need access to SqliteHandler fields
+pub trait HandlerUtils {
+    fn conn(&self) -> &Arc<Mutex<Connection>>;
+    fn sessions(&self) -> &Arc<DashMap<u32, SessionContext>>;
+    fn schema_manager(&self) -> &SchemaManager;
+    fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
+
+    /// Check if the current user has permission to execute the query
+    fn check_permissions(&self, referenced_tables: &[String], operation_type: crate::transpiler::OperationType) -> Result<bool> {
+        // Get current user from session
+        let session = self.sessions().get(&0).unwrap_or_else(|| {
+            self.sessions().insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions().get(&0).unwrap()
+        });
+        let current_user = session.current_user.clone();
+
+        // Get the connection to query RBAC tables
+        let conn = self.conn().lock().unwrap();
+
+        // Check if user is superuser
+        let is_superuser: bool = conn.query_row(
+            "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
+            &[&current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if is_superuser {
+            return Ok(true);
+        }
+
+        // If user doesn't exist in __pg_authid__, create them as a superuser
+        // This allows any connecting user to have full access (development mode)
+        let user_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM __pg_authid__ WHERE rolname = ?1)",
+            &[&current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !user_exists {
+            // Auto-create unknown users as superusers
+            conn.execute(
+                "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) VALUES (?1, 1, 1, 1, 1, 1)",
+                &[&current_user],
+            )?;
+            return Ok(true);
+        }
+
+        // Get effective roles (including inherited) using prepare and query_map
+        let mut stmt = conn.prepare("
+            WITH RECURSIVE effective_roles AS (
+                SELECT oid FROM __pg_authid__ WHERE rolname = ?1
+                UNION
+                SELECT m.roleid FROM __pg_auth_members__ m
+                JOIN effective_roles er ON er.oid = m.member
+             )
+             SELECT oid FROM effective_roles
+        ").unwrap();
+        let effective_roles: Vec<i64> = stmt.query_map([&current_user], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if effective_roles.is_empty() {
+            return Ok(false);
+        }
+
+        // Map operation to privilege
+        let required_privilege = match operation_type {
+            crate::transpiler::OperationType::SELECT => "SELECT",
+            crate::transpiler::OperationType::INSERT => "INSERT",
+            crate::transpiler::OperationType::UPDATE => "UPDATE",
+            crate::transpiler::OperationType::DELETE => "DELETE",
+            _ => return Ok(true), // DDL and other operations are allowed for now
+        };
+
+        // Check permissions for each table
+        for table_name in referenced_tables {
+            let has_privilege: bool = conn.query_row(
+                "SELECT EXISTS (
+                    SELECT 1 FROM __pg_acl__ a
+                    JOIN pg_class c ON c.oid = a.object_id AND c.relname = ?1
+                    WHERE a.privilege = ?2
+                    AND (
+                        a.grantee_id IN (SELECT oid FROM __pg_authid__)
+                        OR a.grantee_id = 0
+                    )
+                )",
+                &[table_name, required_privilege],
+                |row| row.get(0),
+            ).unwrap_or(false);
+
+            if !has_privilege {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Apply RLS (Row-Level Security) to a transpiled query
+    fn apply_rls_to_query(&self, sql: String, operation_type: crate::transpiler::OperationType, tables: &[String]) -> String {
+        use crate::rls_inject::{inject_rls_into_select_sql, inject_rls_into_update_sql, inject_rls_into_delete_sql};
+
+        // Get current user from session
+        let session = self.sessions().get(&0);
+        let current_user = session.map(|s| s.current_user.clone()).unwrap_or_else(|| "postgres".to_string());
+
+        let conn = self.conn().lock().unwrap();
+
+        // Check each table for RLS
+        for table_name in tables {
+            // Check if RLS is enabled for this table
+            if let Ok(true) = crate::catalog::is_rls_enabled(&conn, table_name) {
+                // Check if user can bypass RLS
+                let can_bypass = conn.query_row(
+                    "SELECT rls_forced FROM __pg_rls_enabled__ WHERE relname = ?1",
+                    [table_name],
+                    |row| {
+                        let forced: bool = row.get(0)?;
+                        if forced {
+                            return Ok(false); // Cannot bypass if forced
+                        }
+                        // Check if user is table owner
+                        let owner_oid: Result<i64, _> = conn.query_row(
+                            "SELECT relowner FROM __pg_relation_meta__ WHERE relname = ?1",
+                            [table_name],
+                            |row| row.get(0),
+                        );
+                        if let Ok(owner) = owner_oid {
+                            let user_oid: Result<i64, _> = conn.query_row(
+                                "SELECT oid FROM __pg_authid__ WHERE rolname = ?1",
+                                [&current_user],
+                                |row| row.get(0),
+                            );
+                            if let Ok(user) = user_oid {
+                                if owner == user {
+                                    return Ok(true); // Owner can bypass
+                                }
+                            }
+                        }
+                        // Check if user is superuser
+                        let is_superuser: bool = conn.query_row(
+                            "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
+                            [&current_user],
+                            |row| row.get(0),
+                        ).unwrap_or(false);
+                        Ok(is_superuser)
+                    },
+                );
+
+                if can_bypass.unwrap_or(false) {
+                    continue; // Skip RLS for this table
+                }
+
+                // Get applicable RLS policies for this table and operation
+                let command = match operation_type {
+                    crate::transpiler::OperationType::SELECT => "SELECT",
+                    crate::transpiler::OperationType::INSERT => "INSERT",
+                    crate::transpiler::OperationType::UPDATE => "UPDATE",
+                    crate::transpiler::OperationType::DELETE => "DELETE",
+                    _ => continue,
+                };
+
+                if let Ok(policies) = crate::catalog::get_applicable_policies(&conn, table_name, command, &["PUBLIC".to_string(), current_user.clone()]) {
+                    if !policies.is_empty() {
+                        // Build RLS expression from policies
+                        let rls_expr = crate::rls::build_rls_expression(&policies, true);
+                        if let Some(expr) = rls_expr {
+                            // Rewrite current_user in expression
+                            let rewritten_expr = crate::rls_inject::rewrite_rls_expression(&expr, &current_user, &current_user);
+
+                            // Inject RLS into the query based on operation type
+                            return match operation_type {
+                                crate::transpiler::OperationType::SELECT => inject_rls_into_select_sql(&sql, &rewritten_expr),
+                                crate::transpiler::OperationType::UPDATE => inject_rls_into_update_sql(&sql, &rewritten_expr),
+                                crate::transpiler::OperationType::DELETE => inject_rls_into_delete_sql(&sql, &rewritten_expr),
+                                _ => sql,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        sql
+    }
+
+    /// Handle CREATE SCHEMA statement
+    fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse schema name from CREATE SCHEMA [IF NOT EXISTS] name [AUTHORIZATION user]
+        let upper_sql = sql.to_uppercase();
+        let if_not_exists = upper_sql.contains("IF NOT EXISTS");
+
+        // Extract schema name (simplified parsing)
+        let schema_name = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w == "create" || *w == "schema" || *w == "if" || *w == "not" || *w == "exists")
+            .next()
+            .map(|s| {
+                let s = s.trim_matches('"');
+                let s = s.trim_end_matches(|c| c == ';' || c == '"');
+                s.to_string()
+            })
+            .ok_or_else(|| anyhow!("invalid CREATE SCHEMA syntax"))?;
+
+        // Check for reserved names
+        if schema_name.starts_with("pg_") {
+            return Err(anyhow!(
+                "unacceptable schema name \"{}\": system schemas must start with pg_",
+                schema_name
+            ));
+        }
+
+        let conn = self.conn().lock().unwrap();
+
+        // Check if schema already exists
+        if crate::schema::schema_exists(&conn, &schema_name)? {
+            if if_not_exists {
+                return Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))]);
+            }
+            return Err(anyhow!("schema \"{}\" already exists", schema_name));
+        }
+
+        // Create schema in catalog
+        crate::schema::create_schema(&conn, &schema_name, None)?;
+
+        // Attach the schema database
+        self.schema_manager().attach_schema(&conn, &schema_name)?;
+
+        Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))])
+    }
+
+    /// Handle DROP SCHEMA statement
+    fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse schema name from DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]
+        let upper_sql = sql.to_uppercase();
+        let if_exists = upper_sql.contains("IF EXISTS");
+        let cascade = upper_sql.ends_with("CASCADE") || (!upper_sql.ends_with("RESTRICT") && upper_sql.contains(" CASCADE"));
+
+        // Extract schema name
+        let schema_name = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w == "drop" || *w == "schema" || *w == "if" || *w == "exists")
+            .next()
+            .map(|s| {
+                let s = s.trim_matches('"');
+                let s = s.trim_end_matches(|c| c == ';' || c == '"');
+                s.to_string()
+            })
+            .ok_or_else(|| anyhow!("invalid DROP SCHEMA syntax"))?;
+
+        // Cannot drop system schemas
+        if schema_name == "public" {
+            return Err(anyhow!("cannot drop schema \"public\""));
+        }
+        if schema_name == "pg_catalog" || schema_name == "information_schema" {
+            return Err(anyhow!("cannot drop system schema \"{}\"", schema_name));
+        }
+
+        let conn = self.conn().lock().unwrap();
+
+        // Check if schema exists
+        if !crate::schema::schema_exists(&conn, &schema_name)? {
+            if if_exists {
+                return Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))]);
+            }
+            return Err(anyhow!("schema \"{}\" does not exist", schema_name));
+        }
+
+        // Check if schema is empty (unless CASCADE)
+        if !cascade && !crate::schema::schema_is_empty(&conn, &schema_name, self.schema_manager())? {
+            return Err(anyhow!(
+                "schema \"{}\" cannot be dropped without CASCADE because it contains objects",
+                schema_name
+            ));
+        }
+
+        // Drop all objects in the schema (if CASCADE)
+        if cascade {
+            crate::schema::drop_schema_objects(&conn, &schema_name, self.schema_manager())?;
+        }
+
+        // Detach the schema database
+        self.schema_manager().detach_schema(&conn, &schema_name)?;
+
+        // Delete the schema database file
+        self.schema_manager().delete_schema_db(&schema_name)?;
+
+        // Remove schema from catalog
+        crate::schema::drop_schema(&conn, &schema_name)?;
+
+        Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))])
+    }
+
+    /// Handle SET search_path statement
+    fn handle_set_search_path(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse search_path from SET search_path TO value or SET search_path = value
+        let path_str = sql
+            .to_lowercase()
+            .split_whitespace()
+            .skip_while(|w| *w != "to" && *w != "=")
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string();
+
+        let search_path = crate::schema::SearchPath::parse(&path_str)?;
+
+        // Update session context
+        let mut session = self.sessions().get_mut(&0).unwrap_or_else(|| {
+            self.sessions().insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions().get_mut(&0).unwrap()
+        });
+        session.search_path = search_path;
+
+        Ok(vec![Response::Execution(Tag::new("SET"))])
+    }
+
+    /// Handle SHOW search_path statement
+    fn handle_show_search_path(&self) -> Result<Vec<Response>> {
+        let session = self.sessions().get(&0).unwrap_or_else(|| {
+            self.sessions().insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions().get(&0).unwrap()
+        });
+
+        let path = session.search_path.to_string();
+
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+            "search_path".to_string(),
+            None,
+            None,
+            Type::TEXT,
+            pgwire::api::results::FieldFormat::Text,
+        )]);
+
+        let mut encoder = DataRowEncoder::new(fields.clone());
+        encoder.encode_field(&Some(path)).unwrap();
+        let data_rows = vec![Ok(encoder.take_row())];
+
+        let row_stream = stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            fields,
+            row_stream,
+        ))])
+    }
+
+    /// Handle CREATE FUNCTION statement
+    fn handle_create_function(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse CREATE FUNCTION
+        let metadata = crate::transpiler::parse_create_function(sql)?;
+
+        // Store in catalog
+        let conn = self.conn().lock().unwrap();
+        crate::catalog::store_function(&conn, &metadata)?;
+
+        // Also register as a SQLite custom function for runtime interception
+        self.register_sqlite_function(&conn, &metadata)?;
+
+        Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
+    }
+
+    /// Register a user-defined function as a SQLite custom function
+    fn register_sqlite_function(&self, conn: &Connection, metadata: &FunctionMetadata) -> Result<()> {
+        use rusqlite::functions::FunctionFlags;
+        use crate::catalog::ReturnTypeKind;
+        use rusqlite::types::Value;
+
+        // Determine the number of parameters (excluding OUT params for now)
+        let num_params = metadata.arg_types.len();
+
+        // Store metadata in the in-memory cache for fast lookup
+        self.functions().insert(metadata.name.clone(), metadata.clone());
+
+        // Create references for the closure
+        let func_name = metadata.name.clone();
+        let func_name_for_closure = func_name.clone(); // Clone for the closure
+        let arg_count = num_params;
+        let is_strict = metadata.strict;
+        let return_type_kind = metadata.return_type_kind.clone();
+        let functions_cache = self.functions().clone();
+
+        // Register as a scalar function
+        conn.create_scalar_function(
+            func_name.as_str(),
+            arg_count as i32,
+            FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                // Collect arguments
+                let mut args = Vec::new();
+                for i in 0..arg_count {
+                    let arg = ctx.get::<Value>(i)?;
+                    args.push(arg);
+                }
+
+                // If STRICT and any NULL args, return NULL
+                if is_strict && args.iter().any(|v| matches!(v, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+
+                // Look up function metadata from cache
+                let _func_metadata = match functions_cache.get(&func_name_for_closure) {
+                    Some(metadata) => metadata.clone(),
+                    None => return Ok(Value::Null), // Function not found
+                };
+
+                // Only support scalar functions for now
+                if return_type_kind != ReturnTypeKind::Scalar {
+                    // For non-scalar functions, return NULL (not yet supported)
+                    return Ok(Value::Null);
+                }
+
+                // For now, return NULL to indicate not fully implemented
+                // The AST-based interception will handle simple cases
+                Ok(Value::Null)
+            }
+        )?;
+
+        Ok(())
+    }
+
+    /// Try to execute a simple function call like SELECT func(arg1, arg2)
+    /// Returns Ok(response) if it was a simple function call, Err if not
+    fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
+
+
+        // Parse the SQL
+        let result = pg_query::parse(sql)?;
+
+        // Check if this is a simple SELECT with a function call
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                if let Some(NodeEnum::SelectStmt(ref select_stmt)) = &stmt_node.node {
+                    // Check if the SELECT list has exactly one item and it's a function call
+                    if select_stmt.target_list.len() == 1 {
+                        if let Some(NodeEnum::ResTarget(ref target)) = &select_stmt.target_list[0].node {
+                            if let Some(ref val_node) = target.val {
+                                if let Some(NodeEnum::FuncCall(ref func_call)) = &val_node.node {
+                                    // This is a simple function call! Execute it.
+                                    return self.execute_function_call(func_call, sql);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Not a simple function call
+        anyhow::bail!("Not a simple function call")
+    }
+
+    /// Execute a function call
+    fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
+        use rusqlite::types::Value;
+
+
+        // Extract function name
+        let func_name = func_call
+            .funcname
+            .iter()
+            .filter_map(|n| {
+                if let Some(ref inner) = n.node {
+                    if let NodeEnum::String(s) = inner {
+                        return Some(s.sval.to_lowercase());
+                    }
+                }
+                None
+            })
+            .last()
+            .ok_or_else(|| anyhow!("Could not extract function name"))?;
+
+
+        // Get connection and look up function
+        let conn = self.conn().lock().unwrap();
+        let metadata = crate::catalog::get_function(&conn, &func_name, None)?
+            .ok_or_else(|| anyhow!("Function {} not found", func_name))?;
+
+
+        // Extract arguments (only handle simple literals for now)
+        let mut args = Vec::new();
+        for (_i, arg_node) in func_call.args.iter().enumerate() {
+            if let Some(ref inner) = arg_node.node {
+                match inner {
+                    NodeEnum::AConst(ref aconst) => {
+                        // Handle literal values
+                        if let Some(ref val) = aconst.val {
+                            match val {
+                                pg_query::protobuf::a_const::Val::Ival(iv) => {
+                                    args.push(Value::Integer(iv.ival as i64));
+                                }
+                                pg_query::protobuf::a_const::Val::Fval(fv) => {
+                                    // fval is a string representation of the float
+                                    let parsed = fv.fval.parse::<f64>().unwrap_or(0.0);
+                                    args.push(Value::Real(parsed));
+                                }
+                                pg_query::protobuf::a_const::Val::Sval(sv) => {
+                                    args.push(Value::Text(sv.sval.clone()));
+                                }
+                                _ => {
+                                    // Unsupported argument type
+                                    anyhow::bail!("Unsupported argument type in function call");
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // Non-literal argument (column ref, etc.) - not supported yet
+                        anyhow::bail!("Only literal arguments supported in function calls");
+                    }
+                }
+            }
+        }
+
+
+        // Execute the function
+        let result = crate::functions::execute_sql_function(&conn, &metadata, &args)?;
+
+
+        // Convert result to Response
+        self.convert_function_result_to_response(result)
+    }
+
+    /// Convert function execution result to pgwire Response
+    fn convert_function_result_to_response(&self, result: crate::functions::FunctionResult) -> Result<Vec<Response>> {
+        use crate::functions::FunctionResult;
+        use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse};
+        use std::sync::Arc;
+        use rusqlite::types::Value;
+
+        match result {
+            FunctionResult::Scalar(Some(value)) => {
+                // Return single value
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+
+                let mut encoder = DataRowEncoder::new(fields.clone());
+
+                // Convert Value to string properly
+                let value_str = match value {
+                    Value::Null => None,
+                    Value::Integer(i) => Some(i.to_string()),
+                    Value::Real(f) => Some(f.to_string()),
+                    Value::Text(s) => Some(s),
+                    Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                };
+
+                encoder.encode_field(&value_str)?;
+                let data_rows = vec![Ok(encoder.take_row())];
+
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::Scalar(None) | FunctionResult::Null | FunctionResult::Void => {
+                // Return NULL for scalar None/Null or Void
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+
+                let mut encoder = DataRowEncoder::new(fields.clone());
+                encoder.encode_field(&None::<String>)?;
+                let data_rows = vec![Ok(encoder.take_row())];
+
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::SetOf(values) => {
+                // Return multiple rows, each with one column
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+
+                let mut data_rows = Vec::new();
+                for value in values {
+                    let mut encoder = DataRowEncoder::new(fields.clone());
+                    let value_str = match value {
+                        Value::Null => None,
+                        Value::Integer(i) => Some(i.to_string()),
+                        Value::Real(f) => Some(f.to_string()),
+                        Value::Text(s) => Some(s),
+                        Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                    };
+                    encoder.encode_field(&value_str)?;
+                    data_rows.push(Ok(encoder.take_row()));
+                }
+
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::Table(rows) => {
+                // Return multiple rows with multiple columns
+                if rows.is_empty() {
+                    return Ok(vec![Response::Execution(Tag::new("SELECT 0"))]);
+                }
+
+                let column_count = rows[0].len();
+                let mut fields_vec = Vec::new();
+                for i in 0..column_count {
+                    fields_vec.push(FieldInfo::new(
+                        format!("col_{}", i),
+                        None,
+                        None,
+                        pgwire::api::Type::UNKNOWN,
+                        pgwire::api::results::FieldFormat::Text,
+                    ));
+                }
+                let fields = Arc::new(fields_vec);
+
+                let mut data_rows = Vec::new();
+                for row in rows {
+                    let mut encoder = DataRowEncoder::new(fields.clone());
+                    for value in row {
+                        let value_str = match value {
+                            Value::Null => None,
+                            Value::Integer(i) => Some(i.to_string()),
+                            Value::Real(f) => Some(f.to_string()),
+                            Value::Text(s) => Some(s),
+                            Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                        };
+                        encoder.encode_field(&value_str)?;
+                    }
+                    data_rows.push(Ok(encoder.take_row()));
+                }
+
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+        }
+    }
+
+    /// Handle DROP FUNCTION statement
+    fn handle_drop_function(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse function name from DROP FUNCTION
+        // For now, simple parsing - extract name between "DROP FUNCTION" and "(" or end
+        let upper_sql = sql.trim().to_uppercase();
+        let name_part = upper_sql.trim_start_matches("DROP FUNCTION").trim();
+        let name = name_part.split_whitespace().next().unwrap_or("");
+        let name = name.trim_start_matches("IF EXISTS").trim();
+        let name = name.split('(').next().unwrap_or(name).trim();
+
+        // Remove from catalog
+        let conn = self.conn().lock().unwrap();
+        crate::catalog::drop_function(&conn, name, None)?;
+
+        Ok(vec![Response::Execution(Tag::new("DROP FUNCTION"))])
+    }
+}

@@ -290,6 +290,65 @@ pub fn negative_inner_product(a: &str, b: &str) -> Result<f64, String> {
     Ok(-product)
 }
 
+/// Calculate Hamming distance between two vectors
+/// 
+/// Formula: number of positions at which the corresponding elements are different
+pub fn hamming_distance(a: &str, b: &str) -> Result<f64, String> {
+    let vec_a = parse_vector_to_f32(a)?;
+    let vec_b = parse_vector_to_f32(b)?;
+    
+    if vec_a.len() != vec_b.len() {
+        return Err(format!(
+            "vector dimension mismatch: {} vs {}",
+            vec_a.len(),
+            vec_b.len()
+        ));
+    }
+    
+    let distance: f64 = vec_a.iter()
+        .zip(vec_b.iter())
+        .filter(|(x, y)| x != y)
+        .count() as f64;
+    
+    Ok(distance)
+}
+
+/// Calculate Jaccard distance between two vectors
+/// 
+/// Formula: 1 - (|A ∩ B| / |A ∪ B|)
+/// Returns 0 for identical vectors, 1 for completely different vectors
+pub fn jaccard_distance(a: &str, b: &str) -> Result<f64, String> {
+    let vec_a = parse_vector_to_f32(a)?;
+    let vec_b = parse_vector_to_f32(b)?;
+    
+    if vec_a.len() != vec_b.len() {
+        return Err(format!(
+            "vector dimension mismatch: {} vs {}",
+            vec_a.len(),
+            vec_b.len()
+        ));
+    }
+    
+    // Count intersection (positions where both have the same non-zero value)
+    let intersection: f64 = vec_a.iter()
+        .zip(vec_b.iter())
+        .filter(|(x, y)| x == y && **x != 0.0)
+        .count() as f64;
+    
+    // Count union (positions where at least one has non-zero value)
+    let union: f64 = vec_a.iter()
+        .zip(vec_b.iter())
+        .filter(|(x, y)| **x != 0.0 || **y != 0.0)
+        .count() as f64;
+    
+    if union == 0.0 {
+        return Ok(0.0); // Both vectors are all zeros
+    }
+    
+    let similarity = intersection / union;
+    Ok(1.0 - similarity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
