@@ -1,3 +1,17 @@
+//! User-Defined Function (UDF) execution for PostgreSQL compatibility
+//!
+//! This module handles the storage and execution of user-defined functions created
+//! via `CREATE FUNCTION`. It supports SQL-language functions as well as PL/pgSQL
+//! functions (transpiled to Lua via the [`crate::plpgsql`] module).
+//!
+//! ## Supported Features
+//! - `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION`
+//! - `DROP FUNCTION`
+//! - Parameter modes: `IN`, `OUT`, `INOUT`
+//! - Return types: scalar, `SETOF`, `TABLE`, `VOID`
+//! - Function attributes: `STRICT`, `IMMUTABLE`, `STABLE`, `VOLATILE`
+//! - `SECURITY DEFINER` / `SECURITY INVOKER`
+
 use rusqlite::{Connection, types::Value, OptionalExtension};
 use anyhow::{Result, Context};
 use crate::catalog::{FunctionMetadata, ReturnTypeKind};

@@ -602,10 +602,43 @@ cargo test
 
 ```
 src/
-├── main.rs           # TCP server and connection handling
-├── catalog.rs        # Shadow catalog (__pg_meta__) management
-├── transpiler.rs     # SQL AST transpilation (PostgreSQL → SQLite)
-└── lib.rs            # Library exports
+├── main.rs                    # TCP server entry point
+├── lib.rs                     # Library exports
+├── handler/                   # PostgreSQL wire protocol handler
+│   └── mod.rs                 # SqliteHandler, session management, custom functions
+├── transpiler/                # SQL transpilation (PostgreSQL → SQLite)
+│   ├── mod.rs                 # Public API: transpile(), TranspileResult
+│   ├── context.rs             # TranspileContext and result types
+│   ├── ddl.rs                 # CREATE, ALTER, DROP, GRANT, COPY statements
+│   ├── dml.rs                 # SELECT, INSERT, UPDATE, DELETE statements
+│   ├── expr.rs                # Expression and node reconstruction
+│   ├── utils.rs               # Shared helper functions
+│   └── window.rs              # Window function and frame support
+├── catalog/                   # Shadow catalog (__pg_meta__) management
+│   ├── mod.rs                 # Public API and shared types
+│   ├── init.rs                # Catalog initialization and pg_types
+│   ├── table.rs               # Table/column metadata storage
+│   ├── function.rs            # UDF metadata storage
+│   ├── rls.rs                 # RLS policy storage
+│   └── system_views.rs        # pg_catalog view initialization
+├── array.rs                   # PostgreSQL array functions and operators
+├── copy.rs                    # COPY FROM/TO command support
+├── distinct_on.rs             # DISTINCT ON polyfill (ROW_NUMBER window)
+├── fts.rs                     # Full-text search (FTS5-backed)
+├── functions.rs               # User-defined function execution
+├── geo.rs                     # 2D geometric type support
+├── plpgsql/                   # PL/pgSQL parser and Lua transpiler
+│   ├── mod.rs                 # Public API
+│   ├── ast.rs                 # PL/pgSQL AST types
+│   ├── parser.rs              # PL/pgSQL parser
+│   ├── runtime.rs             # Lua execution runtime
+│   ├── sqlstate.rs            # SQLSTATE error codes
+│   └── transpiler.rs          # PL/pgSQL → Lua transpiler
+├── range.rs                   # PostgreSQL range type support
+├── rls.rs                     # Row-Level Security (RLS)
+├── rls_inject.rs              # RLS AST injection utilities
+├── schema.rs                  # Schema/namespace (ATTACH DATABASE)
+└── vector.rs                  # pgvector-compatible vector search
 ```
 
 ## Limitations

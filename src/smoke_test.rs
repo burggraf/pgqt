@@ -1,3 +1,9 @@
+//! Smoke tests for quick sanity-checking during development
+//!
+//! This file contains informal manual smoke tests that can be run directly
+//! to quickly verify basic transpilation and SQLite execution works end-to-end.
+//! These are not part of the automated test suite.
+
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use rusqlite::{params, Connection};

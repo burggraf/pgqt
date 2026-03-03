@@ -65,7 +65,7 @@ python3 tests/array_e2e_test.py
 
 **Current test files:**
 
-- Unit: Embedded in `src/array.rs`, `src/catalog.rs`, `src/distinct_on.rs`, `src/fts.rs`, `src/geo.rs`, `src/range.rs`, `src/rls.rs`, `src/rls_inject.rs`, `src/schema.rs`, `src/transpiler.rs`, `src/vector.rs`
+- Unit: Embedded in `src/array.rs`, `src/catalog/mod.rs`, `src/distinct_on.rs`, `src/fts.rs`, `src/geo.rs`, `src/range.rs`, `src/rls.rs`, `src/rls_inject.rs`, `src/schema.rs`, `src/transpiler/mod.rs`, `src/vector.rs`
 - Integration: `tests/array_tests.rs`, `tests/catalog_tests.rs`, `tests/distinct_on_tests.rs`, `tests/fts_integration_tests.rs`, `tests/integration_test.rs`, `tests/rls_integration_tests.rs`, `tests/schema_tests.rs`, `tests/transpiler_tests.rs`, `tests/vector_tests.rs`, `tests/window_tests.rs`
 - E2E: `tests/array_e2e_test.py`, `tests/distinct_on_e2e_test.py`, `tests/geo_e2e_test.py`, `tests/range_e2e_test.py`, `tests/rls_e2e_test.py`, `tests/schema_e2e_test.py`, `tests/vector_e2e_test.py`, `tests/window_e2e_test.py`
 
@@ -183,7 +183,7 @@ The test suite discovers tests automatically:
 
 ### Array vs Range Operator Detection
 
-The transpiler must distinguish between array operators (`&&`, `@>`, `<@`) and range operators. This is handled in `src/transpiler.rs` in the `reconstruct_a_expr` function.
+The transpiler must distinguish between array operators (`&&`, `@>`, `<@`) and range operators. This is handled in `src/transpiler/expr.rs` in the `reconstruct_a_expr` function.
 
 **Key logic**:
 
@@ -206,18 +206,21 @@ SELECT '[1,10)' && '[5,15)';
 
 ### Feature Modules
 
-| Module     | File                              | Description                                    |
-| ---------- | --------------------------------- | ---------------------------------------------- |
-| Array      | `src/array.rs`                    | PostgreSQL array functions and operators       |
-| Range      | `src/range.rs`                    | PostgreSQL range types and operators           |
-| Vector     | `src/vector.rs`                   | pgvector-compatible vector operations          |
-| FTS        | `src/fts.rs`                      | Full-text search (to_tsvector, to_tsquery)     |
-| RLS        | `src/rls.rs`, `src/rls_inject.rs` | Row-Level Security                             |
-| Schema     | `src/schema.rs`                   | Schema management (CREATE SCHEMA, search_path) |
-| Window     | `src/window.rs`                   | Window functions (ROW_NUMBER, RANK, etc.)      |
-| Geo        | `src/geo.rs`                      | Geometric types (point, box, circle)           |
-| Catalog    | `src/catalog.rs`                  | Metadata storage in SQLite                     |
-| Transpiler | `src/transpiler.rs`               | SQL parsing and transformation                 |
+| Module     | File(s)                                    | Description                                    |
+| ---------- | ------------------------------------------ | ---------------------------------------------- |
+| Array      | `src/array.rs`                             | PostgreSQL array functions and operators       |
+| Range      | `src/range.rs`                             | PostgreSQL range types and operators           |
+| Vector     | `src/vector.rs`                            | pgvector-compatible vector operations          |
+| FTS        | `src/fts.rs`                               | Full-text search (to_tsvector, to_tsquery)     |
+| RLS        | `src/rls.rs`, `src/rls_inject.rs`          | Row-Level Security                             |
+| Schema     | `src/schema.rs`                            | Schema management (CREATE SCHEMA, search_path) |
+| Geo        | `src/geo.rs`                               | Geometric types (point, box, circle)           |
+| Functions  | `src/functions.rs`                         | User-defined function execution                |
+| Copy       | `src/copy.rs`                              | COPY FROM/TO command support                   |
+| Distinct   | `src/distinct_on.rs`                       | DISTINCT ON polyfill via ROW_NUMBER()          |
+| Catalog    | `src/catalog/` (mod, init, table, fn, rls, system_views) | Metadata storage in SQLite    |
+| Transpiler | `src/transpiler/` (mod, context, ddl, dml, expr, func, rls_aug, utils, window) | SQL parsing and transformation |
+| Handler    | `src/handler/mod.rs`                       | PostgreSQL wire protocol (SqliteHandler)       |
 
 ### Transpilation Pipeline
 
@@ -291,27 +294,52 @@ SELECT '[1,10)' && '[5,15)';
 ```
 .
 ├── src/
-│   ├── main.rs           # Proxy server and protocol handling
-│   ├── lib.rs            # Library exports
-│   ├── transpiler.rs     # SQL transpilation (largest file)
-│   ├── catalog.rs        # Metadata management
-│   ├── array.rs          # Array support
-│   ├── range.rs          # Range types
-│   ├── vector.rs         # Vector operations
-│   ├── fts.rs            # Full-text search
-│   ├── rls.rs            # Row-Level Security
-│   ├── rls_inject.rs     # RLS query injection
-│   ├── schema.rs         # Schema management
-│   ├── window.rs         # Window functions
-│   ├── geo.rs            # Geometric types
-│   └── plpgsql.rs        # PL/pgSQL parser stub
+│   ├── main.rs                # CLI, server setup, main() entry point
+│   ├── handler/               # PostgreSQL wire protocol handler (SqliteHandler)
+│   │   └── mod.rs             # SqliteHandler impl: query exec, schema, functions, RLS, COPY
+│   ├── lib.rs                 # Library exports
+│   ├── transpiler/            # SQL transpilation (PostgreSQL → SQLite)
+│   │   ├── mod.rs             # Public API: transpile(), TranspileResult, main dispatch
+│   │   ├── context.rs         # TranspileContext and result types
+│   │   ├── ddl.rs             # CREATE TABLE, ALTER, DROP, TRUNCATE, INDEX, COPY
+│   │   ├── dml.rs             # SELECT, INSERT, UPDATE, DELETE
+│   │   ├── expr.rs            # Expression/node reconstruction
+│   │   ├── func.rs            # FuncCall reconstruction + CREATE FUNCTION parsing
+│   │   ├── rls_aug.rs         # Roles, grants, policies, transpile_with_rls()
+│   │   ├── utils.rs           # Type rewriting (rewrite_type_for_sqlite)
+│   │   └── window.rs          # Window function support
+│   ├── catalog/               # Shadow catalog management
+│   │   ├── mod.rs             # Public API and shared types
+│   │   ├── init.rs            # Catalog init and pg_types
+│   │   ├── table.rs           # Table/column metadata
+│   │   ├── function.rs        # UDF metadata
+│   │   ├── rls.rs             # RLS policy storage
+│   │   └── system_views.rs    # pg_catalog view init
+│   ├── array.rs               # Array support
+│   ├── copy.rs                # COPY FROM/TO support
+│   ├── distinct_on.rs         # DISTINCT ON polyfill
+│   ├── fts.rs                 # Full-text search
+│   ├── functions.rs           # UDF execution
+│   ├── geo.rs                 # Geometric types
+│   ├── plpgsql/               # PL/pgSQL parser and Lua transpiler
+│   │   ├── mod.rs             # Public API
+│   │   ├── ast.rs             # AST type definitions
+│   │   ├── parser.rs          # Parser
+│   │   ├── runtime.rs         # Lua execution runtime
+│   │   ├── sqlstate.rs        # SQLSTATE error codes
+│   │   └── transpiler.rs      # PL/pgSQL → Lua
+│   ├── range.rs               # Range types
+│   ├── rls.rs                 # Row-Level Security
+│   ├── rls_inject.rs          # RLS AST injection
+│   ├── schema.rs              # Schema management
+│   └── vector.rs              # Vector operations
 ├── tests/
-│   ├── *_tests.rs        # Rust integration tests
-│   ├── *_e2e_test.py     # Python e2e tests
-│   └── run_all_e2e.py    # Unified e2e runner
-├── examples/             # Example usage code
-├── docs/                 # Documentation
-├── run_tests.sh          # Test runner script
+│   ├── *_tests.rs             # Rust integration tests
+│   ├── *_e2e_test.py          # Python e2e tests
+│   └── run_all_e2e.py         # Unified e2e runner
+├── examples/                  # Example usage code
+├── docs/                      # Documentation
+├── run_tests.sh               # Test runner script
 ├── Cargo.toml
 └── README.md
 ```

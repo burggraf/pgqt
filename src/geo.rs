@@ -1,3 +1,23 @@
+//! Geometric type support for PostgreSQL compatibility
+//!
+//! This module implements 2D geometric data types and their associated operators
+//! and distance functions, providing PostgreSQL-compatible geometry support backed
+//! by SQLite TEXT storage.
+//!
+//! ## Supported Types
+//! - `POINT` — a 2D coordinate `(x, y)`
+//! - `LINE` — an infinite line described by coefficients `{A, B, C}` (Ax + By + C = 0)
+//! - `LSEG` — a finite line segment `[(x1,y1),(x2,y2)]`
+//! - `BOX` — a rectangular box `(x1,y1),(x2,y2)`
+//! - `PATH` — an open or closed sequence of points
+//! - `POLYGON` — a closed polygon
+//! - `CIRCLE` — a circle `<(x,y),r>`
+//!
+//! ## Supported Operators
+//! - Distance: `<->`, `<#>`, `<=>`
+//! - Containment: `@>`, `<@`, `&&`
+//! - Translation: `+`, `-`, `*`, `/`
+
 use std::str::FromStr;
 use std::fmt;
 
