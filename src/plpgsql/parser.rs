@@ -122,8 +122,7 @@ mod tests {
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         
         let func = result.unwrap();
-        // Note: pg_parse doesn't provide fn_name in the output
-        // We may need to extract it separately from CREATE FUNCTION statement
+        assert_eq!(func.fn_name, Some("add".to_string()));
         assert!(!func.fn_body().is_empty(), "Function body should not be empty");
     }
 
@@ -138,7 +137,7 @@ mod tests {
         "#;
         
         let func = parse_plpgsql_function(sql).unwrap();
-        // Note: pg_parse doesn't provide fn_name in the output
+        assert_eq!(func.fn_name, Some("greet".to_string()));
         assert!(!func.fn_body().is_empty());
         
         // Check argument names - pg_parse provides these in datums
@@ -160,6 +159,7 @@ mod tests {
         "#;
         
         let func = parse_plpgsql_function(sql).unwrap();
+        assert_eq!(func.fn_name, Some("max_val".to_string()));
         
         // Should have a block with an IF statement
         assert!(!func.fn_body().is_empty());
@@ -183,6 +183,7 @@ mod tests {
         "#;
         
         let func = parse_plpgsql_function(sql).unwrap();
+        assert_eq!(func.fn_name, Some("counter".to_string()));
         assert!(!func.fn_body().is_empty());
     }
 
@@ -197,6 +198,7 @@ mod tests {
         "#;
         
         let func = parse_plpgsql_function(sql).unwrap();
+        assert_eq!(func.fn_name, Some("log_message".to_string()));
         assert!(!func.fn_body().is_empty());
     }
 
