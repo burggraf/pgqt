@@ -169,7 +169,7 @@ impl SqliteHandler {
         conn.create_scalar_function("format_type", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let type_oid: i64 = ctx.get(0)?;
             let _typemod: Option<i64> = ctx.get(1)?;
-            
+
             // Map common OIDs back to type names
             let type_name = match type_oid {
                 16 => "boolean",
@@ -326,7 +326,7 @@ impl SqliteHandler {
         conn.create_scalar_function("regexp", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let pattern: String = ctx.get(0)?;
             let text: String = ctx.get(1)?;
-            
+
             let re = regex::Regex::new(&pattern).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
             Ok(re.is_match(&text))
         })?;
@@ -335,7 +335,7 @@ impl SqliteHandler {
         conn.create_scalar_function("regexpi", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let pattern: String = ctx.get(0)?;
             let text: String = ctx.get(1)?;
-            
+
             let re = regex::RegexBuilder::new(&pattern)
                 .case_insensitive(true)
                 .build()
@@ -344,7 +344,7 @@ impl SqliteHandler {
         })?;
 
         // ========== Full-Text Search Functions ==========
-        
+
         // to_tsvector([config,] text) - converts text to tsvector
         conn.create_scalar_function("to_tsvector", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let text: String = ctx.get(0)?;
@@ -1052,7 +1052,7 @@ impl SqliteHandler {
         // Range Types Operators
         conn.create_scalar_function("range_contains", 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let left: String = ctx.get(0)?;
-            
+
             // Handle different parameter types for index 1
             let right = if let Ok(s) = ctx.get::<String>(1) {
                 s
@@ -1109,52 +1109,132 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
-        // Range Metadata Functions
+        // Range Metadata Functions        
         conn.create_scalar_function("lower", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::lower(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::lower(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, use standard string lowercase
+                Ok(Some(r.to_lowercase()))
+            }
         })?;
 
         conn.create_scalar_function("upper", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::upper(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::upper(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, use standard string uppercase
+                Ok(Some(r.to_uppercase()))
+            }
         })?;
 
         conn.create_scalar_function("lower_inc", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::lower_inc(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::lower_inc(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, return false
+                Ok(false)
+            }
         })?;
 
         conn.create_scalar_function("upper_inc", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::upper_inc(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::upper_inc(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, return false
+                Ok(false)
+            }
         })?;
 
         conn.create_scalar_function("lower_inf", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::lower_inf(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::lower_inf(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, return false
+                Ok(false)
+            }
         })?;
 
         conn.create_scalar_function("upper_inf", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::upper_inf(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::upper_inf(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, return false
+                Ok(false)
+            }
         })?;
 
         conn.create_scalar_function("isempty", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
-            range::isempty(&r, range::RangeType::Int4)
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            // Only apply range logic if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if is_range_format {
+                range::isempty(&r, range::RangeType::Int4)
+                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            } else {
+                // Not a range, return false
+                Ok(false)
+            }
         })?;
 
         conn.create_scalar_function("range_canonicalize", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let r: String = ctx.get(0)?;
             // Default to Int4 for now, as strings don't carry type info
+            
+            // Only canonicalize if input looks like a PostgreSQL range format
+            let trimmed = r.trim();
+            let is_range_format = (trimmed.starts_with('[') || trimmed.starts_with('(')) 
+                && (trimmed.ends_with(']') || trimmed.ends_with(')'));
+            
+            if !is_range_format {
+                return Ok(r);
+            }
+            
             let rv = range::parse_range(&r, range::RangeType::Int4)
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
             Ok(rv.to_postgres_string())
@@ -1233,7 +1313,7 @@ impl SqliteHandler {
         if is_superuser {
             return Ok(true);
         }
-        
+
         // If user doesn't exist in __pg_authid__, create them as a superuser
         // This allows any connecting user to have full access (development mode)
         let user_exists: bool = conn.query_row(
@@ -1241,7 +1321,7 @@ impl SqliteHandler {
             &[&current_user],
             |row| row.get(0),
         ).unwrap_or(false);
-        
+
         if !user_exists {
             // Auto-create unknown users as superusers
             conn.execute(
@@ -1306,13 +1386,13 @@ impl SqliteHandler {
     /// Apply RLS (Row-Level Security) to a transpiled query
     fn apply_rls_to_query(&self, sql: String, operation_type: transpiler::OperationType, tables: &[String]) -> String {
         use rls_inject::{inject_rls_into_select_sql, inject_rls_into_update_sql, inject_rls_into_delete_sql};
-        
+
         // Get current user from session
         let session = self.sessions.get(&0);
         let current_user = session.map(|s| s.current_user.clone()).unwrap_or_else(|| "postgres".to_string());
-        
+
         let conn = self.conn.lock().unwrap();
-        
+
         // Check each table for RLS
         for table_name in tables {
             // Check if RLS is enabled for this table
@@ -1353,11 +1433,11 @@ impl SqliteHandler {
                         Ok(is_superuser)
                     },
                 );
-                
+
                 if can_bypass.unwrap_or(false) {
                     continue; // Skip RLS for this table
                 }
-                
+
                 // Get applicable RLS policies for this table and operation
                 let command = match operation_type {
                     transpiler::OperationType::SELECT => "SELECT",
@@ -1366,7 +1446,7 @@ impl SqliteHandler {
                     transpiler::OperationType::DELETE => "DELETE",
                     _ => continue,
                 };
-                
+
                 if let Ok(policies) = catalog::get_applicable_policies(&conn, table_name, command, &["PUBLIC".to_string(), current_user.clone()]) {
                     if !policies.is_empty() {
                         // Build RLS expression from policies
@@ -1374,7 +1454,7 @@ impl SqliteHandler {
                         if let Some(expr) = rls_expr {
                             // Rewrite current_user in expression
                             let rewritten_expr = rls_inject::rewrite_rls_expression(&expr, &current_user, &current_user);
-                            
+
                             // Inject RLS into the query based on operation type
                             return match operation_type {
                                 transpiler::OperationType::SELECT => inject_rls_into_select_sql(&sql, &rewritten_expr),
@@ -1387,7 +1467,7 @@ impl SqliteHandler {
                 }
             }
         }
-        
+
         sql
     }
 
@@ -1566,29 +1646,29 @@ impl SqliteHandler {
     fn handle_create_function(&self, sql: &str) -> Result<Vec<Response>> {
         // Parse CREATE FUNCTION
         let metadata = transpiler::parse_create_function(sql)?;
-        
+
         // Store in catalog
         let conn = self.conn.lock().unwrap();
         catalog::store_function(&conn, &metadata)?;
-        
+
         // Also register as a SQLite custom function for runtime interception
         self.register_sqlite_function(&conn, &metadata)?;
-        
+
         Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
     }
-    
+
     /// Register a user-defined function as a SQLite custom function
     fn register_sqlite_function(&self, conn: &Connection, metadata: &catalog::FunctionMetadata) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
         use crate::catalog::ReturnTypeKind;
         use rusqlite::types::Value;
-        
+
         // Determine the number of parameters (excluding OUT params for now)
         let num_params = metadata.arg_types.len();
-        
+
         // Store metadata in the in-memory cache for fast lookup
         self.functions.insert(metadata.name.clone(), metadata.clone());
-        
+
         // Create references for the closure
         let func_name = metadata.name.clone();
         let func_name_for_closure = func_name.clone(); // Clone for the closure
@@ -1596,7 +1676,7 @@ impl SqliteHandler {
         let is_strict = metadata.strict;
         let return_type_kind = metadata.return_type_kind.clone();
         let functions_cache = self.functions.clone();
-        
+
         // Register as a scalar function
         conn.create_scalar_function(
             func_name.as_str(),
@@ -1609,42 +1689,42 @@ impl SqliteHandler {
                     let arg = ctx.get::<Value>(i)?;
                     args.push(arg);
                 }
-                
+
                 // If STRICT and any NULL args, return NULL
                 if is_strict && args.iter().any(|v| matches!(v, Value::Null)) {
                     return Ok(Value::Null);
                 }
-                
+
                 // Look up function metadata from cache
                 let _func_metadata = match functions_cache.get(&func_name_for_closure) {
                     Some(metadata) => metadata.clone(),
                     None => return Ok(Value::Null), // Function not found
                 };
-                
+
                 // Only support scalar functions for now
                 if return_type_kind != ReturnTypeKind::Scalar {
                     // For non-scalar functions, return NULL (not yet supported)
                     return Ok(Value::Null);
                 }
-                
+
                 // For now, return NULL to indicate not fully implemented
                 // The AST-based interception will handle simple cases
                 Ok(Value::Null)
             }
         )?;
-        
+
         Ok(())
     }
-    
+
     /// Try to execute a simple function call like SELECT func(arg1, arg2)
     /// Returns Ok(response) if it was a simple function call, Err if not
     fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
-        
-        
+
+
         // Parse the SQL
         let result = pg_query::parse(sql)?;
-        
+
         // Check if this is a simple SELECT with a function call
         if let Some(raw_stmt) = result.protobuf.stmts.first() {
             if let Some(ref stmt_node) = raw_stmt.stmt {
@@ -1663,17 +1743,17 @@ impl SqliteHandler {
                 }
             }
         }
-        
+
         // Not a simple function call
         anyhow::bail!("Not a simple function call")
     }
-    
+
     /// Execute a function call
     fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
-        
-        
+
+
         // Extract function name
         let func_name = func_call
             .funcname
@@ -1688,14 +1768,14 @@ impl SqliteHandler {
             })
             .last()
             .ok_or_else(|| anyhow::anyhow!("Could not extract function name"))?;
-        
-        
+
+
         // Get connection and look up function
         let conn = self.conn.lock().unwrap();
         let metadata = catalog::get_function(&conn, &func_name, None)?
             .ok_or_else(|| anyhow::anyhow!("Function {} not found", func_name))?;
-        
-        
+
+
         // Extract arguments (only handle simple literals for now)
         let mut args = Vec::new();
         for (_i, arg_node) in func_call.args.iter().enumerate() {
@@ -1730,23 +1810,23 @@ impl SqliteHandler {
                 }
             }
         }
-        
-        
+
+
         // Execute the function
         let result = crate::functions::execute_sql_function(&conn, &metadata, &args)?;
-        
-        
+
+
         // Convert result to Response
         self.convert_function_result_to_response(result)
     }
-    
+
     /// Convert function execution result to pgwire Response
     fn convert_function_result_to_response(&self, result: crate::functions::FunctionResult) -> Result<Vec<Response>> {
         use crate::functions::FunctionResult;
         use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
         use std::sync::Arc;
         use rusqlite::types::Value;
-        
+
         match result {
             FunctionResult::Scalar(Some(value)) => {
                 // Return single value
@@ -1757,9 +1837,9 @@ impl SqliteHandler {
                     pgwire::api::Type::UNKNOWN,
                     pgwire::api::results::FieldFormat::Text,
                 )]);
-                
+
                 let mut encoder = DataRowEncoder::new(fields.clone());
-                
+
                 // Convert Value to string properly
                 let value_str = match value {
                     Value::Null => None,
@@ -1768,10 +1848,10 @@ impl SqliteHandler {
                     Value::Text(s) => Some(s),
                     Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
                 };
-                
+
                 encoder.encode_field(&value_str)?;
                 let data_rows = vec![Ok(encoder.take_row())];
-                
+
                 Ok(vec![Response::Query(QueryResponse::new(
                     fields,
                     futures::stream::iter(data_rows),
@@ -1786,11 +1866,11 @@ impl SqliteHandler {
                     pgwire::api::Type::UNKNOWN,
                     pgwire::api::results::FieldFormat::Text,
                 )]);
-                
+
                 let mut encoder = DataRowEncoder::new(fields.clone());
                 encoder.encode_field(&None::<String>)?;
                 let data_rows = vec![Ok(encoder.take_row())];
-                
+
                 Ok(vec![Response::Query(QueryResponse::new(
                     fields,
                     futures::stream::iter(data_rows),
@@ -1805,7 +1885,7 @@ impl SqliteHandler {
                     pgwire::api::Type::UNKNOWN,
                     pgwire::api::results::FieldFormat::Text,
                 )]);
-                
+
                 let mut data_rows = Vec::new();
                 for value in values {
                     let mut encoder = DataRowEncoder::new(fields.clone());
@@ -1819,7 +1899,7 @@ impl SqliteHandler {
                     encoder.encode_field(&value_str)?;
                     data_rows.push(Ok(encoder.take_row()));
                 }
-                
+
                 Ok(vec![Response::Query(QueryResponse::new(
                     fields,
                     futures::stream::iter(data_rows),
@@ -1830,7 +1910,7 @@ impl SqliteHandler {
                 if rows.is_empty() {
                     return Ok(vec![Response::Execution(Tag::new("SELECT 0"))]);
                 }
-                
+
                 let column_count = rows[0].len();
                 let mut fields_vec = Vec::new();
                 for i in 0..column_count {
@@ -1843,7 +1923,7 @@ impl SqliteHandler {
                     ));
                 }
                 let fields = Arc::new(fields_vec);
-                
+
                 let mut data_rows = Vec::new();
                 for row in rows {
                     let mut encoder = DataRowEncoder::new(fields.clone());
@@ -1859,7 +1939,7 @@ impl SqliteHandler {
                     }
                     data_rows.push(Ok(encoder.take_row()));
                 }
-                
+
                 Ok(vec![Response::Query(QueryResponse::new(
                     fields,
                     futures::stream::iter(data_rows),
@@ -1877,11 +1957,11 @@ impl SqliteHandler {
         let name = name_part.split_whitespace().next().unwrap_or("");
         let name = name.trim_start_matches("IF EXISTS").trim();
         let name = name.split('(').next().unwrap_or(name).trim();
-        
+
         // Remove from catalog
         let conn = self.conn.lock().unwrap();
         catalog::drop_function(&conn, name, None)?;
-        
+
         Ok(vec![Response::Execution(Tag::new("DROP FUNCTION"))])
     }
 
@@ -1961,7 +2041,7 @@ impl SqliteHandler {
         if upper_sql.starts_with("DROP FUNCTION") {
             return self.handle_drop_function(sql);
         }
-        
+
         // Try to handle simple function calls like SELECT func(arg1, arg2)
         // This intercepts user-defined function calls before normal execution
         match self.try_execute_simple_function_call(sql) {
@@ -1974,12 +2054,12 @@ impl SqliteHandler {
 
         let mut ctx = transpiler::TranspileContext::with_functions(self.functions.clone());
         let transpile_result = transpiler::transpile_with_context(sql, &mut ctx);
-        
+
         // Handle COPY statements
         if let Some(copy_stmt) = transpile_result.copy_metadata {
             return self.handle_copy_statement(copy_stmt);
         }
-        
+
         // Handle SET ROLE specially
         if transpile_result.sql.starts_with("-- SET ROLE") {
             let role_name = transpile_result.sql.trim_start_matches("-- SET ROLE ").trim();
@@ -2000,7 +2080,7 @@ impl SqliteHandler {
         }
 
         // GLOBAL PATCH FOR RANGES
-        
+
         // Check permissions before executing
         if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type)? {
             return Err(anyhow::anyhow!("permission denied for table(s)"));
@@ -2029,7 +2109,7 @@ impl SqliteHandler {
                     .collect();
 
                 store_table_metadata(&conn, &metadata.table_name, &columns)?;
-                
+
                 // Store ownership (use current user as owner)
                 let session = self.sessions.get(&0).unwrap_or_else(|| {
                     self.sessions.insert(0, SessionContext {
@@ -2045,9 +2125,9 @@ impl SqliteHandler {
                     &[&session.current_user],
                     |row| row.get(0),
                 ).unwrap_or(10); // Default to postgres (OID 10)
-                
+
                 store_relation_metadata(&conn, &metadata.table_name, owner_oid)?;
-                
+
                 // Populate pg_catalog tables for ORM compatibility
                 catalog::populate_pg_attribute(&conn, &metadata.table_name)?;
                 catalog::populate_pg_index(&conn)?;
@@ -2123,11 +2203,11 @@ impl SqliteHandler {
 
     fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
         println!("Executing statement: {}", sql);
-        
+
         // Split multiple statements and execute them sequentially
         let statements: Vec<&str> = sql.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
         let mut total_changes = 0;
-        
+
         for stmt in statements {
             total_changes += conn.execute(stmt, [])?;
         }
@@ -2167,7 +2247,7 @@ impl SimpleQueryHandler for SqliteHandler {
                 search_path: SearchPath::default(),
             });
         }
-        
+
         println!("Received query: {}", query);
         match self.execute_query(query) {
             Ok(responses) => Ok(responses),
