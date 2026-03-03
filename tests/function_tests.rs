@@ -312,21 +312,43 @@ fn test_debug_function_body() {
 }
 
 #[test]
-fn test_debug_function_returns_table() {
+fn test_parse_returns_table() {
     let sql = r#"
-        CREATE FUNCTION get_numbers()
-        RETURNS TABLE(id integer, val integer)
+        CREATE FUNCTION get_users()
+        RETURNS TABLE(id integer, name text)
         LANGUAGE sql
         AS $$
-            SELECT id, val FROM numbers
+            SELECT id, name FROM users
         $$;
     "#;
     
-    let result = pg_query::parse(sql).unwrap();
+    let metadata = parse_create_function(sql).unwrap();
     
-    if let Some(raw_stmt) = result.protobuf.stmts.first() {
-        if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(stmt)) = raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
-            println!("STMT: {:#?}", stmt);
-        }
-    }
+    assert_eq!(metadata.name, "get_users");
+    assert_eq!(metadata.return_type_kind, ReturnTypeKind::Table);
+    
+    let cols = metadata.return_table_cols.expect("Should have return table columns");
+    assert_eq!(cols.len(), 2);
+    assert_eq!(cols[0].0, "id");
+    assert_eq!(cols[0].1, "INT4");
+    assert_eq!(cols[1].0, "name");
+    assert_eq!(cols[1].1, "TEXT");
+}
+
+#[test]
+fn test_parse_returns_void() {
+    let sql = r#"
+        CREATE FUNCTION log_it(msg text)
+        RETURNS void
+        LANGUAGE sql
+        AS $$
+            INSERT INTO logs(msg) VALUES(msg)
+        $$;
+    "#;
+    
+    let metadata = parse_create_function(sql).unwrap();
+    
+    assert_eq!(metadata.name, "log_it");
+    assert_eq!(metadata.return_type_kind, ReturnTypeKind::Void);
+    assert_eq!(metadata.return_type, "VOID");
 }

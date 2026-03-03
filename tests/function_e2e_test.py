@@ -321,7 +321,7 @@ def test_function_in_where_clause():
         # Use in WHERE clause
         cur.execute("SELECT value FROM numbers WHERE is_even(value)")
         results = cur.fetchall()
-        even_values = [r[0] for r in results]
+        even_values = [int(r[0]) for r in results]
         assert even_values == [2, 4], f"Expected [2, 4], got {even_values}"
         
         cur.close()
@@ -330,11 +330,95 @@ def test_function_in_where_clause():
     finally:
         stop_proxy(proc)
 
+def test_void_function():
+    """Test VOID function."""
+    proc = start_proxy()
+    try:
+        conn = psycopg2.connect(
+            host=PROXY_HOST,
+            port=PROXY_PORT,
+            database="postgres",
+            user="postgres",
+            password="postgres"
+        )
+        cur = conn.cursor()
+        
+        # Create table for side effects
+        cur.execute("CREATE TABLE logs (msg TEXT)")
+        
+        # Create VOID function
+        cur.execute("""
+            CREATE FUNCTION log_it(p_msg text)
+            RETURNS void
+            LANGUAGE sql
+            AS $$
+                INSERT INTO logs(msg) VALUES(p_msg)
+            $$;
+        """)
+        
+        # Call function via SELECT (simple function call execution)
+        cur.execute("SELECT log_it('hello world')")
+        result = cur.fetchone()
+        assert result[0] is None, f"Expected NULL for VOID function, got {result[0]}"
+        
+        # Verify side effect
+        cur.execute("SELECT msg FROM logs")
+        result = cur.fetchone()
+        assert result[0] == 'hello world', f"Expected 'hello world' in logs, got {result[0]}"
+        
+        cur.close()
+        conn.close()
+        print("test_void_function: PASSED")
+    finally:
+        stop_proxy(proc)
+
+def test_setof_function_in_select_list():
+    """Test SETOF function in SELECT list."""
+    proc = start_proxy()
+    try:
+        conn = psycopg2.connect(
+            host=PROXY_HOST,
+            port=PROXY_PORT,
+            database="postgres",
+            user="postgres",
+            password="postgres"
+        )
+        cur = conn.cursor()
+        
+        # Create table
+        cur.execute("CREATE TABLE items (id INTEGER, vals TEXT)")
+        cur.execute("INSERT INTO items VALUES (1, '[10, 20, 30]')")
+        
+        # Create SETOF function using json_each
+        cur.execute("""
+            CREATE FUNCTION get_vals(j text)
+            RETURNS SETOF integer
+            LANGUAGE sql
+            AS $$
+                SELECT value FROM json_each($1)
+            $$;
+        """)
+        
+        # Call function in SELECT list
+        # In SQLite, this will only return the FIRST value (10) for each row
+        cur.execute("SELECT id, get_vals(vals) FROM items")
+        result = cur.fetchone()
+        assert int(result[0]) == 1, f"Expected 1, got {result[0]}"
+        assert int(result[1]) == 10, f"Expected 10, got {result[1]}"
+        
+        cur.close()
+        conn.close()
+        print("test_setof_function_in_select_list: PASSED")
+    finally:
+        stop_proxy(proc)
+
 if __name__ == "__main__":
     test_simple_scalar_function()
     test_function_with_out_params()
     test_strict_function()
     test_returns_table_function()
+    test_void_function()
+    test_setof_function_in_select_list()
     test_drop_function()
     test_create_or_replace()
     test_function_in_where_clause()

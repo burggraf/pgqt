@@ -1771,8 +1771,8 @@ impl SqliteHandler {
                     futures::stream::iter(data_rows),
                 ))])
             }
-            FunctionResult::Scalar(None) | FunctionResult::Null => {
-                // Return NULL
+            FunctionResult::Scalar(None) | FunctionResult::Null | FunctionResult::Void => {
+                // Return NULL for scalar None/Null or Void
                 let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
                     "result".to_string(),
                     None,
@@ -1790,8 +1790,74 @@ impl SqliteHandler {
                     futures::stream::iter(data_rows),
                 ))])
             }
-            _ => {
-                anyhow::bail!("Unsupported function result type for simple function calls");
+            FunctionResult::SetOf(values) => {
+                // Return multiple rows, each with one column
+                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+                    "result".to_string(),
+                    None,
+                    None,
+                    pgwire::api::Type::UNKNOWN,
+                    pgwire::api::results::FieldFormat::Text,
+                )]);
+                
+                let mut data_rows = Vec::new();
+                for value in values {
+                    let mut encoder = DataRowEncoder::new(fields.clone());
+                    let value_str = match value {
+                        Value::Null => None,
+                        Value::Integer(i) => Some(i.to_string()),
+                        Value::Real(f) => Some(f.to_string()),
+                        Value::Text(s) => Some(s),
+                        Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                    };
+                    encoder.encode_field(&value_str)?;
+                    data_rows.push(Ok(encoder.take_row()));
+                }
+                
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
+            }
+            FunctionResult::Table(rows) => {
+                // Return multiple rows with multiple columns
+                if rows.is_empty() {
+                    return Ok(vec![Response::Execution(Tag::new("SELECT 0"))]);
+                }
+                
+                let column_count = rows[0].len();
+                let mut fields_vec = Vec::new();
+                for i in 0..column_count {
+                    fields_vec.push(FieldInfo::new(
+                        format!("col_{}", i),
+                        None,
+                        None,
+                        pgwire::api::Type::UNKNOWN,
+                        pgwire::api::results::FieldFormat::Text,
+                    ));
+                }
+                let fields = Arc::new(fields_vec);
+                
+                let mut data_rows = Vec::new();
+                for row in rows {
+                    let mut encoder = DataRowEncoder::new(fields.clone());
+                    for value in row {
+                        let value_str = match value {
+                            Value::Null => None,
+                            Value::Integer(i) => Some(i.to_string()),
+                            Value::Real(f) => Some(f.to_string()),
+                            Value::Text(s) => Some(s),
+                            Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                        };
+                        encoder.encode_field(&value_str)?;
+                    }
+                    data_rows.push(Ok(encoder.take_row()));
+                }
+                
+                Ok(vec![Response::Query(QueryResponse::new(
+                    fields,
+                    futures::stream::iter(data_rows),
+                ))])
             }
         }
     }

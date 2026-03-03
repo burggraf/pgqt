@@ -1964,8 +1964,24 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                 // Update referenced tables in outer context
                 ctx.referenced_tables = inner_ctx.referenced_tables;
                 
-                // Wrap in parentheses to treat as subquery or expression
-                return format!("({})", transpiled_body.sql.trim_end_matches(';'));
+                let sql_body = transpiled_body.sql.trim_end_matches(';');
+                
+                // Special handling for different return types
+                return match metadata.return_type_kind {
+                    ReturnTypeKind::Void => {
+                        // For VOID functions, we want to return NULL but still execute the body if it's a SELECT
+                        // If it's a side-effect (INSERT/UPDATE/DELETE), SQLite won't allow it in an expression anyway
+                        format!("(select null from ({}) limit 1)", sql_body)
+                    }
+                    ReturnTypeKind::SetOf | ReturnTypeKind::Table => {
+                        // For SETOF/TABLE functions, they work best in the FROM clause.
+                        // When used in a SELECT list, SQLite will just take the first row/column.
+                        format!("({})", sql_body)
+                    }
+                    ReturnTypeKind::Scalar => {
+                        format!("({})", sql_body)
+                    }
+                };
             }
         }
     }
@@ -3897,8 +3913,6 @@ pub fn parse_create_function(sql: &str) -> anyhow::Result<crate::catalog::Functi
 
 /// Parse CreateFunctionStmt protobuf
 fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate::catalog::FunctionMetadata> {
-    use crate::catalog::ReturnTypeKind;
-    
     // Extract function name
     let funcname = extract_funcname(&stmt.funcname)?;
     
@@ -3917,7 +3931,7 @@ fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate
     }
     
     // Extract return type and kind
-    let (return_type, return_type_kind, return_table_cols) = parse_return_type(&stmt.return_type, &[])?;
+    let (return_type, return_type_kind, return_table_cols) = parse_return_type(&stmt.return_type, &stmt.parameters)?;
     
     // Extract function body from options (defname="as")
     // The sql_body field is often None, so we need to look in options
@@ -4101,16 +4115,41 @@ fn parse_return_type(
     return_type: &Option<TypeName>,
     return_attrs: &[Node]
 ) -> anyhow::Result<(String, ReturnTypeKind, Option<Vec<(String, String)>>)> {
-    // Check if this is RETURNS TABLE
-    if !return_attrs.is_empty() {
-        // RETURNS TABLE case - for now, return empty columns and refine later
-        // In a full implementation, we would parse the table column definitions
-        return Ok(("TABLE".to_string(), ReturnTypeKind::Table, None));
+    // Check if this is RETURNS TABLE (identified by mode Table in parameters)
+    let mut table_columns = Vec::new();
+    let mut out_params = Vec::new();
+    for attr_node in return_attrs {
+        if let Some(NodeEnum::FunctionParameter(param)) = attr_node.node.as_ref() {
+            if param.mode() == pg_query::protobuf::FunctionParameterMode::FuncParamTable {
+                let name = param.name.clone();
+                let pg_type = extract_type_name(&param.arg_type)?;
+                table_columns.push((name, pg_type));
+            } else if param.mode() == pg_query::protobuf::FunctionParameterMode::FuncParamOut || 
+                      param.mode() == pg_query::protobuf::FunctionParameterMode::FuncParamInout {
+                let name = param.name.clone();
+                let pg_type = extract_type_name(&param.arg_type)?;
+                out_params.push((name, pg_type));
+            }
+        }
     }
     
-    // For now, assume scalar unless we detect TABLE or SETOF
+    if !table_columns.is_empty() {
+        return Ok(("TABLE".to_string(), ReturnTypeKind::Table, Some(table_columns)));
+    }
+    
+    // If we have OUT parameters, it's like returning a record/table
+    if !out_params.is_empty() {
+        return Ok(("RECORD".to_string(), ReturnTypeKind::Table, Some(out_params)));
+    }
+    
+    // Check for VOID, SETOF, or SCALAR
     if let Some(tn) = return_type {
         let return_type_str = extract_type_name(&Some(tn.clone()))?;
+        
+        if return_type_str == "VOID" {
+            return Ok(("VOID".to_string(), ReturnTypeKind::Void, None));
+        }
+        
         let kind = if tn.setof {
             if return_type_str == "RECORD" {
                 ReturnTypeKind::Table

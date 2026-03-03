@@ -655,6 +655,7 @@ pub fn get_function(
             Ok((
                 row.get::<_, i64>(0)?,        // oid
                 row.get::<_, String>(1)?,     // funcname
+                row.get::<_, String>(2)?,     // schema_name
                 row.get::<_, String>(3)?,     // arg_types
                 row.get::<_, String>(4)?,     // arg_names
                 row.get::<_, String>(5)?,     // arg_modes
@@ -676,6 +677,7 @@ pub fn get_function(
             Ok((
                 row.get::<_, i64>(0)?,        // oid
                 row.get::<_, String>(1)?,     // funcname
+                row.get::<_, String>(2)?,     // schema_name
                 row.get::<_, String>(3)?,     // arg_types
                 row.get::<_, String>(4)?,     // arg_names
                 row.get::<_, String>(5)?,     // arg_modes
@@ -695,7 +697,7 @@ pub fn get_function(
     };
 
     match row_result {
-        Ok((oid, name, arg_types_json, arg_names_json, arg_modes_json, return_type, return_type_kind_str, 
+        Ok((oid, name, schema, arg_types_json, arg_names_json, arg_modes_json, return_type, return_type_kind_str, 
             return_table_cols_json, function_body, language, volatility, strict, security_definer, 
             parallel, owner_oid, created_at)) => 
         {
@@ -716,8 +718,8 @@ pub fn get_function(
 
             Ok(Some(FunctionMetadata {
                 oid,
-                name: name.clone(),
-                schema: name,
+                name,
+                schema,
                 arg_types,
                 arg_names,
                 arg_modes,

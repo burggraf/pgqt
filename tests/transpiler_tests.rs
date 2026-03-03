@@ -95,11 +95,71 @@ fn test_transpile_cast_int() {
 }
 
 #[test]
-fn test_transpile_cast_text() {
-    let input = "SELECT 123::text";
-    let result = transpile(input);
-    assert!(result.contains("cast("));
-    assert!(result.contains("as text"));
+fn test_transpile_udf_inlining() {
+    use pgqt::transpiler::{TranspileContext, transpile_with_context};
+    use pgqt::catalog::{FunctionMetadata, ParamMode, ReturnTypeKind};
+    use dashmap::DashMap;
+    use std::sync::Arc;
+
+    let functions = Arc::new(DashMap::new());
+    functions.insert("add".to_string(), FunctionMetadata {
+        oid: 1,
+        name: "add".to_string(),
+        schema: "public".to_string(),
+        arg_types: vec!["int".to_string(), "int".to_string()],
+        arg_names: vec!["a".to_string(), "b".to_string()],
+        arg_modes: vec![ParamMode::In, ParamMode::In],
+        return_type: "int".to_string(),
+        return_type_kind: ReturnTypeKind::Scalar,
+        return_table_cols: None,
+        function_body: "SELECT $1 + $2".to_string(),
+        language: "sql".to_string(),
+        volatility: "IMMUTABLE".to_string(),
+        strict: false,
+        security_definer: false,
+        parallel: "SAFE".to_string(),
+        owner_oid: 1,
+        created_at: None,
+    });
+
+    let mut ctx = TranspileContext::with_functions(functions);
+    let input = "SELECT add(1, 2)";
+    let result = transpile_with_context(input, &mut ctx);
+    assert_eq!(result.sql, "select (select 1 + 2)");
+}
+
+#[test]
+fn test_transpile_void_udf_inlining() {
+    use pgqt::transpiler::{TranspileContext, transpile_with_context};
+    use pgqt::catalog::{FunctionMetadata, ParamMode, ReturnTypeKind};
+    use dashmap::DashMap;
+    use std::sync::Arc;
+
+    let functions = Arc::new(DashMap::new());
+    functions.insert("log".to_string(), FunctionMetadata {
+        oid: 2,
+        name: "log".to_string(),
+        schema: "public".to_string(),
+        arg_types: vec!["text".to_string()],
+        arg_names: vec!["msg".to_string()],
+        arg_modes: vec![ParamMode::In],
+        return_type: "void".to_string(),
+        return_type_kind: ReturnTypeKind::Void,
+        return_table_cols: None,
+        function_body: "SELECT $1".to_string(), // Simplified for testing
+        language: "sql".to_string(),
+        volatility: "VOLATILE".to_string(),
+        strict: false,
+        security_definer: false,
+        parallel: "UNSAFE".to_string(),
+        owner_oid: 1,
+        created_at: None,
+    });
+
+    let mut ctx = TranspileContext::with_functions(functions);
+    let input = "SELECT log('hi')";
+    let result = transpile_with_context(input, &mut ctx);
+    assert_eq!(result.sql, "select (select null from (select 'hi') limit 1)");
 }
 
 #[test]

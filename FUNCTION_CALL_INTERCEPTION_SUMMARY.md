@@ -47,25 +47,34 @@ functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>,
 - `src/catalog.rs`: Fixed function lookup to return the latest version (highest OID).
 - `src/functions.rs`: Refined parameter substitution.
 
-## What Works
+## Current Status
 
+### Function Call Interception
+The implementation now supports robust function call interception through transpiler-based inlining and direct execution for simple calls.
+
+### Return Types
+✅ Scalar return values.
+✅ VOID functions (handled via execution and inlining as `(SELECT NULL FROM (...) LIMIT 1)`).
+✅ SETOF/TABLE functions (now correctly extracting metadata for column names/types).
+✅ OUT/INOUT parameter support (mapped to RECORD/TABLE return types).
+
+### What Works
 ✅ Function calls in SELECT, WHERE, and FROM clauses.
 ✅ Column references as arguments: `SELECT add(id, 1) FROM users`
 ✅ Nested function calls: `SELECT add(multiply(2, 3), 4)`
 ✅ Multiple function calls in one query.
 ✅ Table-valued functions in FROM clause: `SELECT * FROM get_users()`
 ✅ STRICT attribute handling.
-✅ Named parameter support in function definitions.
+✅ Named parameter support in function definitions (automatically converted to positional $1, $2...).
 
 ## Current Limitations
 
 ### Return Types
-❌ Complex SETOF/TABLE processing (partially handled via inlining).
-❌ VOID functions (handled via execution, but return values might be unexpected in expressions).
+❌ Complex composite type processing (partially handled via RECORD/TABLE mapping).
 
 ### Other
 ❌ Non-SQL languages (e.g., PL/pgSQL) are not yet supported for inlining.
-❌ Complex parameter types (e.g., records, composite types).
+❌ Complex parameter types (e.g., nested records).
 
 ## Testing
 
