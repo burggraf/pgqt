@@ -461,11 +461,22 @@ fn emit_dyn_execute(ctx: &mut TranspileContext, dyn_exec: &PlPgSQLStmtDynExecute
 /// Emit GET DIAGNOSTICS
 fn emit_get_diag(ctx: &mut TranspileContext, diag: &PlPgSQLStmtGetDiag) -> Result<()> {
     // Map diagnostic items to context properties
+    // PostgreSQL diagnostic item kinds:
+    // 1 = ROW_COUNT, 2 = RESULT_OID, 3 = COMMAND_FUNCTION_CODE, 
+    // 4 = RETURNED_SQLSTATE, 5 = MESSAGE_TEXT, 6 = PG_EXCEPTION_CONTEXT, etc.
     for item in &diag.diag_items {
         let value = match item.kind {
-            0 => "_ctx.row_count",      // ROW_COUNT
-            1 => "_ctx.result_oid",     // RESULT_OID
-            2 => "_ctx.pg_context",     // PG_CONTEXT
+            1 => "_ctx.ROW_COUNT",           // ROW_COUNT
+            2 => "_ctx.RESULT_OID or nil",   // RESULT_OID
+            3 => "_ctx.command_function",    // COMMAND_FUNCTION_CODE
+            4 => "_ctx.SQLSTATE or '00000'", // RETURNED_SQLSTATE
+            5 => "_ctx.SQLERRM or ''",       // MESSAGE_TEXT
+            6 => "_ctx.PG_CONTEXT or ''",    // PG_EXCEPTION_CONTEXT
+            7 => "_ctx.constraint_name",     // CONSTRAINT_NAME
+            8 => "_ctx.schema_name",         // SCHEMA_NAME
+            9 => "_ctx.table_name",          // TABLE_NAME
+            10 => "_ctx.column_name",        // COLUMN_NAME
+            11 => "_ctx.datatype_name",      // DATATYPE_NAME
             _ => "nil",
         };
         ctx.emit_line(&format!("{} = {}", item.target_name, value));

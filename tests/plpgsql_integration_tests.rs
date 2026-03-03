@@ -423,3 +423,24 @@ fn test_string_concatenation() {
     
     assert_eq!(result, SqliteValue::Text("Hello, John Doe".to_string()));
 }
+
+/// Test GET DIAGNOSTICS ROW_COUNT
+#[test]
+fn test_get_diagnostics_row_count() {
+    let sql = r#"
+        CREATE FUNCTION test_row_count() RETURNS int AS $$
+        DECLARE
+            cnt int;
+        BEGIN
+            GET DIAGNOSTICS cnt = ROW_COUNT;
+            RETURN cnt;
+        END;
+        $$ LANGUAGE plpgsql;
+    "#;
+    
+    let func = parse_plpgsql_function(sql).unwrap();
+    let lua = transpile_to_lua(&func).unwrap();
+    
+    // Verify the Lua code contains GET DIAGNOSTICS handling
+    assert!(lua.contains("ROW_COUNT"));
+}

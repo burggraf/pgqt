@@ -1,0 +1,26 @@
+{
+  "title": "PostgreSQL Compatibility Test Suite Architecture",
+  "description": "I'm planning the structure of the new `/test-suite` folder. Please choose the preferred implementation approach for the test harness.",
+  "questions": [
+    {
+      "id": "harness-type",
+      "type": "single",
+      "question": "Which language should we use for the test harness (the script that runs SQL files and compares results)?",
+      "options": [
+        {
+          "label": "Python (using pytest + psycopg2)",
+          "description": "Flexible, easy to write diffing logic, good reporting. Consistent with existing E2E tests."
+        },
+        {
+          "label": "Rust (using tokio-postgres)",
+          "description": "Fast, consistent with the main project language. Can reuse internal logic if needed."
+        },
+        {
+          "label": "Shell (using psql + diff)",
+          "description": "Classic PostgreSQL approach. Best for comparing large output files."
+        }
+      ],
+      "recommended": "Python (using pytest + psycopg2)"
+    }
+  ]
+}

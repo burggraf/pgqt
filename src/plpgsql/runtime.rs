@@ -25,6 +25,10 @@ pub struct ExecutionContext {
     pub row_count: i64,
     /// Result set for RETURN NEXT
     pub result_set: Vec<Vec<SqliteValue>>,
+    /// Return OID from last INSERT (if applicable)
+    pub return_oid: Option<i64>,
+    /// PG_CONTEXT string (stack trace)
+    pub pg_context: Option<String>,
 }
 
 impl PlPgSqlRuntime {
@@ -75,6 +79,8 @@ impl PlPgSqlRuntime {
             sqlerrm: None,
             row_count: 0,
             result_set: Vec::new(),
+            return_oid: None,
+            pg_context: None,
         };
         
         // Create API table
@@ -320,7 +326,7 @@ impl ExecutionContext {
         })?;
         api.set("quote_ident", quote_ident_fn)?;
         
-        // Special variables
+        // Special variables for GET DIAGNOSTICS
         if let Some(sqlstate) = &self.sqlstate {
             api.set("SQLSTATE", sqlstate.clone())?;
         }
@@ -328,8 +334,18 @@ impl ExecutionContext {
             api.set("SQLERRM", sqlerrm.clone())?;
         }
         
-        // ROW_COUNT
+        // ROW_COUNT - rows affected by last command
         api.set("ROW_COUNT", self.row_count)?;
+        
+        // RESULT_OID - OID from last INSERT (if applicable)
+        if let Some(oid) = self.return_oid {
+            api.set("RESULT_OID", oid)?;
+        }
+        
+        // PG_CONTEXT - stack trace (simplified)
+        if let Some(context) = &self.pg_context {
+            api.set("PG_CONTEXT", context.clone())?;
+        }
         
         Ok(api)
     }
