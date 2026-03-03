@@ -26,6 +26,7 @@ mod schema;
 mod array;
 mod range;
 mod geo;
+mod plpgsql;
 mod functions;
 
 /// Output destination for server messages
@@ -285,7 +286,7 @@ impl SqliteHandler {
             // First arg is function name, rest are arguments
             let argc = ctx.len();
             if argc < 1 {
-                return Err(rusqlite::Error::InvalidFunctionParameter);
+                return Err(rusqlite::Error::UserFunctionError("Invalid function parameter".into()));
             }
             
             let func_name: String = ctx.get(0)?;
@@ -301,22 +302,22 @@ impl SqliteHandler {
             use crate::catalog::get_function;
             
             // Get function metadata from catalog (by name only for now)
-            let conn = ctx.get_connection();
-            let metadata = match get_function(conn, &func_name, None) {
+            let conn = unsafe { ctx.get_connection()? };
+            let metadata = match get_function(&conn, &func_name, None) {
                 Ok(Some(m)) => m,
-                _ => return Err(rusqlite::Error::InvalidFunctionParameter),
+                _ => return Err(rusqlite::Error::UserFunctionError("Function not found".into())),
             };
             
             // Check if it's a PL/pgSQL function
             if metadata.language.to_lowercase() != "plpgsql" {
-                return Err(rusqlite::Error::InvalidFunctionParameter);
+                return Err(rusqlite::Error::UserFunctionError("Not a PL/pgSQL function".into()));
             }
             
             // Execute the function
-            match execute_function(conn, &metadata, &args) {
+            match execute_function(&conn, &metadata, &args) {
                 Ok(FunctionResult::Scalar(Some(val))) => Ok(val),
                 Ok(FunctionResult::Scalar(None)) => Ok(rusqlite::types::Value::Null),
-                Ok(_) => Err(rusqlite::Error::InvalidFunctionParameter),
+                Ok(_) => Err(rusqlite::Error::UserFunctionError("Invalid function result".into())),
                 Err(e) => Err(rusqlite::Error::SqliteFailure(
                     rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                     Some(e.to_string())
@@ -329,7 +330,7 @@ impl SqliteHandler {
             // First arg is function name, rest are arguments
             let argc = ctx.len();
             if argc < 1 {
-                return Err(rusqlite::Error::InvalidFunctionParameter);
+                return Err(rusqlite::Error::UserFunctionError("Invalid function parameter".into()));
             }
             
             let func_name: String = ctx.get(0)?;
@@ -341,24 +342,24 @@ impl SqliteHandler {
                 args.push(value);
             }
             
-            use crate::functions::{execute_function, FunctionResult};
+            use crate::functions::execute_function;
             use crate::catalog::get_function;
             
-            let conn = ctx.get_connection();
-            let metadata = match get_function(conn, &func_name, None) {
+            let conn = unsafe { ctx.get_connection()? };
+            let metadata = match get_function(&conn, &func_name, None) {
                 Ok(Some(m)) => m,
-                _ => return Err(rusqlite::Error::InvalidFunctionParameter),
+                _ => return Err(rusqlite::Error::UserFunctionError("Function not found".into())),
             };
             
             if metadata.language.to_lowercase() != "plpgsql" {
-                return Err(rusqlite::Error::InvalidFunctionParameter);
+                return Err(rusqlite::Error::UserFunctionError("Not a PL/pgSQL function".into()));
             }
             
             // Execute and ignore result
-            match execute_function(conn, &metadata, &args) {
+            match execute_function(&conn, &metadata, &args) {
                 Ok(_) => Ok(rusqlite::types::Value::Null),
                 Err(e) => Err(rusqlite::Error::SqliteFailure(
-                    rusqlite::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                     Some(e.to_string())
                 )),
             }

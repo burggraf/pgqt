@@ -1998,7 +1998,7 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                 let args_str = arg_exprs.join(", ");
                 let func_name_literal = func_name.replace("'", "''");
                 
-                match metadata.return_type_kind {
+                return match metadata.return_type_kind {
                     ReturnTypeKind::Void => {
                         // For VOID functions, execute and return NULL
                         format!("pgqt_plpgsql_call_void('{}', {})", func_name_literal, args_str)
@@ -2011,7 +2011,7 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                         // For scalar functions, return the value
                         format!("pgqt_plpgsql_call_scalar('{}', {})", func_name_literal, args_str)
                     }
-                }
+                };
             }
         }
     }
