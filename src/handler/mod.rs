@@ -64,7 +64,7 @@ impl SqliteHandler {
     }
 
     /// Register built-in PostgreSQL-compatible functions with SQLite
-    fn register_builtin_functions(conn: &Connection) -> Result<()> {
+    // Test comment
         use rusqlite::functions::FunctionFlags;
         
         // pg_get_userbyid - returns username for OID
@@ -425,20 +425,42 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
+        // int4range with 2 args (default bounds [))
         conn.create_scalar_function("int4range", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let lower: i64 = ctx.get(0)?;
-            let upper: i64 = ctx.get(1)?;
-            Ok(format!("[{},{})", lower, upper))
+            let low = ctx.get_raw(0).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(0).unwrap().to_string());
+            let high = ctx.get_raw(1).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(1).unwrap().to_string());
+            let rv = crate::range::parse_range(&format!("[{},{})", low, high), RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
         })?;
 
-        conn.create_scalar_function("daterange", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let lower: String = ctx.get(0)?;
-            let upper: String = ctx.get(1)?;
+        // int4range with 3 args (custom bounds)
+        conn.create_scalar_function("int4range", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low = ctx.get_raw(0).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(0).unwrap().to_string());
+            let high = ctx.get_raw(1).as_str().map(|s| s.to_string()).unwrap_or_else(|_| ctx.get::<i64>(1).unwrap().to_string());
             let bounds: String = ctx.get(2)?;
-            Ok(format!("{}{},{}{}", 
-                if bounds.starts_with('[') { '[' } else { '(' },
-                lower, upper,
-                if bounds.ends_with(']') { ']' } else { ')' }))
+            let rv = crate::range::parse_range(&format!("{}{},{}{}", &bounds[0..1], low, high, &bounds[1..2]), RangeType::Int4)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        // daterange with 2 args (default bounds [))
+        conn.create_scalar_function("daterange", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low: String = ctx.get(0)?;
+            let high: String = ctx.get(1)?;
+            let rv = crate::range::parse_range(&format!("[{},{})", low, high), RangeType::Date)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
+        })?;
+
+        // daterange with 3 args (custom bounds)
+        conn.create_scalar_function("daterange", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let low: String = ctx.get(0)?;
+            let high: String = ctx.get(1)?;
+            let bounds: String = ctx.get(2)?;
+            let rv = crate::range::parse_range(&format!("{}{},{}{}", &bounds[0..1], low, high, &bounds[1..2]), RangeType::Date)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(rv.to_postgres_string())
         })?;
 
         conn.create_scalar_function("isempty", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
