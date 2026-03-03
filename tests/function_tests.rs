@@ -288,3 +288,45 @@ fn test_create_or_replace_function() {
     let functions = pgqt::catalog::get_function(&conn, "test_func", None).unwrap();
     assert!(functions.is_some());
 }
+
+#[test]
+fn test_debug_function_body() {
+    let sql = r#"
+        CREATE FUNCTION test_func(x integer)
+        RETURNS integer
+        LANGUAGE sql
+        AS $$
+            SELECT x * 2
+        $$;
+    "#;
+    
+    let metadata = pgqt::transpiler::parse_create_function(sql).unwrap();
+    
+    println!("Function name: {}", metadata.name);
+    println!("Function body: {:?}", metadata.function_body);
+    println!("Arg names: {:?}", metadata.arg_names);
+    
+    // The body should contain the actual SQL, not "SELECT 1"
+    assert!(!metadata.function_body.contains("SELECT 1"), 
+            "Function body should not be default 'SELECT 1', got: {}", metadata.function_body);
+}
+
+#[test]
+fn test_debug_function_returns_table() {
+    let sql = r#"
+        CREATE FUNCTION get_numbers()
+        RETURNS TABLE(id integer, val integer)
+        LANGUAGE sql
+        AS $$
+            SELECT id, val FROM numbers
+        $$;
+    "#;
+    
+    let result = pg_query::parse(sql).unwrap();
+    
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(stmt)) = raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
+            println!("STMT: {:#?}", stmt);
+        }
+    }
+}

@@ -1574,27 +1574,28 @@ impl SqliteHandler {
     fn register_sqlite_function(&self, conn: &Connection, metadata: &catalog::FunctionMetadata) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
         use crate::catalog::ReturnTypeKind;
+        use rusqlite::types::Value;
         
         // Determine the number of parameters (excluding OUT params for now)
         let num_params = metadata.arg_types.len();
         
-        // Create a closure that will execute the function
+        // Store metadata in the in-memory cache for fast lookup
+        self.functions.insert(metadata.name.clone(), metadata.clone());
+        
+        // Create references for the closure
         let func_name = metadata.name.clone();
-        let func_body = metadata.function_body.clone();
+        let func_name_for_closure = func_name.clone(); // Clone for the closure
         let arg_count = num_params;
         let is_strict = metadata.strict;
         let return_type_kind = metadata.return_type_kind.clone();
+        let functions_cache = self.functions.clone();
         
         // Register as a scalar function
-        // Note: This is a simplified approach - we register it once per connection
-        // In a real implementation, we might need to handle this differently for connection pooling
         conn.create_scalar_function(
-            &func_name[..],
+            func_name.as_str(),
             arg_count as i32,
             FunctionFlags::SQLITE_UTF8,
             move |ctx| {
-                use rusqlite::types::Value;
-                
                 // Collect arguments
                 let mut args = Vec::new();
                 for i in 0..arg_count {
@@ -1607,27 +1608,21 @@ impl SqliteHandler {
                     return Ok(Value::Null);
                 }
                 
-                // Execute the function
-                // Note: We need a way to get the catalog connection here
-                // For now, we'll use a simple approach - in reality we'd need to share the catalog
-                // This is a placeholder - the real implementation needs access to the catalog
+                // Look up function metadata from cache
+                let func_metadata = match functions_cache.get(&func_name_for_closure) {
+                    Some(metadata) => metadata.clone(),
+                    None => return Ok(Value::Null), // Function not found
+                };
                 
-                // For now, just return a placeholder
-                // The real implementation would:
-                // 1. Look up function metadata from catalog
-                // 2. Substitute parameters in function body
-                // 3. Transpile and execute
-                // 4. Return result
-                
-                // Simple placeholder implementation for scalar functions
-                if return_type_kind == ReturnTypeKind::Scalar {
-                    // This is where we'd actually execute the function body
-                    // For now, return NULL as a placeholder
-                    Ok(Value::Null)
-                } else {
-                    // For non-scalar functions, return NULL
-                    Ok(Value::Null)
+                // Only support scalar functions for now
+                if return_type_kind != ReturnTypeKind::Scalar {
+                    // For non-scalar functions, return NULL (not yet supported)
+                    return Ok(Value::Null);
                 }
+                
+                // For now, return NULL to indicate not fully implemented
+                // The AST-based interception will handle simple cases
+                Ok(Value::Null)
             }
         )?;
         
@@ -1639,6 +1634,7 @@ impl SqliteHandler {
     fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
+        
         
         // Parse the SQL
         let result = pg_query::parse(sql)?;
@@ -1671,6 +1667,7 @@ impl SqliteHandler {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
         
+        
         // Extract function name
         let func_name = func_call
             .funcname
@@ -1686,14 +1683,16 @@ impl SqliteHandler {
             .last()
             .ok_or_else(|| anyhow::anyhow!("Could not extract function name"))?;
         
+        
         // Get connection and look up function
         let conn = self.conn.lock().unwrap();
         let metadata = catalog::get_function(&conn, &func_name, None)?
             .ok_or_else(|| anyhow::anyhow!("Function {} not found", func_name))?;
         
+        
         // Extract arguments (only handle simple literals for now)
         let mut args = Vec::new();
-        for arg_node in &func_call.args {
+        for (i, arg_node) in func_call.args.iter().enumerate() {
             if let Some(ref inner) = arg_node.node {
                 match inner {
                     NodeEnum::AConst(ref aconst) => {
@@ -1726,8 +1725,10 @@ impl SqliteHandler {
             }
         }
         
+        
         // Execute the function
         let result = crate::functions::execute_sql_function(&conn, &metadata, &args)?;
+        
         
         // Convert result to Response
         self.convert_function_result_to_response(result)
@@ -1738,6 +1739,7 @@ impl SqliteHandler {
         use crate::functions::FunctionResult;
         use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
         use std::sync::Arc;
+        use rusqlite::types::Value;
         
         match result {
             FunctionResult::Scalar(Some(value)) => {
@@ -1751,7 +1753,17 @@ impl SqliteHandler {
                 )]);
                 
                 let mut encoder = DataRowEncoder::new(fields.clone());
-                encoder.encode_field(&Some(format!("{:?}", value)))?;
+                
+                // Convert Value to string properly
+                let value_str = match value {
+                    Value::Null => None,
+                    Value::Integer(i) => Some(i.to_string()),
+                    Value::Real(f) => Some(f.to_string()),
+                    Value::Text(s) => Some(s),
+                    Value::Blob(b) => Some(String::from_utf8_lossy(&b).to_string()),
+                };
+                
+                encoder.encode_field(&value_str)?;
                 let data_rows = vec![Ok(encoder.take_row())];
                 
                 Ok(vec![Response::Query(QueryResponse::new(
@@ -1759,26 +1771,7 @@ impl SqliteHandler {
                     futures::stream::iter(data_rows),
                 ))])
             }
-            FunctionResult::Scalar(None) => {
-                // Return NULL
-                let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
-                    "result".to_string(),
-                    None,
-                    None,
-                    pgwire::api::Type::UNKNOWN,
-                    pgwire::api::results::FieldFormat::Text,
-                )]);
-                
-                let mut encoder = DataRowEncoder::new(fields.clone());
-                encoder.encode_field(&None::<String>)?;
-                let data_rows = vec![Ok(encoder.take_row())];
-                
-                Ok(vec![Response::Query(QueryResponse::new(
-                    fields,
-                    futures::stream::iter(data_rows),
-                ))])
-            }
-            FunctionResult::Null => {
+            FunctionResult::Scalar(None) | FunctionResult::Null => {
                 // Return NULL
                 let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
                     "result".to_string(),
@@ -1862,6 +1855,11 @@ impl SqliteHandler {
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         let upper_sql = sql.trim().to_uppercase();
 
+        // Ignore transaction control statements - SQLite handles transactions automatically
+        if upper_sql == "BEGIN" || upper_sql == "COMMIT" || upper_sql == "ROLLBACK" {
+            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+        }
+
         // Handle CREATE SCHEMA
         if upper_sql.starts_with("CREATE SCHEMA") {
             return self.handle_create_schema(sql);
@@ -1894,11 +1892,16 @@ impl SqliteHandler {
         
         // Try to handle simple function calls like SELECT func(arg1, arg2)
         // This intercepts user-defined function calls before normal execution
-        if let Ok(result) = self.try_execute_simple_function_call(sql) {
-            return Ok(result);
+        match self.try_execute_simple_function_call(sql) {
+            Ok(result) => {
+                return Ok(result);
+            }
+            Err(_) => {
+            }
         }
 
-        let transpile_result = transpile_with_metadata(sql);
+        let mut ctx = transpiler::TranspileContext::with_functions(self.functions.clone());
+        let transpile_result = transpiler::transpile_with_context(sql, &mut ctx);
         
         // Handle COPY statements
         if let Some(copy_stmt) = transpile_result.copy_metadata {

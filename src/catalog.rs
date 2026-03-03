@@ -641,9 +641,9 @@ pub fn get_function(
     arg_types: Option<&[String]>
 ) -> Result<Option<FunctionMetadata>> {
     let query = if arg_types.is_some() {
-        "SELECT * FROM __pg_functions__ WHERE funcname = ? AND arg_types = ?"
+        "SELECT * FROM __pg_functions__ WHERE funcname = ? AND arg_types = ? ORDER BY oid DESC LIMIT 1"
     } else {
-        "SELECT * FROM __pg_functions__ WHERE funcname = ? ORDER BY oid LIMIT 1"
+        "SELECT * FROM __pg_functions__ WHERE funcname = ? ORDER BY oid DESC LIMIT 1"
     };
 
     let arg_types_json = arg_types.map(|types| serde_json::to_string(types).unwrap());

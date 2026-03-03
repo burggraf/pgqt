@@ -1,3 +1,5 @@
+use dashmap::DashMap;
+use std::sync::Arc;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     AArrayExpr, AConst, AExpr, ArrayExpr, BoolExpr, ColumnDef, ColumnRef, Constraint, CreateStmt, FuncCall, Node,
@@ -45,7 +47,6 @@ pub enum OperationType {
     DDL,
     OTHER,
 }
-
 /// Metadata extracted from a CREATE TABLE statement
 #[derive(Debug)]
 pub struct CreateTableMetadata {
@@ -57,6 +58,7 @@ pub struct CreateTableMetadata {
 pub struct TranspileContext {
     pub referenced_tables: Vec<String>,
     pub errors: Vec<String>,
+    pub functions: Option<Arc<DashMap<String, crate::catalog::FunctionMetadata>>>,
 }
 
 impl TranspileContext {
@@ -64,6 +66,15 @@ impl TranspileContext {
         Self {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
+            functions: None,
+        }
+    }
+
+    pub fn with_functions(functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>) -> Self {
+        Self {
+            referenced_tables: Vec::new(),
+            errors: Vec::new(),
+            functions: Some(functions),
         }
     }
 }
@@ -72,11 +83,16 @@ impl TranspileContext {
 /// Returns both the transpiled SQL and any extracted metadata
 pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
     let mut ctx = TranspileContext::new();
+    transpile_with_context(sql, &mut ctx)
+}
+
+/// Transpile with a specific context (useful for function inlining)
+pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> TranspileResult {
     match pg_query::parse(sql) {
         Ok(result) => {
             if let Some(raw_stmt) = result.protobuf.stmts.first() {
                 if let Some(ref stmt_node) = raw_stmt.stmt {
-                    return reconstruct_sql_with_metadata(stmt_node, &mut ctx);
+                    return reconstruct_sql_with_metadata(stmt_node, ctx);
                 }
             }
 
@@ -97,7 +113,7 @@ pub fn transpile_with_metadata(sql: &str) -> TranspileResult {
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
-                errors: Vec::new(),
+                errors: ctx.errors.clone(),
             }
         }
     }
@@ -1914,6 +1930,45 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
 
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
+
+    // Try to inline user-defined functions (SQL language only for now)
+    let functions_registry = ctx.functions.clone();
+    if let Some(ref functions) = functions_registry {
+        // Try looking up by full name then by short name
+        if let Some(metadata) = functions.get(&full_func_name).or_else(|| functions.get(func_name)) {
+            let metadata = metadata.value();
+            if metadata.language.to_lowercase() == "sql" {
+                // Reconstruct arguments
+                let mut arg_exprs = Vec::new();
+                for arg_node in &func_call.args {
+                    arg_exprs.push(reconstruct_node(arg_node, ctx));
+                }
+                
+                let mut inlined = metadata.function_body.clone();
+                
+                // Replace positional parameters ($1, $2, etc.) with argument expressions
+                // We do this in reverse order to avoid replacing $1 in $10
+                for i in (0..arg_exprs.len()).rev() {
+                    let placeholder = format!("${}", i + 1);
+                    // Use parentheses around the expression to ensure correct operator precedence
+                    let replacement = format!("({})", arg_exprs[i]);
+                    inlined = inlined.replace(&placeholder, &replacement);
+                }
+                
+                // Transpile the inlined body itself to ensure it's valid SQLite
+                // Note: We avoid infinite recursion by not passing the functions registry
+                let mut inner_ctx = TranspileContext::new();
+                inner_ctx.referenced_tables = ctx.referenced_tables.clone();
+                let transpiled_body = transpile_with_context(&inlined, &mut inner_ctx);
+                
+                // Update referenced tables in outer context
+                ctx.referenced_tables = inner_ctx.referenced_tables;
+                
+                // Wrap in parentheses to treat as subquery or expression
+                return format!("({})", transpiled_body.sql.trim_end_matches(';'));
+            }
+        }
+    }
 
     // Build args string - handle agg_star (count(*)) case
     let args_str = if func_call.agg_star {
@@ -3861,28 +3916,25 @@ fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate
         }
     }
     
-    // Extract return type
-    // Note: pg_query doesn't expose return_type_attrs in the same way
-    // For now, we'll just handle the basic return type
-    let return_type = if let Some(rt) = &stmt.return_type {
-        extract_type_name(&Some(rt.clone()))?
-    } else {
-        "VOID".to_string()
-    };
-    let return_type_kind = ReturnTypeKind::Scalar;
-    let return_table_cols: Option<Vec<(String, String)>> = None;
+    // Extract return type and kind
+    let (return_type, return_type_kind, return_table_cols) = parse_return_type(&stmt.return_type, &[])?;
     
-    // Extract function body
-    // The function body is in the "sql_body" field which is a Node
-    let function_body = if let Some(sql_body_node) = &stmt.sql_body {
-        if let Some(NodeEnum::String(s)) = sql_body_node.node.as_ref() {
-            s.sval.clone()
-        } else {
-            "SELECT 1".to_string()
+    // Extract function body from options (defname="as")
+    // The sql_body field is often None, so we need to look in options
+    let function_body = extract_function_body_from_options(&stmt.options)
+        .unwrap_or_else(|| "SELECT 1".to_string());
+    
+    // Convert named parameters to positional ($1, $2, etc.)
+    // Only include IN, INOUT, or VARIADIC parameters for positional substitution
+    let mut input_arg_names = Vec::new();
+    for (i, mode) in arg_modes.iter().enumerate() {
+        if *mode != ParamMode::Out {
+            input_arg_names.push(arg_names[i].clone());
         }
-    } else {
-        "SELECT 1".to_string()
-    };
+    }
+    
+    // This is crucial for function execution
+    let function_body_with_positions = convert_named_to_positional_params(&function_body, &input_arg_names);
     
     // Extract attributes from options
     let mut volatility = "VOLATILE".to_string();
@@ -3928,7 +3980,7 @@ fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate
         return_type,
         return_type_kind,
         return_table_cols,
-        function_body,
+        function_body: function_body_with_positions,
         language: "sql".to_string(),
         volatility,
         strict,
@@ -3937,6 +3989,36 @@ fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate
         owner_oid: 1, // TODO: Get current user OID
         created_at: None,
     })
+}
+
+/// Convert named parameters (a, b) to positional ($1, $2)
+fn convert_named_to_positional_params(body: &str, arg_names: &[String]) -> String {
+    // If there are no named parameters, return as-is
+    if arg_names.is_empty() || arg_names.iter().all(|n| n.is_empty()) {
+        return body.to_string();
+    }
+    
+    // Parse the SQL body to find identifier references
+    // For now, use a simple approach: replace identifiers that match parameter names
+    // This is imperfect but works for simple cases like "SELECT a + b"
+    let mut result = body.to_string();
+    
+    // Replace parameter names with $1, $2, etc. in reverse order to avoid conflicts
+    for (i, name) in arg_names.iter().enumerate().rev() {
+        if !name.is_empty() {
+            // Use regex to replace whole word matches only
+            let pattern = format!(r"\b{}\b", regex::escape(name));
+            let replacement = format!("${}", i + 1);
+            // Use a closure to generate the replacement to avoid $ being treated as capture group
+            result = regex::Regex::new(&pattern)
+                .map(|re| {
+                    re.replace_all(&result, |_: &regex::Captures| replacement.clone()).to_string()
+                })
+                .unwrap_or(result);
+        }
+    }
+    
+    result
 }
 
 /// Extract function name from ObjectWithArgs
@@ -3963,6 +4045,7 @@ fn parse_function_parameter(param: &FunctionParameter) -> anyhow::Result<(Option
         pg_query::protobuf::FunctionParameterMode::FuncParamOut => ParamMode::Out,
         pg_query::protobuf::FunctionParameterMode::FuncParamInout => ParamMode::InOut,
         pg_query::protobuf::FunctionParameterMode::FuncParamVariadic => ParamMode::Variadic,
+        pg_query::protobuf::FunctionParameterMode::FuncParamTable => ParamMode::Out,
         _ => ParamMode::In,
     };
     
@@ -3991,6 +4074,28 @@ fn extract_type_name(type_name: &Option<TypeName>) -> anyhow::Result<String> {
     }
 }
 
+/// Extract function body from the "as" option in CREATE FUNCTION
+fn extract_function_body_from_options(options: &[Node]) -> Option<String> {
+    for opt_node in options {
+        if let Some(NodeEnum::DefElem(opt)) = opt_node.node.as_ref() {
+            if opt.defname == "as" {
+                // The body is in a List containing a String
+                if let Some(ref arg) = opt.arg {
+                    if let Some(NodeEnum::List(list)) = arg.node.as_ref() {
+                        // Get the first item from the list
+                        if let Some(first_item) = list.items.first() {
+                            if let Some(NodeEnum::String(s)) = first_item.node.as_ref() {
+                                return Some(s.sval.trim().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Parse return type
 fn parse_return_type(
     return_type: &Option<TypeName>,
@@ -4003,10 +4108,19 @@ fn parse_return_type(
         return Ok(("TABLE".to_string(), ReturnTypeKind::Table, None));
     }
     
-    // For now, assume scalar unless we detect TABLE
+    // For now, assume scalar unless we detect TABLE or SETOF
     if let Some(tn) = return_type {
         let return_type_str = extract_type_name(&Some(tn.clone()))?;
-        Ok((return_type_str, ReturnTypeKind::Scalar, None))
+        let kind = if tn.setof {
+            if return_type_str == "RECORD" {
+                ReturnTypeKind::Table
+            } else {
+                ReturnTypeKind::SetOf
+            }
+        } else {
+            ReturnTypeKind::Scalar
+        };
+        Ok((return_type_str, kind, None))
     } else {
         Ok(("VOID".to_string(), ReturnTypeKind::Void, None))
     }

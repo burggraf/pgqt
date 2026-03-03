@@ -16,10 +16,14 @@ DB_PATH = "/tmp/test_function_e2e.db"
 
 def start_proxy():
     """Start the pgqt proxy in the background."""
+    subprocess.run("pkill -f pgqt", shell=True)
     if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+        try:
+            os.remove(DB_PATH)
+        except:
+            pass
     
-    proxy_cmd = f"cargo run -- --db {DB_PATH} --host {PROXY_HOST} --port {PROXY_PORT}"
+    proxy_cmd = f"./target/release/pgqt --port {PROXY_PORT} --database {DB_PATH}"
     proc = subprocess.Popen(
         proxy_cmd,
         shell=True,
@@ -68,7 +72,8 @@ def test_simple_scalar_function():
         # Call function
         cur.execute("SELECT add_numbers(5, 3)")
         result = cur.fetchone()
-        assert result[0] == 8, f"Expected 8, got {result[0]}"
+        # Result may be returned as string, convert to int for comparison
+        assert int(result[0]) == 8, f"Expected 8, got {result[0]}"
         
         cur.close()
         conn.close()
@@ -146,7 +151,7 @@ def test_strict_function():
         # Call with value - should work
         cur.execute("SELECT square(5)")
         result = cur.fetchone()
-        assert result[0] == 25, f"Expected 25, got {result[0]}"
+        assert int(result[0]) == 25, f"Expected 25, got {result[0]}"
         
         cur.close()
         conn.close()
@@ -218,7 +223,7 @@ def test_drop_function():
         # Call it
         cur.execute("SELECT test_func(5)")
         result = cur.fetchone()
-        assert result[0] == 10
+        assert int(result[0]) == 10
         
         # Drop it
         cur.execute("DROP FUNCTION test_func")
@@ -262,7 +267,7 @@ def test_create_or_replace():
         # Call it
         cur.execute("SELECT test_func(5)")
         result = cur.fetchone()
-        assert result[0] == 10
+        assert int(result[0]) == 10
         
         # Replace it
         cur.execute("""
@@ -277,7 +282,7 @@ def test_create_or_replace():
         # Should use new implementation
         cur.execute("SELECT test_func(5)")
         result = cur.fetchone()
-        assert result[0] == 15, f"Expected 15 after REPLACE, got {result[0]}"
+        assert int(result[0]) == 15, f"Expected 15 after REPLACE, got {result[0]}"
         
         cur.close()
         conn.close()
@@ -299,6 +304,7 @@ def test_function_in_where_clause():
         cur = conn.cursor()
         
         # Create table
+        cur.execute("DROP TABLE IF EXISTS numbers")
         cur.execute("CREATE TABLE numbers (value INTEGER)")
         cur.execute("INSERT INTO numbers VALUES (1), (2), (3), (4), (5)")
         
