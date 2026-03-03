@@ -56,6 +56,10 @@ pub enum PlPgSQLStmt {
     GetDiag(PlPgSQLStmtGetDiag),
     Perform(PlPgSQLStmtPerform),
     Case(PlPgSQLStmtCase),
+    Open(PlPgSQLStmtOpen),
+    Fetch(PlPgSQLStmtFetch),
+    Close(PlPgSQLStmtClose),
+    Move(PlPgSQLStmtMove),
 }
 
 impl<'de> Deserialize<'de> for PlPgSQLStmt {
@@ -147,6 +151,26 @@ impl<'de> Deserialize<'de> for PlPgSQLStmt {
                         let case: PlPgSQLStmtCase = serde_json::from_value(inner.clone())
                             .map_err(|e| serde::de::Error::custom(e.to_string()))?;
                         Ok(PlPgSQLStmt::Case(case))
+                    }
+                    "PLpgSQL_stmt_open" => {
+                        let open: PlPgSQLStmtOpen = serde_json::from_value(inner.clone())
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+                        Ok(PlPgSQLStmt::Open(open))
+                    }
+                    "PLpgSQL_stmt_fetch" => {
+                        let fetch: PlPgSQLStmtFetch = serde_json::from_value(inner.clone())
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+                        Ok(PlPgSQLStmt::Fetch(fetch))
+                    }
+                    "PLpgSQL_stmt_close" => {
+                        let close: PlPgSQLStmtClose = serde_json::from_value(inner.clone())
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+                        Ok(PlPgSQLStmt::Close(close))
+                    }
+                    "PLpgSQL_stmt_move" => {
+                        let move_stmt: PlPgSQLStmtMove = serde_json::from_value(inner.clone())
+                            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+                        Ok(PlPgSQLStmt::Move(move_stmt))
                     }
                     _ => Err(serde::de::Error::custom(format!("Unknown statement type: {}", key)))
                 };
@@ -553,4 +577,44 @@ pub struct PlPgSQLException {
     pub sqlstate: String,
     #[serde(rename = "stmts")]
     pub stmts: Vec<PlPgSQLStmt>,
+}
+
+/// OPEN cursor statement
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlPgSQLStmtOpen {
+    #[serde(rename = "cursorname")]
+    pub cursorname: String,
+    #[serde(default)]
+    pub query: Option<PlPgSQLExpr>,
+}
+
+/// FETCH cursor statement
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlPgSQLStmtFetch {
+    #[serde(rename = "cursorname")]
+    pub cursorname: String,
+    #[serde(default)]
+    pub target: Option<PlPgSQLVariable>,
+    #[serde(default)]
+    pub direction: Option<String>, // FORWARD, BACKWARD, etc.
+    #[serde(default)]
+    pub count: Option<i64>,
+}
+
+/// CLOSE cursor statement
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlPgSQLStmtClose {
+    #[serde(rename = "cursorname")]
+    pub cursorname: String,
+}
+
+/// MOVE cursor statement
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlPgSQLStmtMove {
+    #[serde(rename = "cursorname")]
+    pub cursorname: String,
+    #[serde(default)]
+    pub direction: Option<String>,
+    #[serde(default)]
+    pub count: Option<i64>,
 }

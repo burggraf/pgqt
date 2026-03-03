@@ -326,6 +326,38 @@ impl ExecutionContext {
         })?;
         api.set("quote_ident", quote_ident_fn)?;
         
+        // Cursor operations
+        // _ctx.cursor_open(name, query) -> nil
+        let cursor_open_fn = lua.create_function(move |_lua, (name, query): (String, String)| {
+            // Store cursor state in a global table
+            // For now, this is a placeholder - full implementation would maintain cursor state
+            println!("Cursor opened: {} (query: {})", name, query);
+            Ok(())
+        })?;
+        api.set("cursor_open", cursor_open_fn)?;
+        
+        // _ctx.cursor_fetch(name, direction, count) -> row or nil
+        let cursor_fetch_fn = lua.create_function(move |_lua, (name, direction, count): (String, String, i64)| {
+            // Placeholder - would fetch from cursor state
+            println!("Cursor fetch: {} {} {}", name, direction, count);
+            Ok(LuaValue::Nil)
+        })?;
+        api.set("cursor_fetch", cursor_fetch_fn)?;
+        
+        // _ctx.cursor_close(name) -> nil
+        let cursor_close_fn = lua.create_function(move |_lua, name: String| {
+            println!("Cursor closed: {}", name);
+            Ok(())
+        })?;
+        api.set("cursor_close", cursor_close_fn)?;
+        
+        // _ctx.cursor_move(name, direction, count) -> nil
+        let cursor_move_fn = lua.create_function(move |_lua, (name, direction, count): (String, String, i64)| {
+            println!("Cursor move: {} {} {}", name, direction, count);
+            Ok(())
+        })?;
+        api.set("cursor_move", cursor_move_fn)?;
+        
         // Special variables for GET DIAGNOSTICS
         if let Some(sqlstate) = &self.sqlstate {
             api.set("SQLSTATE", sqlstate.clone())?;

@@ -180,6 +180,10 @@ fn emit_statement(ctx: &mut TranspileContext, stmt: &PlPgSQLStmt, is_setof: bool
         PlPgSQLStmt::DynExecute(dyn_exec) => emit_dyn_execute(ctx, dyn_exec)?,
         PlPgSQLStmt::GetDiag(diag) => emit_get_diag(ctx, diag)?,
         PlPgSQLStmt::Case(case) => emit_case(ctx, case, is_setof)?,
+        PlPgSQLStmt::Open(open) => emit_open(ctx, open)?,
+        PlPgSQLStmt::Fetch(fetch) => emit_fetch(ctx, fetch)?,
+        PlPgSQLStmt::Close(close) => emit_close(ctx, close)?,
+        PlPgSQLStmt::Move(move_stmt) => emit_move(ctx, move_stmt)?,
     }
     Ok(())
 }
@@ -513,6 +517,52 @@ fn emit_case(ctx: &mut TranspileContext, case: &PlPgSQLStmtCase, is_setof: bool)
     }
 
     ctx.emit_line("end");
+    Ok(())
+}
+
+/// Emit OPEN cursor statement
+fn emit_open(ctx: &mut TranspileContext, open: &PlPgSQLStmtOpen) -> Result<()> {
+    let cursor_name = &open.cursorname;
+    if let Some(query) = &open.query {
+        ctx.emit_line(&format!("_ctx.cursor_open([[{}]], [[{}]])", cursor_name, query.query));
+    } else {
+        ctx.emit_line(&format!("_ctx.cursor_open(nil, [[{}]])", cursor_name));
+    }
+    Ok(())
+}
+
+/// Emit FETCH cursor statement
+fn emit_fetch(ctx: &mut TranspileContext, fetch: &PlPgSQLStmtFetch) -> Result<()> {
+    let cursor_name = &fetch.cursorname;
+    if let Some(target) = &fetch.target {
+        let direction = fetch.direction.as_deref().unwrap_or("FORWARD");
+        let count = fetch.count.unwrap_or(1);
+        ctx.emit_line(&format!(
+            "{} = _ctx.cursor_fetch([[{}]], \"{}\", {})",
+            target.name, cursor_name, direction, count
+        ));
+    } else {
+        ctx.emit_line(&format!("_ctx.cursor_fetch([[{}]], \"FORWARD\", 1)", cursor_name));
+    }
+    Ok(())
+}
+
+/// Emit CLOSE cursor statement
+fn emit_close(ctx: &mut TranspileContext, close: &PlPgSQLStmtClose) -> Result<()> {
+    let cursor_name = &close.cursorname;
+    ctx.emit_line(&format!("_ctx.cursor_close([[{}]])", cursor_name));
+    Ok(())
+}
+
+/// Emit MOVE cursor statement
+fn emit_move(ctx: &mut TranspileContext, move_stmt: &PlPgSQLStmtMove) -> Result<()> {
+    let cursor_name = &move_stmt.cursorname;
+    let direction = move_stmt.direction.as_deref().unwrap_or("FORWARD");
+    let count = move_stmt.count.unwrap_or(1);
+    ctx.emit_line(&format!(
+        "_ctx.cursor_move([[{}]], \"{}\", {})",
+        cursor_name, direction, count
+    ));
     Ok(())
 }
 
