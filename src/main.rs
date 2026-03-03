@@ -94,7 +94,6 @@ impl Cli {
 }
 
 use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
-use transpiler::transpile_with_metadata;
 use schema::{SchemaManager, SearchPath};
 
 /// Session context for each client connection
@@ -1609,7 +1608,7 @@ impl SqliteHandler {
                 }
                 
                 // Look up function metadata from cache
-                let func_metadata = match functions_cache.get(&func_name_for_closure) {
+                let _func_metadata = match functions_cache.get(&func_name_for_closure) {
                     Some(metadata) => metadata.clone(),
                     None => return Ok(Value::Null), // Function not found
                 };
@@ -1633,7 +1632,6 @@ impl SqliteHandler {
     /// Returns Ok(response) if it was a simple function call, Err if not
     fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
-        use rusqlite::types::Value;
         
         
         // Parse the SQL
@@ -1663,7 +1661,7 @@ impl SqliteHandler {
     }
     
     /// Execute a function call
-    fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, original_sql: &str) -> Result<Vec<Response>> {
+    fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
         
@@ -1692,7 +1690,7 @@ impl SqliteHandler {
         
         // Extract arguments (only handle simple literals for now)
         let mut args = Vec::new();
-        for (i, arg_node) in func_call.args.iter().enumerate() {
+        for (_i, arg_node) in func_call.args.iter().enumerate() {
             if let Some(ref inner) = arg_node.node {
                 match inner {
                     NodeEnum::AConst(ref aconst) => {
