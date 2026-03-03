@@ -45,7 +45,7 @@ pub mod ddl;
 pub mod dml;
 pub mod expr;
 pub mod func;
-pub mod rls_aug;
+pub mod rls;
 pub mod window;
 
 // Re-exports from context
@@ -59,7 +59,7 @@ pub use context::{
 
 // Re-export public functions
 pub use func::parse_create_function;
-pub use rls_aug::transpile_with_rls;
+pub use rls::transpile_with_rls;
 
 /// Transpile PostgreSQL SQL to SQLite SQL using AST walking
 /// Returns both the transpiled SQL and any extracted metadata
@@ -186,7 +186,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 errors: Vec::new(),
             },
             NodeEnum::CreateRoleStmt(ref create_role_stmt) => TranspileResult {
-                sql: rls_aug::reconstruct_create_role_stmt(create_role_stmt, ctx),
+                sql: rls::reconstruct_create_role_stmt(create_role_stmt, ctx),
                 create_table_metadata: None, 
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
@@ -194,7 +194,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 errors: Vec::new(),
             },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
-                sql: rls_aug::reconstruct_drop_role_stmt(drop_role_stmt),
+                sql: rls::reconstruct_drop_role_stmt(drop_role_stmt),
                 create_table_metadata: None, 
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
@@ -202,7 +202,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 errors: Vec::new(),
             },
             NodeEnum::GrantStmt(ref grant_stmt) => TranspileResult {
-                sql: rls_aug::reconstruct_grant_stmt(grant_stmt),
+                sql: rls::reconstruct_grant_stmt(grant_stmt),
                 create_table_metadata: None, 
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
@@ -210,7 +210,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 errors: Vec::new(),
             },
             NodeEnum::GrantRoleStmt(ref grant_role_stmt) => TranspileResult {
-                sql: rls_aug::reconstruct_grant_role_stmt(grant_role_stmt),
+                sql: rls::reconstruct_grant_role_stmt(grant_role_stmt),
                 create_table_metadata: None, 
                 copy_metadata: None,
                 referenced_tables: Vec::new(),

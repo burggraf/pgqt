@@ -12,7 +12,7 @@ use super::super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 
 /// Reconstruct a CREATE ROLE statement as an INSERT into __pg_authid__
-pub(crate) fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileContext) -> String {
+pub fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileContext) -> String {
     let role_name = stmt.role.clone();
 
     let mut superuser = false;
@@ -110,7 +110,7 @@ pub(crate) fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut Tra
 }
 
 /// Reconstruct a DROP ROLE statement as a DELETE from __pg_authid__
-pub(crate) fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt) -> String {
+pub fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt) -> String {
     let roles: Vec<String> = stmt.roles.iter().filter_map(|r| {
         if let Some(ref node) = r.node {
             if let NodeEnum::RoleSpec(ref role) = node {
@@ -124,7 +124,7 @@ pub(crate) fn reconstruct_drop_role_stmt(stmt: &DropRoleStmt) -> String {
 }
 
 /// Reconstruct a GRANT statement as an INSERT into __pg_acl__
-pub(crate) fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
+pub fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
     let is_grant = stmt.is_grant;
     let objtype = stmt.objtype;
 
@@ -192,7 +192,7 @@ pub(crate) fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
 }
 
 /// Reconstruct a GRANT role statement as an INSERT into __pg_auth_members__
-pub(crate) fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
+pub fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
     let is_grant = stmt.is_grant;
 
     let granted_roles: Vec<String> = stmt.granted_roles.iter().filter_map(|r| {

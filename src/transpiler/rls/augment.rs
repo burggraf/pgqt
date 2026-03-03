@@ -241,7 +241,7 @@ pub(crate) fn reconstruct_insert_stmt_with_rls(
         match is_rls_enabled(conn, table_name) {
             Ok(true) => {
                 let policies = get_applicable_policies(conn, table_name, "INSERT", &rls_ctx.user_roles).unwrap_or_default();
-                if policies.iter().any(|p| p.with_check.is_some()) {
+                if policies.iter().any(|p| p.with_check_expr.is_some()) {
                     match get_rls_where_clause(conn, table_name, rls_ctx, "INSERT") {
                         Ok(pred) => pred,
                         Err(_) => None,

@@ -31,3 +31,9 @@ pub mod policy;
 pub mod utils;
 
 pub use augment::transpile_with_rls;
+pub use utils::{
+    reconstruct_create_role_stmt,
+    reconstruct_drop_role_stmt,
+    reconstruct_grant_stmt,
+    reconstruct_grant_role_stmt,
+};
