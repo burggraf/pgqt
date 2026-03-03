@@ -342,6 +342,14 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
+        // string_to_array - splits string into array
+        conn.create_scalar_function("string_to_array", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let delimiter: String = ctx.get(1)?;
+            crate::array::functions::string_to_array_fn(&text, &delimiter, None)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
         // Geo functions
         conn.create_scalar_function("geo_distance", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let p1: String = ctx.get(0)?;
@@ -418,8 +426,8 @@ impl SqliteHandler {
         })?;
 
         conn.create_scalar_function("int4range", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let lower: String = ctx.get(0)?;
-            let upper: String = ctx.get(1)?;
+            let lower: i64 = ctx.get(0)?;
+            let upper: i64 = ctx.get(1)?;
             Ok(format!("[{},{})", lower, upper))
         })?;
 
