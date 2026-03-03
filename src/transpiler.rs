@@ -1984,13 +1984,8 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                     }
                 };
             } else if metadata.language.to_lowercase() == "plpgsql" {
-                // For PL/pgSQL functions, we need to call them through the runtime
-                // This is a placeholder - full implementation would require runtime integration
-                // For now, return a placeholder that indicates the function needs to be executed
-                ctx.errors.push(format!(
-                    "PL/pgSQL function {} cannot be inlined. Full runtime integration required.",
-                    full_func_name
-                ));
+                // For PL/pgSQL functions, generate a call to our runtime wrapper
+                // The wrapper will look up the function and execute it in the Lua runtime
                 
                 // Reconstruct arguments for the call
                 let mut arg_exprs: Vec<String> = Vec::new();
@@ -1998,10 +1993,25 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                     arg_exprs.push(reconstruct_node(arg_node, ctx));
                 }
                 
-                // Return a placeholder - in production, this would call the PL/pgSQL runtime
-                format!("/* PL/pgSQL call: {}({}) */ NULL", 
-                    full_func_name, 
-                    arg_exprs.join(", "))
+                // Generate a call to pgqt_plpgsql_call with function name and args
+                // This will be handled by a custom SQLite function in main.rs
+                let args_str = arg_exprs.join(", ");
+                let func_name_literal = func_name.replace("'", "''");
+                
+                match metadata.return_type_kind {
+                    ReturnTypeKind::Void => {
+                        // For VOID functions, execute and return NULL
+                        format!("pgqt_plpgsql_call_void('{}', {})", func_name_literal, args_str)
+                    }
+                    ReturnTypeKind::SetOf | ReturnTypeKind::Table => {
+                        // For SETOF/TABLE, return as subquery
+                        format!("(SELECT * FROM pgqt_plpgsql_call_setof('{}', {}))", func_name_literal, args_str)
+                    }
+                    ReturnTypeKind::Scalar => {
+                        // For scalar functions, return the value
+                        format!("pgqt_plpgsql_call_scalar('{}', {})", func_name_literal, args_str)
+                    }
+                }
             }
         }
     }

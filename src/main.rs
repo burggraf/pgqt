@@ -278,6 +278,92 @@ impl SqliteHandler {
             Ok(0i64)
         })?;
 
+        // PL/pgSQL function execution wrappers
+        // These are called by the transpiler when a PL/pgSQL function is used in SQL
+        conn.create_scalar_function("pgqt_plpgsql_call_scalar", -1, 
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8, |ctx| {
+            // First arg is function name, rest are arguments
+            let argc = ctx.len();
+            if argc < 1 {
+                return Err(rusqlite::Error::InvalidFunctionParameter);
+            }
+            
+            let func_name: String = ctx.get(0)?;
+            
+            // Collect remaining args
+            let mut args = Vec::new();
+            for i in 1..argc {
+                let value = ctx.get_raw(i).into();
+                args.push(value);
+            }
+            
+            use crate::functions::{execute_function, FunctionResult};
+            use crate::catalog::get_function;
+            
+            // Get function metadata from catalog (by name only for now)
+            let conn = ctx.get_connection();
+            let metadata = match get_function(conn, &func_name, None) {
+                Ok(Some(m)) => m,
+                _ => return Err(rusqlite::Error::InvalidFunctionParameter),
+            };
+            
+            // Check if it's a PL/pgSQL function
+            if metadata.language.to_lowercase() != "plpgsql" {
+                return Err(rusqlite::Error::InvalidFunctionParameter);
+            }
+            
+            // Execute the function
+            match execute_function(conn, &metadata, &args) {
+                Ok(FunctionResult::Scalar(Some(val))) => Ok(val),
+                Ok(FunctionResult::Scalar(None)) => Ok(rusqlite::types::Value::Null),
+                Ok(_) => Err(rusqlite::Error::InvalidFunctionParameter),
+                Err(e) => Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                    Some(e.to_string())
+                )),
+            }
+        })?;
+
+        conn.create_scalar_function("pgqt_plpgsql_call_void", -1, 
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8, |ctx| {
+            // First arg is function name, rest are arguments
+            let argc = ctx.len();
+            if argc < 1 {
+                return Err(rusqlite::Error::InvalidFunctionParameter);
+            }
+            
+            let func_name: String = ctx.get(0)?;
+            
+            // Collect remaining args
+            let mut args = Vec::new();
+            for i in 1..argc {
+                let value = ctx.get_raw(i).into();
+                args.push(value);
+            }
+            
+            use crate::functions::{execute_function, FunctionResult};
+            use crate::catalog::get_function;
+            
+            let conn = ctx.get_connection();
+            let metadata = match get_function(conn, &func_name, None) {
+                Ok(Some(m)) => m,
+                _ => return Err(rusqlite::Error::InvalidFunctionParameter),
+            };
+            
+            if metadata.language.to_lowercase() != "plpgsql" {
+                return Err(rusqlite::Error::InvalidFunctionParameter);
+            }
+            
+            // Execute and ignore result
+            match execute_function(conn, &metadata, &args) {
+                Ok(_) => Ok(rusqlite::types::Value::Null),
+                Err(e) => Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                    Some(e.to_string())
+                )),
+            }
+        })?;
+
         // RLS-related functions: current_user() and session_user()
         // Note: These return a default value; actual RLS uses session context directly
         conn.create_scalar_function("current_user", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, |_ctx| {
