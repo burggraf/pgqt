@@ -2,6 +2,7 @@ use rusqlite::{Connection, types::Value, OptionalExtension};
 use anyhow::{Result, Context};
 use crate::catalog::{FunctionMetadata, ReturnTypeKind};
 use crate::transpiler::transpile;
+use crate::plpgsql::{parse_plpgsql_function, transpile_to_lua, PlPgSqlRuntime};
 
 /// Function execution result
 #[derive(Debug, Clone)]
@@ -11,6 +12,19 @@ pub enum FunctionResult {
     Table(Vec<Vec<Value>>),
     Void,
     Null,
+}
+
+/// Execute a function (SQL or PL/pgSQL)
+pub fn execute_function(
+    conn: &Connection,
+    func_metadata: &FunctionMetadata,
+    args: &[Value]
+) -> Result<FunctionResult> {
+    match func_metadata.language.as_str() {
+        "sql" => execute_sql_function(conn, func_metadata, args),
+        "plpgsql" => execute_plpgsql_function(conn, func_metadata, args),
+        _ => Err(anyhow::anyhow!("Unsupported function language: {}", func_metadata.language)),
+    }
 }
 
 /// Execute a SQL-language function
@@ -56,6 +70,74 @@ pub fn execute_sql_function(
                 .context("VOID function execution failed")
         }
     }
+}
+
+/// Execute a PL/pgSQL function
+pub fn execute_plpgsql_function(
+    conn: &Connection,
+    func_metadata: &FunctionMetadata,
+    args: &[Value]
+) -> Result<FunctionResult> {
+    // 1. Validate argument count
+    validate_arguments(func_metadata, args)
+        .context("Argument validation failed")?;
+    
+    // 2. If STRICT and any NULL args, return NULL immediately
+    if func_metadata.strict && args.iter().any(|v| matches!(v, Value::Null)) {
+        return Ok(FunctionResult::Null);
+    }
+    
+    // 3. Parse PL/pgSQL function
+    // We need to reconstruct the CREATE FUNCTION statement from metadata
+    let create_sql = reconstruct_create_function(func_metadata);
+    
+    let func = parse_plpgsql_function(&create_sql)
+        .context("Failed to parse PL/pgSQL function")?;
+    
+    // 4. Transpile to Lua
+    let lua_code = transpile_to_lua(&func)
+        .context("Failed to transpile PL/pgSQL to Lua")?;
+    
+    // 5. Execute in Lua runtime
+    let runtime = PlPgSqlRuntime::new()
+        .context("Failed to create PL/pgSQL runtime")?;
+    
+    let result = runtime.execute_function(conn, &lua_code, args)
+        .context("Failed to execute PL/pgSQL function")?;
+    
+    // 6. Convert result based on return type
+    match func_metadata.return_type_kind {
+        ReturnTypeKind::Scalar | ReturnTypeKind::SetOf => {
+            Ok(FunctionResult::Scalar(Some(result)))
+        }
+        ReturnTypeKind::Void => {
+            Ok(FunctionResult::Void)
+        }
+        ReturnTypeKind::Table => {
+            // For TABLE return type, we'd need to handle row types
+            // For now, return as scalar
+            Ok(FunctionResult::Scalar(Some(result)))
+        }
+    }
+}
+
+/// Reconstruct CREATE FUNCTION statement from metadata
+fn reconstruct_create_function(metadata: &FunctionMetadata) -> String {
+    let mut sql = format!("CREATE FUNCTION {}(", metadata.name);
+    
+    // Add parameters
+    let params: Vec<String> = metadata.arg_names.iter()
+        .zip(metadata.arg_types.iter())
+        .map(|(name, typ)| format!("{} {}", name, typ))
+        .collect();
+    sql.push_str(&params.join(", "));
+    sql.push_str(&format!(") RETURNS {}", metadata.return_type));
+    
+    sql.push_str(" AS $$");
+    sql.push_str(&metadata.function_body);
+    sql.push_str("$$ LANGUAGE plpgsql;");
+    
+    sql
 }
 
 /// Validate function arguments

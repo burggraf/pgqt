@@ -1931,12 +1931,13 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
 
-    // Try to inline user-defined functions (SQL language only for now)
+    // Try to inline user-defined functions (SQL language) or call PL/pgSQL functions
     let functions_registry = ctx.functions.clone();
     if let Some(ref functions) = functions_registry {
         // Try looking up by full name then by short name
         if let Some(metadata) = functions.get(&full_func_name).or_else(|| functions.get(func_name)) {
             let metadata = metadata.value();
+            
             if metadata.language.to_lowercase() == "sql" {
                 // Reconstruct arguments
                 let mut arg_exprs = Vec::new();
@@ -1982,6 +1983,25 @@ fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> St
                         format!("({})", sql_body)
                     }
                 };
+            } else if metadata.language.to_lowercase() == "plpgsql" {
+                // For PL/pgSQL functions, we need to call them through the runtime
+                // This is a placeholder - full implementation would require runtime integration
+                // For now, return a placeholder that indicates the function needs to be executed
+                ctx.errors.push(format!(
+                    "PL/pgSQL function {} cannot be inlined. Full runtime integration required.",
+                    full_func_name
+                ));
+                
+                // Reconstruct arguments for the call
+                let mut arg_exprs: Vec<String> = Vec::new();
+                for arg_node in &func_call.args {
+                    arg_exprs.push(reconstruct_node(arg_node, ctx));
+                }
+                
+                // Return a placeholder - in production, this would call the PL/pgSQL runtime
+                format!("/* PL/pgSQL call: {}({}) */ NULL", 
+                    full_func_name, 
+                    arg_exprs.join(", "))
             }
         }
     }
