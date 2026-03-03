@@ -27,16 +27,22 @@ E2E_FAILED=0
 
 # Function to run cargo tests
 run_unit_tests() {
-    echo -e "${YELLOW}Running Unit Tests (cargo test)...${NC}"
+    echo -e "${YELLOW}Running Unit Tests (cargo test --lib)...${NC}"
     echo "------------------------------------------"
     
-    if cargo test --quiet 2>&1; then
-        # Count passed tests (portable, no -P flag)
-        UNIT_PASSED=$(cargo test --quiet 2>&1 | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | awk '{s+=$1} END {print s}')
-        if [ -z "$UNIT_PASSED" ]; then
-            UNIT_PASSED=0
-        fi
-        echo -e "${GREEN}✓ Unit tests passed${NC}"
+    # Run only lib tests (unit tests) separately from integration tests
+    local test_output
+    test_output=$(cargo test --lib 2>&1)
+    local exit_code=$?
+    
+    # Count passed tests from the lib test output
+    UNIT_PASSED=$(echo "$test_output" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | awk '{s+=$1} END {print s}')
+    if [ -z "$UNIT_PASSED" ]; then
+        UNIT_PASSED=0
+    fi
+    
+    if [ $exit_code -eq 0 ]; then
+        echo -e "${GREEN}✓ Unit tests passed ($UNIT_PASSED tests)${NC}"
     else
         echo -e "${RED}✗ Unit tests failed${NC}"
         UNIT_FAILED=1
@@ -119,9 +125,28 @@ print_summary() {
     echo "=========================================="
     echo "Test Summary"
     echo "=========================================="
-    echo -e "Unit Tests:       ${GREEN}$UNIT_PASSED passed${NC}"
-    echo -e "Integration Tests: ${GREEN}$INTEGRATION_PASSED passed${NC} ${RED}$INTEGRATION_FAILED failed${NC}"
-    echo -e "E2E Tests:        ${GREEN}$E2E_PASSED passed${NC} ${RED}$E2E_FAILED failed${NC}"
+    
+    # Unit tests
+    if [ $UNIT_FAILED -eq 0 ]; then
+        echo -e "Unit Tests:       ${GREEN}$UNIT_PASSED passed${NC}"
+    else
+        echo -e "Unit Tests:       ${RED}FAILED${NC}"
+    fi
+    
+    # Integration tests
+    if [ $INTEGRATION_FAILED -eq 0 ]; then
+        echo -e "Integration Tests: ${GREEN}$INTEGRATION_PASSED passed${NC}"
+    else
+        echo -e "Integration Tests: ${GREEN}$INTEGRATION_PASSED passed${NC} ${RED}$INTEGRATION_FAILED failed${NC}"
+    fi
+    
+    # E2E tests
+    if [ $E2E_FAILED -eq 0 ]; then
+        echo -e "E2E Tests:        ${GREEN}$E2E_PASSED passed${NC}"
+    else
+        echo -e "E2E Tests:        ${GREEN}$E2E_PASSED passed${NC} ${RED}$E2E_FAILED failed${NC}"
+    fi
+    
     echo ""
     
     TOTAL_FAILED=$((UNIT_FAILED + INTEGRATION_FAILED + E2E_FAILED))
