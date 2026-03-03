@@ -11,6 +11,9 @@ use std::fmt::Write;
 pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
     let mut ctx = TranspileContext::new();
     
+    // Check if this is a SETOF function (uses RETURN NEXT)
+    let is_setof = has_return_next(&function.action.block.body);
+    
     // Generate function header
     ctx.emit_line("-- Generated from PL/pgSQL");
     let func_name = function.fn_name.as_deref().unwrap_or("anonymous");
@@ -23,9 +26,20 @@ pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
     // Emit variable declarations (from DECLARE block)
     ctx.emit_line("-- Variable declarations");
     
+    // Initialize result set for SETOF functions
+    if is_setof {
+        ctx.emit_line("local _result_set = {}");
+    }
+    
     // Emit function body
     for stmt in &function.action.block.body {
-        emit_statement(&mut ctx, stmt)?;
+        emit_statement(&mut ctx, stmt, is_setof)?;
+    }
+    
+    // Return result set for SETOF functions
+    if is_setof {
+        ctx.emit_line("_result_set._is_result_set = true");
+        ctx.emit_line("return _result_set");
     }
     
     ctx.dedent();
@@ -33,6 +47,71 @@ pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
     ctx.emit_line(&format!("return {}", func_name));
     
     Ok(ctx.output)
+}
+
+/// Check if function body contains RETURN NEXT
+fn has_return_next(stmts: &[PlPgSQLStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            PlPgSQLStmt::ReturnNext(_) => return true,
+            PlPgSQLStmt::Block(block) => {
+                if has_return_next(&block.body) {
+                    return true;
+                }
+            }
+            PlPgSQLStmt::If(if_stmt) => {
+                if has_return_next(&if_stmt.then_body) {
+                    return true;
+                }
+                if let Some(ref elsif_list) = if_stmt.elsif_list {
+                    for elsif in elsif_list {
+                        if has_return_next(&elsif.stmts) {
+                            return true;
+                        }
+                    }
+                }
+                if let Some(ref else_body) = if_stmt.else_body {
+                    if has_return_next(else_body) {
+                        return true;
+                    }
+                }
+            }
+            PlPgSQLStmt::Loop(loop_stmt) => {
+                if has_return_next(&loop_stmt.body) {
+                    return true;
+                }
+            }
+            PlPgSQLStmt::While(while_stmt) => {
+                if has_return_next(&while_stmt.body) {
+                    return true;
+                }
+            }
+            PlPgSQLStmt::ForI(for_i) => {
+                if has_return_next(&for_i.body) {
+                    return true;
+                }
+            }
+            PlPgSQLStmt::ForS(for_s) => {
+                if has_return_next(&for_s.body) {
+                    return true;
+                }
+            }
+            PlPgSQLStmt::Case(case) => {
+                for when in &case.case_when_list {
+                    if has_return_next(&when.stmts) {
+                        return true;
+                    }
+                }
+                if let Some(ref else_stmts) = case.else_stmts {
+                    if has_return_next(else_stmts) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Context for transpilation
@@ -83,36 +162,36 @@ fn emit_parameters(ctx: &mut TranspileContext, function: &PlpgsqlFunction) -> Re
 }
 
 /// Emit a single statement
-fn emit_statement(ctx: &mut TranspileContext, stmt: &PlPgSQLStmt) -> Result<()> {
+fn emit_statement(ctx: &mut TranspileContext, stmt: &PlPgSQLStmt, is_setof: bool) -> Result<()> {
     match stmt {
-        PlPgSQLStmt::Block(block) => emit_block(ctx, block)?,
+        PlPgSQLStmt::Block(block) => emit_block(ctx, block, is_setof)?,
         PlPgSQLStmt::Assign(assign) => emit_assign(ctx, assign)?,
-        PlPgSQLStmt::If(if_stmt) => emit_if(ctx, if_stmt)?,
-        PlPgSQLStmt::Loop(loop_stmt) => emit_loop(ctx, loop_stmt)?,
-        PlPgSQLStmt::While(while_stmt) => emit_while(ctx, while_stmt)?,
-        PlPgSQLStmt::ForI(for_i) => emit_for_i(ctx, for_i)?,
-        PlPgSQLStmt::ForS(for_s) => emit_for_s(ctx, for_s)?,
+        PlPgSQLStmt::If(if_stmt) => emit_if(ctx, if_stmt, is_setof)?,
+        PlPgSQLStmt::Loop(loop_stmt) => emit_loop(ctx, loop_stmt, is_setof)?,
+        PlPgSQLStmt::While(while_stmt) => emit_while(ctx, while_stmt, is_setof)?,
+        PlPgSQLStmt::ForI(for_i) => emit_for_i(ctx, for_i, is_setof)?,
+        PlPgSQLStmt::ForS(for_s) => emit_for_s(ctx, for_s, is_setof)?,
         PlPgSQLStmt::Exit(exit) => emit_exit(ctx, exit)?,
-        PlPgSQLStmt::Return(ret) => emit_return(ctx, ret)?,
+        PlPgSQLStmt::Return(ret) => emit_return(ctx, ret, is_setof)?,
         PlPgSQLStmt::ReturnNext(ret_next) => emit_return_next(ctx, ret_next)?,
         PlPgSQLStmt::Raise(raise) => emit_raise(ctx, raise)?,
         PlPgSQLStmt::ExecSql(exec) => emit_exec_sql(ctx, exec)?,
         PlPgSQLStmt::Perform(perform) => emit_perform(ctx, perform)?,
         PlPgSQLStmt::DynExecute(dyn_exec) => emit_dyn_execute(ctx, dyn_exec)?,
         PlPgSQLStmt::GetDiag(diag) => emit_get_diag(ctx, diag)?,
-        PlPgSQLStmt::Case(case) => emit_case(ctx, case)?,
+        PlPgSQLStmt::Case(case) => emit_case(ctx, case, is_setof)?,
     }
     Ok(())
 }
 
 /// Emit BEGIN/END block
-fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock) -> Result<()> {
+fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock, is_setof: bool) -> Result<()> {
     if let Some(exceptions) = &block.exceptions {
         // Block with exception handler - use pcall
         ctx.emit_line("local _ok, _err = pcall(function()");
         ctx.indent();
         for stmt in &block.body {
-            emit_statement(ctx, stmt)?;
+            emit_statement(ctx, stmt, is_setof)?;
         }
         ctx.dedent();
         ctx.emit_line("end)");
@@ -133,7 +212,7 @@ fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock) -> Result<()
             }
             ctx.indent();
             for stmt in &exc.stmts {
-                emit_statement(ctx, stmt)?;
+                emit_statement(ctx, stmt, is_setof)?;
             }
             ctx.dedent();
         }
@@ -152,7 +231,7 @@ fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock) -> Result<()
     } else {
         // Regular block - just emit statements
         for stmt in &block.body {
-            emit_statement(ctx, stmt)?;
+            emit_statement(ctx, stmt, is_setof)?;
         }
     }
     Ok(())
@@ -166,12 +245,12 @@ fn emit_assign(ctx: &mut TranspileContext, assign: &PlPgSQLStmtAssign) -> Result
 }
 
 /// Emit IF statement
-fn emit_if(ctx: &mut TranspileContext, if_stmt: &PlPgSQLStmtIf) -> Result<()> {
+fn emit_if(ctx: &mut TranspileContext, if_stmt: &PlPgSQLStmtIf, is_setof: bool) -> Result<()> {
     let cond = transpile_expr(&if_stmt.cond)?;
     ctx.emit_line(&format!("if {} then", cond));
     ctx.indent();
     for stmt in &if_stmt.then_body {
-        emit_statement(ctx, stmt)?;
+        emit_statement(ctx, stmt, is_setof)?;
     }
     ctx.dedent();
     
@@ -182,7 +261,7 @@ fn emit_if(ctx: &mut TranspileContext, if_stmt: &PlPgSQLStmtIf) -> Result<()> {
             ctx.emit_line(&format!("elseif {} then", elsif_cond));
             ctx.indent();
             for stmt in &elsif.stmts {
-                emit_statement(ctx, stmt)?;
+                emit_statement(ctx, stmt, is_setof)?;
             }
             ctx.dedent();
         }
@@ -193,7 +272,7 @@ fn emit_if(ctx: &mut TranspileContext, if_stmt: &PlPgSQLStmtIf) -> Result<()> {
         ctx.emit_line("else");
         ctx.indent();
         for stmt in else_body {
-            emit_statement(ctx, stmt)?;
+            emit_statement(ctx, stmt, is_setof)?;
         }
         ctx.dedent();
     }
@@ -203,12 +282,12 @@ fn emit_if(ctx: &mut TranspileContext, if_stmt: &PlPgSQLStmtIf) -> Result<()> {
 }
 
 /// Emit LOOP statement
-fn emit_loop(ctx: &mut TranspileContext, loop_stmt: &PlPgSQLStmtLoop) -> Result<()> {
+fn emit_loop(ctx: &mut TranspileContext, loop_stmt: &PlPgSQLStmtLoop, is_setof: bool) -> Result<()> {
     ctx.loop_depth += 1;
     ctx.emit_line("while true do");
     ctx.indent();
     for stmt in &loop_stmt.body {
-        emit_statement(ctx, stmt)?;
+        emit_statement(ctx, stmt, is_setof)?;
     }
     ctx.dedent();
     ctx.emit_line("end");
@@ -217,12 +296,12 @@ fn emit_loop(ctx: &mut TranspileContext, loop_stmt: &PlPgSQLStmtLoop) -> Result<
 }
 
 /// Emit WHILE loop
-fn emit_while(ctx: &mut TranspileContext, while_stmt: &PlPgSQLStmtWhile) -> Result<()> {
+fn emit_while(ctx: &mut TranspileContext, while_stmt: &PlPgSQLStmtWhile, is_setof: bool) -> Result<()> {
     let cond = transpile_expr(&while_stmt.cond)?;
     ctx.emit_line(&format!("while {} do", cond));
     ctx.indent();
     for stmt in &while_stmt.body {
-        emit_statement(ctx, stmt)?;
+        emit_statement(ctx, stmt, is_setof)?;
     }
     ctx.dedent();
     ctx.emit_line("end");
@@ -230,7 +309,7 @@ fn emit_while(ctx: &mut TranspileContext, while_stmt: &PlPgSQLStmtWhile) -> Resu
 }
 
 /// Emit FOR i IN start..end loop
-fn emit_for_i(ctx: &mut TranspileContext, for_i: &PlPgSQLStmtForI) -> Result<()> {
+fn emit_for_i(ctx: &mut TranspileContext, for_i: &PlPgSQLStmtForI, is_setof: bool) -> Result<()> {
     let lower = transpile_expr(&for_i.lower)?;
     let upper = transpile_expr(&for_i.upper)?;
     let var = &for_i.varname;
@@ -243,7 +322,7 @@ fn emit_for_i(ctx: &mut TranspileContext, for_i: &PlPgSQLStmtForI) -> Result<()>
     
     ctx.indent();
     for stmt in &for_i.body {
-        emit_statement(ctx, stmt)?;
+        emit_statement(ctx, stmt, is_setof)?;
     }
     ctx.dedent();
     ctx.emit_line("end");
@@ -251,13 +330,13 @@ fn emit_for_i(ctx: &mut TranspileContext, for_i: &PlPgSQLStmtForI) -> Result<()>
 }
 
 /// Emit FOR row IN SELECT loop
-fn emit_for_s(ctx: &mut TranspileContext, for_s: &PlPgSQLStmtForS) -> Result<()> {
+fn emit_for_s(ctx: &mut TranspileContext, for_s: &PlPgSQLStmtForS, is_setof: bool) -> Result<()> {
     let query = &for_s.query.query;
     let var = &for_s.varname;
     ctx.emit_line(&format!("for {} in _ctx.query_iter([[{}]], {{}}) do", var, query));
     ctx.indent();
     for stmt in &for_s.body {
-        emit_statement(ctx, stmt)?;
+        emit_statement(ctx, stmt, is_setof)?;
     }
     ctx.dedent();
     ctx.emit_line("end");
@@ -276,12 +355,19 @@ fn emit_exit(ctx: &mut TranspileContext, exit: &PlPgSQLStmtExit) -> Result<()> {
 }
 
 /// Emit RETURN statement
-fn emit_return(ctx: &mut TranspileContext, ret: &PlPgSQLStmtReturn) -> Result<()> {
+fn emit_return(ctx: &mut TranspileContext, ret: &PlPgSQLStmtReturn, is_setof: bool) -> Result<()> {
     if let Some(expr) = &ret.expr {
         let expr_lua = transpile_expr(expr)?;
-        ctx.emit_line(&format!("return {}", expr_lua));
+        if is_setof {
+            // For SETOF functions, add to result set
+            ctx.emit_line("table.insert(_result_set, {})");
+        } else {
+            ctx.emit_line(&format!("return {}", expr_lua));
+        }
     } else {
-        ctx.emit_line("return");
+        if !is_setof {
+            ctx.emit_line("return");
+        }
     }
     Ok(())
 }
@@ -289,7 +375,9 @@ fn emit_return(ctx: &mut TranspileContext, ret: &PlPgSQLStmtReturn) -> Result<()
 /// Emit RETURN NEXT statement
 fn emit_return_next(ctx: &mut TranspileContext, ret_next: &PlPgSQLStmtReturnNext) -> Result<()> {
     let expr_lua = transpile_expr(&ret_next.expr)?;
-    ctx.emit_line(&format!("_ctx.return_next({})", expr_lua));
+    // Accumulate result in a table
+    ctx.emit_line("if _result_set == nil then _result_set = {} end");
+    ctx.emit_line(&format!("table.insert(_result_set, {})", expr_lua));
     Ok(())
 }
 
@@ -386,9 +474,9 @@ fn emit_get_diag(ctx: &mut TranspileContext, diag: &PlPgSQLStmtGetDiag) -> Resul
 }
 
 /// Emit CASE statement
-fn emit_case(ctx: &mut TranspileContext, case: &PlPgSQLStmtCase) -> Result<()> {
+fn emit_case(ctx: &mut TranspileContext, case: &PlPgSQLStmtCase, is_setof: bool) -> Result<()> {
     let mut first = true;
-    
+
     for when in &case.case_when_list {
         let cond = transpile_expr(&when.expr)?;
         if first {
@@ -399,20 +487,20 @@ fn emit_case(ctx: &mut TranspileContext, case: &PlPgSQLStmtCase) -> Result<()> {
         }
         ctx.indent();
         for stmt in &when.stmts {
-            emit_statement(ctx, stmt)?;
+            emit_statement(ctx, stmt, is_setof)?;
         }
         ctx.dedent();
     }
-    
+
     if let Some(else_stmts) = &case.else_stmts {
         ctx.emit_line("else");
         ctx.indent();
         for stmt in else_stmts {
-            emit_statement(ctx, stmt)?;
+            emit_statement(ctx, stmt, is_setof)?;
         }
         ctx.dedent();
     }
-    
+
     ctx.emit_line("end");
     Ok(())
 }

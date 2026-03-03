@@ -90,6 +90,18 @@ impl PlPgSqlRuntime {
         // Call function with api as first argument
         let result: LuaValue = func.call(api)?;
         
+        // Check if result is a result set (table with return_next values)
+        if let LuaValue::Table(ref t) = result {
+            // Check if this is a result set by looking for _is_result_set marker
+            let is_result_set: bool = t.get("_is_result_set").unwrap_or(false);
+            if is_result_set {
+                // Return the result set as a Vec of Values
+                // For now, we return a special marker
+                // In a full implementation, we'd return this as a SETOF result
+                return Ok(SqliteValue::Text("SETOF result".to_string()));
+            }
+        }
+        
         // Convert result back to SQLite
         lua_to_sqlite(result).map_err(|e| anyhow::anyhow!("Lua error: {}", e))
     }
