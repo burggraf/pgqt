@@ -8,6 +8,8 @@ tokio = { version = "1.0", features = ["full"] }
 pgwire = "0.38"
 rusqlite = { version = "0.38", features = ["bundled", "column_decltype", "functions", "cache"] }
 pg_query = "6.1"
+pg_parse = "0.12"
+mlua = { version = "0.10", features = ["luau", "serialize", "send"] }
 anyhow = "1.0"
 dashmap = "6.1.0"
 serde = { version = "1.0", features = ["derive"] }
