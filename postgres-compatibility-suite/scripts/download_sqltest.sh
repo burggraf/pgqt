@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Directory for SQL files
-SQLTEST_DIR="postgres-compatability-suite/sql/sqltest"
+# Directory for SQL files (relative to project root)
+SQLTEST_DIR="postgres-compatibility-suite/sql/sqltest"
 mkdir -p "$SQLTEST_DIR"
 
 # Base URL for elliotchance/sqltest

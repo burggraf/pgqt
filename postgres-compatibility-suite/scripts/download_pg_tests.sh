@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Directory for SQL files
-SQL_DIR="postgres-compatability-suite/sql/pg_regress"
-EXPECT_DIR="postgres-compatability-suite/expected/pg_regress"
+# Directory for SQL files (relative to project root)
+SQL_DIR="postgres-compatibility-suite/sql/pg_regress"
+EXPECT_DIR="postgres-compatibility-suite/expected/pg_regress"
 
 mkdir -p "$SQL_DIR"
 mkdir -p "$EXPECT_DIR"

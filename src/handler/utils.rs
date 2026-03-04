@@ -16,7 +16,7 @@ use futures::stream;
 use crate::catalog::FunctionMetadata;
 use crate::schema::{SchemaManager, SearchPath};
 use crate::handler::SessionContext;
-use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
+use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
 use pgwire::api::Type;
 
 /// Trait for utility methods that need access to SqliteHandler fields
@@ -379,6 +379,163 @@ pub trait HandlerUtils {
             fields,
             row_stream,
         ))])
+    }
+
+    /// Handle SHOW ALL statement
+    fn handle_show_all(&self) -> Result<Vec<Response>> {
+        // SHOW ALL displays all configuration parameters
+        // For PGQT, we show a subset of supported parameters
+        let params = vec![
+            ("search_path", self.get_search_path_value()),
+            ("server_version", "16.1".to_string()),
+            ("server_encoding", "UTF8".to_string()),
+            ("client_encoding", "UTF8".to_string()),
+            ("application_name", "".to_string()),
+            ("DateStyle", "ISO, MDY".to_string()),
+            ("TimeZone", "UTC".to_string()),
+            ("transaction_isolation", "read committed".to_string()),
+            ("transaction_read_only", "off".to_string()),
+            ("default_transaction_isolation", "read committed".to_string()),
+            ("default_transaction_read_only", "off".to_string()),
+            ("statement_timeout", "0".to_string()),
+            ("lock_timeout", "0".to_string()),
+            ("idle_in_transaction_session_timeout", "0".to_string()),
+            ("max_connections", "100".to_string()),
+            ("shared_buffers", "128MB".to_string()),
+            ("effective_cache_size", "4GB".to_string()),
+            ("work_mem", "4MB".to_string()),
+            ("maintenance_work_mem", "64MB".to_string()),
+            ("checkpoint_completion_target", "0.5".to_string()),
+            ("wal_buffers", "16MB".to_string()),
+            ("default_statistics_target", "100".to_string()),
+            ("random_page_cost", "4.0".to_string()),
+            ("effective_io_concurrency", "1".to_string()),
+            ("work_mem", "4MB".to_string()),
+            ("min_wal_size", "80MB".to_string()),
+            ("max_wal_size", "1GB".to_string()),
+        ];
+
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![
+            FieldInfo::new("name".to_string(), None, None, Type::TEXT, FieldFormat::Text),
+            FieldInfo::new("setting".to_string(), None, None, Type::TEXT, FieldFormat::Text),
+            FieldInfo::new("description".to_string(), None, None, Type::TEXT, FieldFormat::Text),
+        ]);
+
+        let mut data_rows = Vec::new();
+        for (name, setting) in params {
+            let mut encoder = DataRowEncoder::new(fields.clone());
+            encoder.encode_field(&Some(name.to_string()))?;
+            encoder.encode_field(&Some(setting.clone()))?;
+            encoder.encode_field(&Some("PGQT configuration parameter".to_string()))?;
+            data_rows.push(Ok(encoder.take_row()));
+        }
+
+        let row_stream = stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            fields,
+            row_stream,
+        ))])
+    }
+
+    /// Handle SHOW <config_param> statement
+    fn handle_show_config(&self, sql: &str) -> Result<Vec<Response>> {
+        // Extract the parameter name from "SHOW parameter"
+        let param_name = sql
+            .trim()
+            .trim_start_matches("SHOW")
+            .trim()
+            .trim_start_matches("SHOW ")
+            .trim()
+            .to_lowercase();
+
+        let value = self.get_config_value(&param_name)?;
+
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(vec![FieldInfo::new(
+            param_name.clone(),
+            None,
+            None,
+            Type::TEXT,
+            FieldFormat::Text,
+        )]);
+
+        let mut encoder = DataRowEncoder::new(fields.clone());
+        encoder.encode_field(&Some(value))?;
+        let data_rows = vec![Ok(encoder.take_row())];
+
+        let row_stream = stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            fields,
+            row_stream,
+        ))])
+    }
+
+    /// Get the current search_path value
+    fn get_search_path_value(&self) -> String {
+        let session = self.sessions().get(&0).unwrap_or_else(|| {
+            self.sessions().insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+            });
+            self.sessions().get(&0).unwrap()
+        });
+
+        session.search_path.to_string()
+    }
+
+    /// Get the value of a configuration parameter
+    fn get_config_value(&self, param: &str) -> Result<String> {
+        let param_lower = param.to_lowercase();
+
+        Ok(match param_lower.as_str() {
+            "search_path" => self.get_search_path_value(),
+            "server_version" | "server_version_num" => "16.1".to_string(),
+            "server_encoding" => "UTF8".to_string(),
+            "client_encoding" => "UTF8".to_string(),
+            "application_name" => "".to_string(),
+            "datestyle" => "ISO, MDY".to_string(),
+            "timezone" | "time zone" => "UTC".to_string(),
+            "transaction_isolation" | "transaction_isolation_level" => "read committed".to_string(),
+            "transaction_read_only" | "default_transaction_read_only" => "off".to_string(),
+            "default_transaction_isolation" => "read committed".to_string(),
+            "statement_timeout" => "0".to_string(),
+            "lock_timeout" => "0".to_string(),
+            "idle_in_transaction_session_timeout" => "0".to_string(),
+            "max_connections" => "100".to_string(),
+            "shared_buffers" => "128MB".to_string(),
+            "effective_cache_size" => "4GB".to_string(),
+            "work_mem" => "4MB".to_string(),
+            "maintenance_work_mem" => "64MB".to_string(),
+            "checkpoint_completion_target" => "0.5".to_string(),
+            "wal_buffers" => "16MB".to_string(),
+            "default_statistics_target" => "100".to_string(),
+            "random_page_cost" => "4.0".to_string(),
+            "effective_io_concurrency" => "1".to_string(),
+            "min_wal_size" => "80MB".to_string(),
+            "max_wal_size" => "1GB".to_string(),
+            // Client connection parameters
+            "port" => "5432".to_string(),
+            "host" => "127.0.0.1".to_string(),
+            "database" | "current_database" => "postgres".to_string(),
+            "user" | "current_user" | "session_user" => {
+                let session = self.sessions().get(&0).unwrap_or_else(|| {
+                    self.sessions().insert(0, SessionContext {
+                        authenticated_user: "postgres".to_string(),
+                        current_user: "postgres".to_string(),
+                        search_path: SearchPath::default(),
+                    });
+                    self.sessions().get(&0).unwrap()
+                });
+                session.current_user.clone()
+            }
+            _ => {
+                // Return a sensible default for unknown parameters
+                // This matches PostgreSQL behavior of showing a default
+                format!("PGQT parameter: {}", param_lower)
+            }
+        })
     }
 
     /// Handle CREATE FUNCTION statement

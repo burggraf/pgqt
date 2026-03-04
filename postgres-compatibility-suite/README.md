@@ -32,11 +32,11 @@ The test harness automatically starts the `pgqt` proxy using `cargo build --rele
 export PG_DSN="host=localhost port=5432 user=postgres password=postgres dbname=postgres"
 
 # Run all tests
-pytest postgres-compatability-suite/runner.py
+pytest postgres-compatibility-suite/runner.py
 
 # Run only a specific category
-pytest postgres-compatability-suite/runner.py -k "pg_regress"
-pytest postgres-compatability-suite/runner.py -k "pgqt_specific"
+pytest postgres-compatibility-suite/runner.py -k "pg_regress"
+pytest postgres-compatibility-suite/runner.py -k "pgqt_specific"
 ```
 
 ### 2. Generate a Report

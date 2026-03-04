@@ -26,7 +26,12 @@ pub trait QueryExecution: HandlerUtils {
         let upper_sql = sql.trim().to_uppercase();
 
         // Ignore transaction control statements - SQLite handles transactions automatically
-        if upper_sql == "BEGIN" || upper_sql == "COMMIT" || upper_sql == "ROLLBACK" {
+        // PostgreSQL transaction control:
+        // - BEGIN / START TRANSACTION: start a transaction
+        // - COMMIT / END: commit the transaction
+        // - ROLLBACK / ABORT: roll back the transaction
+        if upper_sql == "BEGIN" || upper_sql == "COMMIT" || upper_sql == "ROLLBACK" || upper_sql == "END"
+            || upper_sql == "ABORT" || upper_sql.starts_with("START TRANSACTION") {
             return Ok(vec![Response::Execution(Tag::new("OK"))]);
         }
 
@@ -48,6 +53,16 @@ pub trait QueryExecution: HandlerUtils {
         // Handle SHOW search_path
         if upper_sql == "SHOW SEARCH_PATH" {
             return self.handle_show_search_path();
+        }
+
+        // Handle SHOW ALL
+        if upper_sql == "SHOW ALL" {
+            return self.handle_show_all();
+        }
+
+        // Handle SHOW <config_param>
+        if upper_sql.starts_with("SHOW ") && !upper_sql.starts_with("SHOW ALL") {
+            return self.handle_show_config(sql);
         }
 
         // Handle CREATE FUNCTION
