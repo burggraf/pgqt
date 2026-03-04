@@ -45,6 +45,8 @@ pub struct TranspileContext {
     pub referenced_tables: Vec<String>,
     pub errors: Vec<String>,
     pub functions: Option<Arc<DashMap<String, crate::catalog::FunctionMetadata>>>,
+    /// Column aliases for VALUES statements (when VALUES is used with AS alias (col1, col2))
+    pub values_column_aliases: Vec<String>,
 }
 
 impl TranspileContext {
@@ -53,6 +55,7 @@ impl TranspileContext {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
             functions: None,
+            values_column_aliases: Vec::new(),
         }
     }
 
@@ -61,10 +64,19 @@ impl TranspileContext {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
             functions: Some(functions),
+            values_column_aliases: Vec::new(),
         }
     }
 
     pub fn add_error(&mut self, error: String) {
         self.errors.push(error);
+    }
+
+    pub fn set_values_column_aliases(&mut self, aliases: Vec<String>) {
+        self.values_column_aliases = aliases;
+    }
+
+    pub fn clear_values_column_aliases(&mut self) {
+        self.values_column_aliases.clear();
     }
 }

@@ -11,17 +11,15 @@ use super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 
 /// Check if the current context has column aliases (for VALUES statements)
-fn has_column_aliases(_ctx: &TranspileContext) -> bool {
-    // For now, return false - we'll need to track this in the context
-    // when we encounter RangeSubselect with coldeflist
-    false
+fn has_column_aliases(ctx: &TranspileContext) -> bool {
+    !ctx.values_column_aliases.is_empty()
 }
 
 /// Reconstruct VALUES statement as UNION ALL SELECT to support column aliases
 fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     let mut union_parts = Vec::new();
 
-    for values_list in &stmt.values_lists {
+    for (i, values_list) in stmt.values_lists.iter().enumerate() {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
                 let values: Vec<String> = list
@@ -29,7 +27,26 @@ fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext
                     .iter()
                     .map(|n| reconstruct_node(n, ctx))
                     .collect();
-                union_parts.push(format!("SELECT {}", values.join(", ")));
+
+                if !ctx.values_column_aliases.is_empty() {
+                    // Add column aliases: SELECT value1 AS alias1, value2 AS alias2
+                    let aliased_values: Vec<String> = values
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, val)| {
+                            if idx < ctx.values_column_aliases.len() {
+                                format!("{} AS {}", val, ctx.values_column_aliases[idx])
+                            } else {
+                                val.clone()
+                            }
+                        })
+                        .collect();
+
+                    union_parts.push(format!("SELECT {}", aliased_values.join(", ")));
+                } else {
+                    // No aliases - use column1, column2, etc.
+                    union_parts.push(format!("SELECT {}", values.join(", ")));
+                }
             }
         }
     }
