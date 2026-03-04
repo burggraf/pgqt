@@ -82,7 +82,7 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::ArrayExpr(ref array_expr) => reconstruct_array_expr(array_expr, ctx),
             NodeEnum::AArrayExpr(ref a_array_expr) => reconstruct_a_array_expr(a_array_expr, ctx),
             NodeEnum::RangeFunction(ref range_func) => reconstruct_range_function(range_func, ctx),
-            NodeEnum::SetToDefault(_) => "DEFAULT".to_string(),
+            NodeEnum::SetToDefault(_) => "/* DEFAULT */ NULL".to_string(),
             NodeEnum::WindowDef(ref window_def) => {
                 // Handle named window definitions (e.g., WINDOW w AS (PARTITION BY ...))
                 let window_sql = crate::transpiler::window::reconstruct_window_def(window_def, ctx);
