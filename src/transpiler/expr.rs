@@ -235,6 +235,22 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
         .unwrap_or_default();
     let original_type = extract_original_type(&type_cast.type_name);
     let sqlite_type = rewrite_type_for_sqlite(&original_type);
+
+    // Validate boolean literals
+    if original_type.to_uppercase() == "BOOLEAN" || original_type.to_uppercase() == "BOOL" {
+        // Check if the argument is a string literal and validate it
+        if arg_sql.starts_with('\'') && arg_sql.ends_with('\'') {
+            let inner = arg_sql[1..arg_sql.len()-1].trim().to_lowercase();
+            // Valid boolean literals in PostgreSQL (exact matches only for brevity)
+            let valid_true = matches!(inner.as_str(), "t" | "tr" | "tru" | "true" | "y" | "ye" | "yes" | "on" | "1");
+            let valid_false = matches!(inner.as_str(), "f" | "fa" | "fal" | "fals" | "false" | "n" | "no" | "of" | "off" | "0");
+
+            if !valid_true && !valid_false {
+                ctx.add_error(format!("invalid input syntax for type boolean: \"{}\"", &arg_sql[1..arg_sql.len()-1]));
+            }
+        }
+    }
+
     format!("cast({} as {})", arg_sql, sqlite_type.to_lowercase())
 }
 

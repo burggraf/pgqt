@@ -81,6 +81,13 @@ pub(crate) fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut
 pub(crate) fn reconstruct_column_def(col_def: &ColumnDef, ctx: &mut TranspileContext) -> (String, Option<ColumnTypeInfo>) {
     let col_name = col_def.colname.clone();
     let original_type = extract_original_type(&col_def.type_name);
+
+    // Check for pseudo-type "unknown" which should cause an error
+    if original_type.to_uppercase() == "UNKNOWN" {
+        ctx.add_error(format!("column \"{}\" has pseudo-type unknown", col_name));
+        return (format!("{} text /* unknown type */", col_name.to_lowercase()), None);
+    }
+
     let sqlite_type = rewrite_type_for_sqlite(&original_type);
 
     // Extract constraints

@@ -94,6 +94,11 @@ pub trait QueryExecution: HandlerUtils {
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
 
+        // Check for transpilation errors (e.g., unknown pseudo-type)
+        if !transpile_result.errors.is_empty() {
+            return Err(anyhow!("{}", transpile_result.errors.join("; ")));
+        }
+
         // Handle COPY statements
         if let Some(copy_stmt) = transpile_result.copy_metadata {
             return self.handle_copy_statement(copy_stmt);

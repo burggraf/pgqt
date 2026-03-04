@@ -63,4 +63,8 @@ impl TranspileContext {
             functions: Some(functions),
         }
     }
+
+    pub fn add_error(&mut self, error: String) {
+        self.errors.push(error);
+    }
 }
