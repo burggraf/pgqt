@@ -8,7 +8,7 @@ import signal
 # Configuration
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 5435  # Use a different port than default to avoid collisions
-DB_PATH = "test-suite/test_db.db"
+DB_PATH = "postgres-compatability-suite/test_db.db"
 PG_DSN = os.environ.get("PG_DSN", "host=localhost port=5432 user=postgres password=postgres dbname=postgres")
 
 @pytest.fixture(scope="session")

@@ -3,6 +3,7 @@
 This is a comprehensive test suite for validating PostgreSQL compatibility of the PGQT proxy. It is designed to find bugs, identify missing features, and provide a clear "Compatibility Score."
 
 ## Categories (PG Scorecard)
+
 1.  **Data Types**: Tests for INT, TEXT, UUID, JSON, JSONB, Arrays, etc.
 2.  **DDL Features**: CREATE TABLE, ALTER TABLE, DROP TABLE, etc.
 3.  **SQL Features**: CTEs, Upsert, Window Functions, etc.
@@ -14,6 +15,7 @@ This is a comprehensive test suite for validating PostgreSQL compatibility of th
 9.  **Indexing**: B-Tree (mapped to SQLite indexes).
 
 ## Prerequisites
+
 - **Python 3.10+**
 - **psycopg2** (`pip install psycopg2-binary`)
 - **pytest** (`pip install pytest`)
@@ -22,6 +24,7 @@ This is a comprehensive test suite for validating PostgreSQL compatibility of th
 ## Running the tests
 
 ### 1. Start the proxy and run tests
+
 The test harness automatically starts the `pgqt` proxy using `cargo build --release`.
 
 ```bash
@@ -29,17 +32,19 @@ The test harness automatically starts the `pgqt` proxy using `cargo build --rele
 export PG_DSN="host=localhost port=5432 user=postgres password=postgres dbname=postgres"
 
 # Run all tests
-pytest test-suite/runner.py
+pytest postgres-compatability-suite/runner.py
 
 # Run only a specific category
-pytest test-suite/runner.py -k "pg_regress"
-pytest test-suite/runner.py -k "pgqt_specific"
+pytest postgres-compatability-suite/runner.py -k "pg_regress"
+pytest postgres-compatability-suite/runner.py -k "pgqt_specific"
 ```
 
 ### 2. Generate a Report
+
 The runner will collect pass/fail data and generate a `compatibility_report.md`.
 
 ## Folder Structure
+
 - `sql/pg_regress/`: Official PostgreSQL regression SQL scripts.
 - `sql/sqltest/`: SQL-92 templates from `elliotchance/sqltest`.
 - `sql/pgqt_specific/`: Custom tests for transpilation features (Arrays, Vectors, Ranges).
@@ -47,6 +52,7 @@ The runner will collect pass/fail data and generate a `compatibility_report.md`.
 - `scripts/`: Downloaders and maintainer utilities.
 
 ## How it works
+
 1.  **Dual Execution**: Each SQL statement is executed against both the PGQT proxy and a real PostgreSQL instance.
 2.  **Result Comparison**: The harness compares the result sets (column names, row values, and counts).
 3.  **Diff Reporting**: Differences in output or errors are logged as failures.

@@ -2,8 +2,8 @@
 set -e
 
 # Directory for SQL files
-SQL_DIR="test-suite/sql/pg_regress"
-EXPECT_DIR="test-suite/expected/pg_regress"
+SQL_DIR="postgres-compatability-suite/sql/pg_regress"
+EXPECT_DIR="postgres-compatability-suite/expected/pg_regress"
 
 mkdir -p "$SQL_DIR"
 mkdir -p "$EXPECT_DIR"

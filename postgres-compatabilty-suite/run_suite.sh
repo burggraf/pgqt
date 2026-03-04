@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-suite/run_suite.sh
+# postgres-compatability-suite/run_suite.sh
 # Comprehensive runner for the PGQT compatibility test suite.
 
 set -e
@@ -7,22 +7,22 @@ set -e
 # Configuration
 export PG_DSN=${PG_DSN:-"host=localhost port=5432 user=postgres password=postgres dbname=postgres"}
 export PROXY_PORT=5435
-export DB_PATH="test-suite/test_db.db"
+export DB_PATH="postgres-compatability-suite/test_db.db"
 
 # 1. Ensure we are in the project root
-if [ ! -d "test-suite" ]; then
-    echo "Error: Must run from project root (where test-suite/ exists)"
+if [ ! -d "postgres-compatability-suite" ]; then
+    echo "Error: Must run from project root (where postgres-compatability-suite/ exists)"
     exit 1
 fi
 
 # 2. Activate virtual environment
-if [ ! -d "test-suite/venv" ]; then
+if [ ! -d "postgres-compatability-suite/venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv test-suite/venv
-    source test-suite/venv/bin/activate
-    pip install -r test-suite/requirements.txt
+    python3 -m venv postgres-compatability-suite/venv
+    source postgres-compatability-suite/venv/bin/activate
+    pip install -r postgres-compatability-suite/requirements.txt
 else
-    source test-suite/venv/bin/activate
+    source postgres-compatability-suite/venv/bin/activate
 fi
 
 # 3. Build PGQT
@@ -43,7 +43,7 @@ fi
 
 # 5. Run the suite
 echo "Starting Compatibility Test Suite..."
-pytest test-suite/runner.py "$@"
+pytest postgres-compatability-suite/runner.py "$@"
 
 # 6. Summary
 echo "Test run complete."

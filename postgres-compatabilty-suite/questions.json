@@ -1,6 +1,6 @@
 {
   "title": "PostgreSQL Compatibility Test Suite Architecture",
-  "description": "I'm planning the structure of the new `/test-suite` folder. Please choose the preferred implementation approach for the test harness.",
+  "description": "I'm planning the structure of the new `/postgres-compatability-suite` folder. Please choose the preferred implementation approach for the test harness.",
   "questions": [
     {
       "id": "harness-type",

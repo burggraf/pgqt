@@ -2,7 +2,7 @@
 set -e
 
 # Directory for SQL files
-SQLTEST_DIR="test-suite/sql/sqltest"
+SQLTEST_DIR="postgres-compatability-suite/sql/sqltest"
 mkdir -p "$SQLTEST_DIR"
 
 # Base URL for elliotchance/sqltest

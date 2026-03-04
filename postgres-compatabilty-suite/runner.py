@@ -4,10 +4,10 @@ import os
 import re
 
 # Directory for SQL files
-SQL_DIR = "test-suite/sql"
+SQL_DIR = "postgres-compatability-suite/sql"
 
 def get_sql_files():
-    """Recursively list all SQL files in the test-suite/sql directory."""
+    """Recursively list all SQL files in the postgres-compatability-suite/sql directory."""
     sql_files = []
     for root, _, files in os.walk(SQL_DIR):
         for f in files:
