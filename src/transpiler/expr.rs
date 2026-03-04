@@ -774,6 +774,9 @@ pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx:
 pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut TranspileContext) -> String {
     use pg_query::protobuf::node::Node as NodeEnum;
 
+    // Get the alias name if present - needed for generate_series column naming
+    let alias_name = range_func.alias.as_ref().map(|a| a.aliasname.to_lowercase());
+
     // Extract the function calls from the functions field
     // Each item in functions is typically a List containing [FuncCall, empty_alias]
     let func_sql: Vec<String> = range_func
@@ -809,10 +812,13 @@ pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut T
                                         let start = &args[0];
                                         let stop = &args[1];
                                         let step = if args.len() >= 3 { args[2].clone() } else { "1".to_string() };
-                                        // Return just the CTE without the outer parentheses
+                                        // In PostgreSQL, generate_series(1,10) x makes the column
+                                        // accessible as 'x'. Use the alias name as the output column
+                                        // name, falling back to 'n' if no alias.
+                                        let col_name = alias_name.as_deref().unwrap_or("generate_series");
                                         return Some(format!(
-                                            "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM _series)",
-                                            start, step, step, step, stop, step, step, stop
+                                            "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n AS \"{}\" FROM _series)",
+                                            start, step, step, step, stop, step, step, stop, col_name
                                         ));
                                     }
                                 }

@@ -133,7 +133,8 @@ pub trait QueryExecution: HandlerUtils {
 
         let conn = self.conn().lock().unwrap();
 
-        let is_select = sqlite_sql.trim().to_lowercase().starts_with("select");
+        let trimmed_lower = sqlite_sql.trim().to_lowercase();
+        let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
         let is_create_table = sqlite_sql.trim().to_uppercase().starts_with("CREATE TABLE");
 
         if is_create_table {

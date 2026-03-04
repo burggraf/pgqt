@@ -245,6 +245,49 @@ pub(crate) fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut Tran
     parts.join(" ")
 }
 
+/// Reconstruct a WITH (CTE) clause into SQL
+fn reconstruct_with_clause(with_clause: &pg_query::protobuf::WithClause, ctx: &mut TranspileContext) -> String {
+    let mut parts = Vec::new();
+    if with_clause.recursive {
+        parts.push("WITH RECURSIVE".to_string());
+    } else {
+        parts.push("WITH".to_string());
+    }
+
+    let ctes: Vec<String> = with_clause.ctes.iter().filter_map(|n| {
+        if let Some(ref inner) = n.node {
+            if let NodeEnum::CommonTableExpr(ref cte) = inner {
+                let name = cte.ctename.to_lowercase();
+                // Column aliases: WITH q1(x, y) AS (...)
+                let col_aliases = if !cte.aliascolnames.is_empty() {
+                    let cols: Vec<String> = cte.aliascolnames.iter().filter_map(|n| {
+                        if let Some(ref inner) = n.node {
+                            if let NodeEnum::String(ref s) = inner {
+                                return Some(s.sval.to_lowercase());
+                            }
+                        }
+                        None
+                    }).collect();
+                    format!("({})", cols.join(", "))
+                } else {
+                    String::new()
+                };
+                // CTE query
+                let query_sql = if let Some(ref query) = cte.ctequery {
+                    reconstruct_node(query, ctx)
+                } else {
+                    String::new()
+                };
+                return Some(format!("{}{} AS ({})", name, col_aliases, query_sql));
+            }
+        }
+        None
+    }).collect();
+
+    parts.push(ctes.join(", "));
+    parts.join(" ")
+}
+
 /// Reconstruct a set operation statement (UNION, INTERSECT, EXCEPT)
 pub(crate) fn reconstruct_set_operation_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     use pg_query::protobuf::SetOperation;
@@ -262,11 +305,28 @@ pub(crate) fn reconstruct_set_operation_stmt(stmt: &SelectStmt, ctx: &mut Transp
         .map(|l| reconstruct_select_stmt(l, ctx))
         .unwrap_or_default();
 
+    // If the right side is itself a set operation (e.g., UNION (SELECT x UNION ALL SELECT y)),
+    // wrap it in SELECT * FROM (...) to preserve precedence in SQLite
     let right_sql = stmt.rarg.as_ref()
-        .map(|r| reconstruct_select_stmt(r, ctx))
+        .map(|r| {
+            let sql = reconstruct_select_stmt(r, ctx);
+            if r.op > 1 {
+                // Right side is a nested set operation - wrap to preserve precedence
+                format!("select * from ({})", sql)
+            } else {
+                sql
+            }
+        })
         .unwrap_or_default();
 
-    let mut result = format!("{} {} {}", left_sql, op_str, right_sql);
+    // Add WITH clause if present
+    let with_prefix = if let Some(ref with_clause) = stmt.with_clause {
+        format!("{} ", reconstruct_with_clause(with_clause, ctx))
+    } else {
+        String::new()
+    };
+
+    let mut result = format!("{}{} {} {}", with_prefix, left_sql, op_str, right_sql);
 
     // Add ORDER BY if present (applies to the whole result)
     if !stmt.sort_clause.is_empty() {
@@ -327,6 +387,11 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
     }
 
     let mut parts = Vec::new();
+
+    // Handle WITH clause (CTEs)
+    if let Some(ref with_clause) = stmt.with_clause {
+        parts.push(reconstruct_with_clause(with_clause, ctx));
+    }
 
     // Handle regular DISTINCT
     if !stmt.distinct_clause.is_empty() {
