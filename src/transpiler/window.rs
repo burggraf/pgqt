@@ -33,12 +33,12 @@ pub mod frame_options {
 }
 
 pub(crate) fn reconstruct_window_def(win_def: &WindowDef, ctx: &mut TranspileContext) -> String {
-    let mut parts = Vec::new();
-
     // Handle named window reference (e.g., OVER w)
     if !win_def.refname.is_empty() {
         return win_def.refname.to_lowercase();
     }
+
+    let mut parts = Vec::new();
 
     // PARTITION BY clause
     if !win_def.partition_clause.is_empty() {

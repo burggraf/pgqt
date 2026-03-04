@@ -264,6 +264,17 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
         }
     }
 
+    // WINDOW clause (named window definitions)
+    if !stmt.window_clause.is_empty() {
+        parts.push("window".to_string());
+        let windows: Vec<String> = stmt
+            .window_clause
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(windows.join(", "));
+    }
+
     // ORDER BY clause (from sort_clause)
     if !stmt.sort_clause.is_empty() {
         parts.push("order by".to_string());

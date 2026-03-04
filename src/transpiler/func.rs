@@ -407,8 +407,16 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
 pub(crate) fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut TranspileContext) -> String {
     if let Some(ref over) = func_call.over {
         let window_sql = reconstruct_window_def(over, ctx);
-        // Always add OVER clause if the function has one, even if empty
-        // Also add an alias using just the function name for PostgreSQL compatibility
+
+        // Don't add alias if the window is a named reference (OVER w)
+        // because it would break when used multiple times (e.g., SELECT ... ORDER BY)
+        // Also, don't wrap named references in parentheses
+        if !over.refname.is_empty() {
+            return format!("{} over {}", base, window_sql);
+        }
+
+        // For inline window definitions, add an alias using just the function name
+        // for PostgreSQL compatibility (e.g., 'sum' instead of 'sum(salary) over (...)')
         let func_name = func_call.funcname.last()
             .and_then(|n| n.node.as_ref())
             .and_then(|node| {
