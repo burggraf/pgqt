@@ -9,6 +9,8 @@ use crate::transpiler::reconstruct_node;
 
 /// Frame option flags for window specifications
 pub mod frame_options {
+    #![allow(dead_code)]
+    
     pub const NONDEFAULT: i32 = 0x00001;
     pub const RANGE: i32 = 0x00002;
     pub const ROWS: i32 = 0x00004;

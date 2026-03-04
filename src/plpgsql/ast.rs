@@ -3,6 +3,9 @@
 //! These types represent the JSON AST output from pg_parse::parse_plpgsql()
 //! and are used for transpilation to Lua.
 
+// AST type definitions
+#![allow(dead_code)]
+
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 

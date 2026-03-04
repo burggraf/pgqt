@@ -4,6 +4,9 @@
 //! implemented in pure Rust. Supports distance calculations, normalization,
 //! and vector manipulation functions.
 
+// These functions are part of the public vector API
+#![allow(dead_code)]
+
 #[allow(dead_code)]
 /// Parse a vector from JSON array format '[1,2,3]' to Vec<f32>
 fn parse_vector_to_f32(input: &str) -> Result<Vec<f32>, String> {

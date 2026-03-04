@@ -3,6 +3,9 @@
 //! Provides a sandboxed Lua execution environment for running
 //! PL/pgSQL functions that have been transpiled to Lua.
 
+// PL/pgSQL runtime functions
+#![allow(dead_code)]
+
 use mlua::{Lua, Table, Value as LuaValue, Function as LuaFunction};
 use rusqlite::{Connection, types::Value as SqliteValue, OptionalExtension};
 use anyhow::Result;

@@ -4,6 +4,9 @@
 //! Note: SQLite handles transactions automatically, so we mostly
 //! just acknowledge transaction control statements.
 
+// Transaction control functions
+#![allow(dead_code)]
+
 use anyhow::Result;
 use pgwire::api::results::{Response, Tag};
 

@@ -2,6 +2,9 @@
 //!
 //! This module implements PostgreSQL's full-text search functionality using SQLite's FTS5
 //! extension. It provides:
+
+// These functions are part of the public FTS API
+#![allow(dead_code)]
 //!
 //! - Type mapping: TSVECTOR → TEXT, TSQUERY → TEXT
 //! - Query translation: PostgreSQL FTS syntax → SQLite FTS5 syntax

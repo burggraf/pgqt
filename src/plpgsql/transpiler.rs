@@ -3,6 +3,9 @@
 //! Converts PL/pgSQL AST into Lua source code for execution
 //! in the mlua runtime environment.
 
+// PL/pgSQL transpiler functions
+#![allow(dead_code)]
+
 use anyhow::Result;
 use crate::plpgsql::ast::*;
 use std::fmt::Write;

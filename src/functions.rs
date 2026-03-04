@@ -3,6 +3,9 @@
 //! This module handles the storage and execution of user-defined functions created
 //! via `CREATE FUNCTION`. It supports SQL-language functions as well as PL/pgSQL
 //! functions (transpiled to Lua via the [`crate::plpgsql`] module).
+
+// UDF functions
+#![allow(dead_code)]
 //!
 //! ## Supported Features
 //! - `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION`

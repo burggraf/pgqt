@@ -1,5 +1,8 @@
 //! Array comparison functions: array_eq, array_ne, array_lt, array_gt, etc.
 
+// These functions are part of the public array API
+#![allow(dead_code)]
+
 use crate::array::utils::parse_array;
 
 /// Compare two arrays for equality

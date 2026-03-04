@@ -3,6 +3,9 @@
 //! This module provides PostgreSQL-compatible range operations by storing ranges
 //! as strings (TEXT) in SQLite. It supports the standard PostgreSQL range types:
 //! - int4range (integer)
+
+// These functions are part of the public range API
+#![allow(dead_code)]
 //! - int8range (bigint)
 //! - numrange (numeric)
 //! - tsrange (timestamp)

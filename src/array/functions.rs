@@ -1,5 +1,8 @@
 //! Array functions: array_append, array_prepend, array_cat, array_position, array_remove, etc.
 
+// These functions are part of the public array API
+#![allow(dead_code)]
+
 use crate::array::types::ArrayValue;
 use crate::array::utils::parse_array;
 
