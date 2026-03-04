@@ -12,7 +12,7 @@ use crate::transpiler::reconstruct_node;
 
 /// Check if the current context has column aliases (for VALUES statements)
 fn has_column_aliases(ctx: &TranspileContext) -> bool {
-    !ctx.values_column_aliases.is_empty()
+    !ctx.values_column_aliases.is_empty() || ctx.in_subquery
 }
 
 /// Reconstruct VALUES statement as UNION ALL SELECT to support column aliases
@@ -51,7 +51,7 @@ fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext
         }
     }
 
-    union_parts.join(" UNION ALL SELECT ")
+    union_parts.join(" UNION ALL ")
 }
 
 pub(crate) fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {

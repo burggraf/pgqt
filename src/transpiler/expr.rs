@@ -709,18 +709,31 @@ pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx:
         ctx.errors.push("LATERAL joins for subqueries are not supported in SQLite. Consider using window functions or CTEs.".to_string());
     }
 
+    // Check if we have a table alias
+    let alias_name = range_subselect
+        .alias
+        .as_ref()
+        .map(|a| a.aliasname.to_lowercase());
+
+    // Set in_subquery flag before reconstructing the subquery
+    ctx.enter_subquery();
+    
+    // If we have an alias, set it as the column alias (simple heuristic for single-column VALUES)
+    // This handles the common case of (VALUES (1), (2), (3)) AS v (v)
+    if let Some(ref alias) = alias_name {
+        ctx.set_values_column_aliases(vec![alias.clone()]);
+    }
+
     let subquery = range_subselect
         .subquery
         .as_ref()
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
 
-    let alias = range_subselect
-        .alias
-        .as_ref()
-        .map(|a| a.aliasname.to_lowercase());
+    ctx.exit_subquery();
+    ctx.clear_values_column_aliases();
 
-    if let Some(a) = alias {
+    if let Some(a) = alias_name {
         format!("({}) as {}", subquery, a)
     } else {
         format!("({})", subquery)

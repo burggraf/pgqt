@@ -47,6 +47,8 @@ pub struct TranspileContext {
     pub functions: Option<Arc<DashMap<String, crate::catalog::FunctionMetadata>>>,
     /// Column aliases for VALUES statements (when VALUES is used with AS alias (col1, col2))
     pub values_column_aliases: Vec<String>,
+    /// Whether we're currently in a subquery context (for VALUES handling)
+    pub in_subquery: bool,
 }
 
 impl TranspileContext {
@@ -56,6 +58,7 @@ impl TranspileContext {
             errors: Vec::new(),
             functions: None,
             values_column_aliases: Vec::new(),
+            in_subquery: false,
         }
     }
 
@@ -65,6 +68,7 @@ impl TranspileContext {
             errors: Vec::new(),
             functions: Some(functions),
             values_column_aliases: Vec::new(),
+            in_subquery: false,
         }
     }
 
@@ -78,5 +82,13 @@ impl TranspileContext {
 
     pub fn clear_values_column_aliases(&mut self) {
         self.values_column_aliases.clear();
+    }
+
+    pub fn enter_subquery(&mut self) {
+        self.in_subquery = true;
+    }
+
+    pub fn exit_subquery(&mut self) {
+        self.in_subquery = false;
     }
 }
