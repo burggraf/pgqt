@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 /// Test helper to start proxy
+#[allow(dead_code)]
 fn start_proxy(db_path: &str, port: u16) -> std::process::Child {
     let child = Command::new("cargo")
         .args(["run", "--", "--db", db_path, "--port", &port.to_string()])

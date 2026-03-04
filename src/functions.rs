@@ -253,7 +253,7 @@ fn execute_void_function(conn: &Connection, sql: &str) -> Result<FunctionResult>
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use crate::catalog::{init_catalog, FunctionMetadata, ReturnTypeKind, ParamMode};
+    use crate::catalog::{FunctionMetadata, ReturnTypeKind, ParamMode};
 
     #[test]
     fn test_substitute_parameters() {

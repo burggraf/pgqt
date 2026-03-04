@@ -74,7 +74,6 @@ pub fn execute_plpgsql_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::types::Value as SqliteValue;
 
     #[test]
     fn test_end_to_end_simple_function() {

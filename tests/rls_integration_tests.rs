@@ -123,7 +123,7 @@ fn test_create_select_policy() {
 
 #[test]
 fn test_policy_combination_permissive() {
-    let conn = setup_test_db();
+    let _conn = setup_test_db();
     
     // Create multiple permissive policies
     let policies = vec![
@@ -160,7 +160,7 @@ fn test_policy_combination_permissive() {
 
 #[test]
 fn test_policy_combination_restrictive() {
-    let conn = setup_test_db();
+    let _conn = setup_test_db();
     
     // Create mixed policies
     let policies = vec![

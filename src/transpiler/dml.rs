@@ -549,11 +549,13 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
 
     // Table name and alias
     let mut table_alias: Option<String> = None;
+    let mut original_table_name: Option<String> = None;
     let table_name = stmt
         .relation
         .as_ref()
         .map(|r| {
             let name = r.relname.to_lowercase();
+            original_table_name = Some(name.clone());
             ctx.referenced_tables.push(name.clone());
             // Check for alias
             if let Some(ref alias) = r.alias {
@@ -586,6 +588,12 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
                     if let Some(ref alias) = table_alias {
                         val = remove_table_alias_from_columns(&val, alias);
                     }
+                    // Also remove original table name if there's an alias
+                    if table_alias.is_some() {
+                        if let Some(ref orig_table) = original_table_name {
+                            val = remove_table_alias_from_columns(&val, orig_table);
+                        }
+                    }
                     return Some(format!("{} = {}", col_name, val));
                 }
             }
@@ -601,6 +609,12 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
             // Remove table alias prefixes from column references
             if let Some(ref alias) = table_alias {
                 where_sql = remove_table_alias_from_columns(&where_sql, alias);
+            }
+            // Also remove original table name if there's an alias
+            if table_alias.is_some() {
+                if let Some(ref orig_table) = original_table_name {
+                    where_sql = remove_table_alias_from_columns(&where_sql, orig_table);
+                }
             }
             parts.push("where".to_string());
             parts.push(where_sql);
@@ -618,11 +632,13 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
 
     // Table name and alias
     let mut table_alias: Option<String> = None;
+    let mut original_table_name: Option<String> = None;
     let table_name = stmt
         .relation
         .as_ref()
         .map(|r| {
             let name = r.relname.to_lowercase();
+            original_table_name = Some(name.clone());
             ctx.referenced_tables.push(name.clone());
             // Check for alias
             if let Some(ref alias) = r.alias {
@@ -644,6 +660,12 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
             // Remove table alias prefixes from column references
             if let Some(ref alias) = table_alias {
                 where_sql = remove_table_alias_from_columns(&where_sql, alias);
+            }
+            // Also remove original table name if there's an alias (PostgreSQL allows both)
+            if table_alias.is_some() {
+                if let Some(ref orig_table) = original_table_name {
+                    where_sql = remove_table_alias_from_columns(&where_sql, orig_table);
+                }
             }
             parts.push("where".to_string());
             parts.push(where_sql);
