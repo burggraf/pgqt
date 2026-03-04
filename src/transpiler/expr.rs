@@ -5,17 +5,14 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    Node, AConst, AExpr, BoolExpr, ColumnRef, ColumnDef, Constraint, CreateStmt, 
-    FuncCall, JoinExpr, NullTest, CaseExpr, CoalesceExpr, ResTarget, RangeVar, 
-    RangeSubselect, SelectStmt, SubLink, TypeCast, TypeName, InsertStmt, UpdateStmt, 
-    DeleteStmt, SqlValueFunction, ArrayExpr, AArrayExpr, RangeFunction, WindowDef
+    Node, AConst, AExpr, BoolExpr, ColumnRef, JoinExpr, NullTest, CaseExpr, CoalesceExpr, ResTarget, RangeVar, 
+    RangeSubselect, SubLink, TypeCast, SqlValueFunction, ArrayExpr, AArrayExpr, RangeFunction
 };
 use super::context::TranspileContext;
 use crate::transpiler::func::reconstruct_func_call;
 use crate::transpiler::dml::reconstruct_select_stmt;
 use crate::transpiler::dml::reconstruct_sort_by;
 use crate::transpiler::utils::{extract_original_type, rewrite_type_for_sqlite};
-use crate::transpiler::window::reconstruct_window_def;
 
 pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> String {
     if let Some(ref inner) = node.node {

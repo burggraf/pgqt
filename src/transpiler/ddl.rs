@@ -9,7 +9,6 @@ use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt, 
     IndexStmt, CopyStmt
 };
-use crate::copy::CopyStatement;
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
 use crate::transpiler::reconstruct_node;
 use pg_query::protobuf::TypeName;

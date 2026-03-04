@@ -5,24 +5,24 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    Node, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
+    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
 };
 use rusqlite::Connection;
 use crate::rls::RlsContext;
 use crate::catalog::{is_rls_enabled, get_applicable_policies};
-use super::super::context::{TranspileContext, TranspileResult, OperationType};
+use super::super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 use crate::transpiler::dml::reconstruct_values_stmt;
 use crate::transpiler::dml::reconstruct_sort_by;
 use crate::transpiler::transpile_with_metadata;
-use crate::transpiler::reconstruct_sql_with_metadata;
-use crate::rls::{get_rls_where_clause, can_bypass_rls, build_rls_expression};
+use crate::rls::get_rls_where_clause;
 use super::utils::{
     extract_table_name_from_select, extract_table_name_from_insert,
     extract_table_name_from_update, extract_table_name_from_delete
 };
 use super::policy::{reconstruct_create_policy_stmt, reconstruct_drop_policy_stmt};
 
+#[allow(dead_code)]
 /// Main entry point for transpiling SQL with RLS augmentation
 pub fn transpile_with_rls(
     sql: &str,
@@ -237,7 +237,7 @@ pub(crate) fn reconstruct_insert_stmt_with_rls(
     table_name: &str,
 ) -> String {
     
-    let with_check_predicate = if !table_name.is_empty() && !rls_ctx.bypass_rls {
+    let _with_check_predicate = if !table_name.is_empty() && !rls_ctx.bypass_rls {
         match is_rls_enabled(conn, table_name) {
             Ok(true) => {
                 let policies = get_applicable_policies(conn, table_name, "INSERT", &rls_ctx.user_roles).unwrap_or_default();

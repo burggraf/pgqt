@@ -24,19 +24,11 @@
 //! ```
 
 use pg_query::protobuf::node::Node as NodeEnum;
-use pg_query::protobuf::{
-    Node, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, CreateStmt,
-    VariableSetStmt, VariableShowStmt, CreateRoleStmt, DropRoleStmt,
-    GrantStmt, GrantRoleStmt, AlterTableStmt, DropStmt, IndexStmt,
-    CopyStmt, TruncateStmt
-};
+use pg_query::protobuf::Node;
 
 #[allow(unused_imports)]
 use crate::copy::{CopyStatement, CopyDirection, CopyOptions, CopyFormat};
 
-use crate::rls::RlsContext;
-use crate::catalog::{is_rls_enabled, get_applicable_policies};
-use rusqlite::Connection;
 
 // Submodules
 pub mod context;
@@ -50,8 +42,6 @@ pub mod window;
 
 // Re-exports from context
 pub use context::{
-    ColumnTypeInfo, 
-    CreateTableMetadata, 
     OperationType, 
     TranspileContext, 
     TranspileResult
@@ -59,7 +49,6 @@ pub use context::{
 
 // Re-export public functions
 pub use func::parse_create_function;
-pub use rls::transpile_with_rls;
 
 /// Transpile PostgreSQL SQL to SQLite SQL using AST walking
 /// Returns both the transpiled SQL and any extracted metadata

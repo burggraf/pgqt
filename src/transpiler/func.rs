@@ -5,7 +5,7 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    Node, FuncCall, WindowDef, CreateFunctionStmt, FunctionParameter, TypeName
+    Node, FuncCall, CreateFunctionStmt, FunctionParameter, TypeName
 };
 use crate::catalog::{ParamMode, ReturnTypeKind};
 use super::context::TranspileContext;

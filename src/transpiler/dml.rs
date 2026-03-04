@@ -7,7 +7,7 @@ use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
 };
-use super::context::{TranspileContext, TranspileResult, OperationType};
+use super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 
 pub(crate) fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {

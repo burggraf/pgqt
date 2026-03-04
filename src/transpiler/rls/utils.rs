@@ -9,7 +9,6 @@ use pg_query::protobuf::{
     SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
 };
 use super::super::context::TranspileContext;
-use crate::transpiler::reconstruct_node;
 
 /// Reconstruct a CREATE ROLE statement as an INSERT into __pg_authid__
 pub fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileContext) -> String {

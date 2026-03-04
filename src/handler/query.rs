@@ -6,14 +6,13 @@
 //! - DML statement execution (INSERT, UPDATE, DELETE)
 //! - COPY statement handling
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
-use dashmap::DashMap;
 use futures::stream;
 
-use crate::catalog::{store_table_metadata, store_relation_metadata, FunctionMetadata};
-use crate::schema::{SchemaManager, SearchPath};
+use crate::catalog::{store_table_metadata, store_relation_metadata};
+use crate::schema::SearchPath;
 use crate::handler::SessionContext;
 use crate::handler::utils::HandlerUtils;
 use crate::copy;

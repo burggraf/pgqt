@@ -18,20 +18,17 @@
 //! PGQT_DB=myapp.db PGQT_PORT=5433 ./pgqt
 //! ```
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
-use dashmap::DashMap;
-use futures::stream;
 use pgwire::api::query::SimpleQueryHandler;
-use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
-use pgwire::api::{ClientInfo, PgWireServerHandlers, Type};
+use pgwire::api::results::Response;
+use pgwire::api::{ClientInfo, PgWireServerHandlers};
 use pgwire::error::{ErrorInfo, PgWireResult};
 use pgwire::tokio::process_socket;
-use rusqlite::Connection;
 use tokio::net::TcpListener;
 
 mod catalog;
@@ -50,8 +47,7 @@ mod plpgsql;
 mod functions;
 mod handler;
 
-use catalog::{init_catalog, init_system_views, store_table_metadata, store_relation_metadata};
-use schema::{SchemaManager, SearchPath};
+use schema::SearchPath;
 use handler::{SqliteHandler, SessionContext};
 use handler::query::QueryExecution;
 
