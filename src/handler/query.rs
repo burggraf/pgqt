@@ -50,6 +50,11 @@ pub trait QueryExecution: HandlerUtils {
             return self.handle_set_search_path(sql);
         }
 
+        // Handle EXPLAIN with PostgreSQL-specific options (e.g., EXPLAIN (costs off) SELECT ...)
+        if upper_sql.starts_with("EXPLAIN") {
+            return self.handle_explain(sql);
+        }
+
         // Handle SHOW search_path
         if upper_sql == "SHOW SEARCH_PATH" {
             return self.handle_show_search_path();

@@ -860,4 +860,56 @@ pub trait HandlerUtils {
 
         Ok(vec![Response::Execution(Tag::new("DROP FUNCTION"))])
     }
+
+    /// Handle EXPLAIN statement - strip PostgreSQL-specific options
+    fn handle_explain(&self, sql: &str) -> Result<Vec<Response>> {
+        // EXPLAIN (costs off) SELECT ... -> EXPLAIN SELECT ...
+        // Extract the query after EXPLAIN and any options
+        let sql_stripped = sql.trim();
+
+        // Find the actual query (SELECT, INSERT, UPDATE, DELETE)
+        let query = if let Some(pos) = sql_stripped.find("SELECT") {
+            &sql_stripped[pos..]
+        } else if let Some(pos) = sql_stripped.find("UPDATE") {
+            &sql_stripped[pos..]
+        } else if let Some(pos) = sql_stripped.find("INSERT") {
+            &sql_stripped[pos..]
+        } else if let Some(pos) = sql_stripped.find("DELETE") {
+            &sql_stripped[pos..]
+        } else {
+            return Err(anyhow::anyhow!("EXPLAIN requires SELECT, INSERT, UPDATE, or DELETE query"));
+        };
+
+        // Strip PostgreSQL EXPLAIN options like (costs off)
+        // and construct SQLite-compatible EXPLAIN
+        let explain_sql = format!("EXPLAIN {}", query);
+
+        // Execute the EXPLAIN query directly on SQLite
+        let conn = self.conn().lock().unwrap();
+
+        let mut stmt = conn.prepare(&explain_sql)?;
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(
+            column_names
+                .iter()
+                .map(|name| FieldInfo::new(name.clone(), None, None, Type::TEXT, FieldFormat::Text))
+                .collect(),
+        );
+
+        let mut data_rows = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let mut encoder = DataRowEncoder::new(fields.clone());
+            for i in 0..column_names.len() {
+                let value: Option<String> = row.get(i)?;
+                encoder.encode_field(&value)?;
+            }
+            data_rows.push(Ok(encoder.take_row()));
+        }
+
+        let row_stream = stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(fields, row_stream))])
+    }
 }

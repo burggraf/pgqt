@@ -24,7 +24,9 @@ def pgqt_proxy():
     subprocess.run(["cargo", "build", "--release"], check=True)
 
     cmd = [PGQT_BINARY, "--port", str(PROXY_PORT), "--database", DB_PATH]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Use DEVNULL to avoid buffer filling issues that cause hangs
+    with open(os.path.join(PROJECT_ROOT, "postgres-compatibility-suite", "test_db.db.error.log"), "w") as err_log:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err_log)
     
     # Wait for proxy to start
     time.sleep(2)
