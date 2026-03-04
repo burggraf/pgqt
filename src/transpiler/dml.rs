@@ -10,6 +10,33 @@ use pg_query::protobuf::{
 use super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 
+/// Check if the current context has column aliases (for VALUES statements)
+fn has_column_aliases(_ctx: &TranspileContext) -> bool {
+    // For now, return false - we'll need to track this in the context
+    // when we encounter RangeSubselect with coldeflist
+    false
+}
+
+/// Reconstruct VALUES statement as UNION ALL SELECT to support column aliases
+fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
+    let mut union_parts = Vec::new();
+
+    for values_list in &stmt.values_lists {
+        if let Some(ref inner) = values_list.node {
+            if let NodeEnum::List(list) = inner {
+                let values: Vec<String> = list
+                    .items
+                    .iter()
+                    .map(|n| reconstruct_node(n, ctx))
+                    .collect();
+                union_parts.push(format!("SELECT {}", values.join(", ")));
+            }
+        }
+    }
+
+    union_parts.join(" UNION ALL SELECT ")
+}
+
 pub(crate) fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     // Extract DISTINCT ON expressions
     let partition_exprs = crate::distinct_on::extract_distinct_on_exprs(stmt);
@@ -313,6 +340,12 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
 
 /// Reconstruct a VALUES statement (used in INSERT)
 pub(crate) fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
+    // Check if this VALUES has column aliases (via coldeflist in RangeSubselect)
+    // If so, we need to convert to UNION ALL SELECT because SQLite doesn't support column aliases on VALUES
+    if has_column_aliases(ctx) {
+        return reconstruct_values_as_union_all(stmt, ctx);
+    }
+
     let mut values_parts = Vec::new();
 
     for values_list in &stmt.values_lists {
