@@ -226,16 +226,14 @@ fn parse_pg_elements(input: &str) -> Result<Vec<Option<String>>, String> {
 
         match c {
             '\\' => {
-                current.push(c);
                 escape_next = true;
             }
             '"' => {
                 in_quotes = !in_quotes;
-                // Don't include quotes in the output
             }
             ',' if !in_quotes => {
                 let elem = current.trim();
-                elements.push(if elem == "NULL" || elem.is_empty() {
+                elements.push(if (elem == "NULL" && !in_quotes) || (elem.is_empty() && !in_quotes) {
                     None
                 } else {
                     Some(elem.to_string())
@@ -250,7 +248,7 @@ fn parse_pg_elements(input: &str) -> Result<Vec<Option<String>>, String> {
 
     let elem = current.trim();
     if !elem.is_empty() || !elements.is_empty() {
-        elements.push(if elem == "NULL" || elem.is_empty() {
+        elements.push(if elem == "NULL" || (elem.is_empty() && !in_quotes) {
             None
         } else {
             Some(elem.to_string())

@@ -64,7 +64,7 @@ impl SqliteHandler {
     }
 
     /// Register built-in PostgreSQL-compatible functions with SQLite
-    // Test comment
+    pub fn register_builtin_functions(conn: &Connection) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
         
         // pg_get_userbyid - returns username for OID
@@ -151,42 +151,33 @@ impl SqliteHandler {
 
         // array_to_string - converts array to string with delimiter
         conn.create_scalar_function("array_to_string", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let arr: Option<String> = ctx.get(0)?;
+            let arr: String = ctx.get(0)?;
             let sep: String = ctx.get(1)?;
-            match arr {
-                Some(s) => {
-                    let cleaned = s.replace('{', "").replace('}', "").trim().to_string();
-                    Ok(Some(cleaned.replace(',', &sep)))
-                }
-                None => Ok(None),
-            }
+            crate::array::array_to_string_fn(&arr, &sep, None)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("array_to_string", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let sep: String = ctx.get(1)?;
+            let null_str: String = ctx.get(2)?;
+            crate::array::array_to_string_fn(&arr, &sep, Some(&null_str))
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
         // array_length - returns array length
         conn.create_scalar_function("array_length", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let arr: Option<String> = ctx.get(0)?;
-            let _dim: i64 = ctx.get(1)?;
-            match arr {
-                Some(s) => {
-                    let cleaned = s.trim_matches(|c| c == '{' || c == '}');
-                    let elements: Vec<&str> = cleaned.split(',').filter(|s| !s.is_empty()).collect();
-                    Ok(Some(elements.len() as i64))
-                }
-                None => Ok(None),
-            }
+            let arr: String = ctx.get(0)?;
+            let dim: i32 = ctx.get(1)?;
+            crate::array::array_length_fn(&arr, dim)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
         // cardinality - returns total number of elements
         conn.create_scalar_function("cardinality", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let arr: Option<String> = ctx.get(0)?;
-            match arr {
-                Some(s) => {
-                    let cleaned = s.trim_matches(|c| c == '{' || c == '}');
-                    let elements: Vec<&str> = cleaned.split(',').filter(|s| !s.is_empty()).collect();
-                    Ok(Some(elements.len() as i64))
-                }
-                None => Ok(None),
-            }
+            let arr: String = ctx.get(0)?;
+            crate::array::array_cardinality(&arr)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
         // to_tsvector - creates full-text search vector

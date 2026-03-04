@@ -268,9 +268,9 @@ pub fn array_to_string_fn(arr: &str, delimiter: &str, null_string: Option<&str>)
 
     let parts: Vec<String> = flat
         .iter()
-        .map(|e| match e {
-            Some(s) => s.clone(),
-            None => null_string.unwrap_or("").to_string(),
+        .filter_map(|e| match e {
+            Some(s) => Some(s.clone()),
+            None => null_string.map(|s| s.to_string()),
         })
         .collect();
 
@@ -298,7 +298,13 @@ pub fn string_to_array_fn(text: &str, delimiter: &str, null_string: Option<&str>
             if s == null_val {
                 None
             } else {
-                Some(s.to_string())
+                // If the element is quoted, strip quotes
+                let s = s.trim();
+                if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+                    Some(s[1..s.len() - 1].to_string())
+                } else {
+                    Some(s.to_string())
+                }
             }
         })
         .collect();

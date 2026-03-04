@@ -1,6 +1,5 @@
 //! Array comparison functions: array_eq, array_ne, array_lt, array_gt, etc.
 
-use crate::array::types::ArrayValue;
 use crate::array::utils::parse_array;
 
 /// Compare two arrays for equality
