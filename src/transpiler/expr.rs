@@ -5,8 +5,8 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    Node, AConst, AExpr, BoolExpr, ColumnRef, JoinExpr, NullTest, CaseExpr, CoalesceExpr, ResTarget, RangeVar, 
-    RangeSubselect, SubLink, TypeCast, SqlValueFunction, ArrayExpr, AArrayExpr, RangeFunction
+    Node, AConst, AExpr, BoolExpr, ColumnRef, JoinExpr, NullTest, CaseExpr, CoalesceExpr, ResTarget, RangeVar,
+    RangeSubselect, SubLink, TypeCast, SqlValueFunction, ArrayExpr, AArrayExpr, RangeFunction, SetToDefault
 };
 use super::context::TranspileContext;
 use crate::transpiler::func::reconstruct_func_call;
@@ -82,6 +82,7 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::ArrayExpr(ref array_expr) => reconstruct_array_expr(array_expr, ctx),
             NodeEnum::AArrayExpr(ref a_array_expr) => reconstruct_a_array_expr(a_array_expr, ctx),
             NodeEnum::RangeFunction(ref range_func) => reconstruct_range_function(range_func, ctx),
+            NodeEnum::SetToDefault(_) => "DEFAULT".to_string(),
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }
     } else {

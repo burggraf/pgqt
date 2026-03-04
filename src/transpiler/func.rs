@@ -343,6 +343,9 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
         "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
 
+        // pg_sleep - stub that returns 0
+        "pg_sleep" => "0",
+
         // Full-Text Search functions
         "to_tsvector" => "to_tsvector",
         "to_tsquery" => "to_tsquery",
@@ -391,6 +394,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         || sqlite_func == "date('now')"
         || sqlite_func == "time('now')"
         || sqlite_func == "random()"
+        || sqlite_func == "0"  // pg_sleep stub
         || sqlite_func.starts_with("lower(hex(randomblob(4)))") {
         return sqlite_func.to_string();
     }
@@ -404,9 +408,21 @@ pub(crate) fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut Tran
     if let Some(ref over) = func_call.over {
         let window_sql = reconstruct_window_def(over, ctx);
         // Always add OVER clause if the function has one, even if empty
-        return format!("{} over ({})", base, window_sql);
+        // Also add an alias using just the function name for PostgreSQL compatibility
+        let func_name = func_call.funcname.last()
+            .and_then(|n| n.node.as_ref())
+            .and_then(|node| {
+                if let NodeEnum::String(s) = node {
+                    Some(s.sval.to_lowercase())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "window_func".to_string());
+        format!("{} over ({}) as \"{}\"", base, window_sql, func_name)
+    } else {
+        base.to_string()
     }
-    base.to_string()
 }
 
 /// Reconstruct a CREATE ROLE statement as an INSERT into __pg_authid__
