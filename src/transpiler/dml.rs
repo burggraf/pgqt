@@ -547,13 +547,18 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
 
     parts.push("update".to_string());
 
-    // Table name
+    // Table name and alias
+    let mut table_alias: Option<String> = None;
     let table_name = stmt
         .relation
         .as_ref()
         .map(|r| {
             let name = r.relname.to_lowercase();
             ctx.referenced_tables.push(name.clone());
+            // Check for alias
+            if let Some(ref alias) = r.alias {
+                table_alias = Some(alias.aliasname.to_lowercase());
+            }
             if r.schemaname.is_empty() || r.schemaname == "public" {
                 name
             } else {
@@ -563,7 +568,7 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
         .unwrap_or_default();
     parts.push(table_name);
 
-    // SET clause
+    // SET clause - strip table alias from column references in values
     parts.push("set".to_string());
     let targets: Vec<String> = stmt
         .target_list
@@ -572,11 +577,15 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
             if let Some(ref inner) = n.node {
                 if let NodeEnum::ResTarget(target) = inner {
                     let col_name = target.name.to_lowercase();
-                    let val = target
+                    let mut val = target
                         .val
                         .as_ref()
                         .map(|v| reconstruct_node(v, ctx))
                         .unwrap_or_default();
+                    // Remove table alias prefixes from column references in values
+                    if let Some(ref alias) = table_alias {
+                        val = remove_table_alias_from_columns(&val, alias);
+                    }
                     return Some(format!("{} = {}", col_name, val));
                 }
             }
@@ -585,10 +594,14 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
         .collect();
     parts.push(targets.join(", "));
 
-    // WHERE clause
+    // WHERE clause - strip table alias from column references
     if let Some(ref where_clause) = stmt.where_clause {
-        let where_sql = reconstruct_node(where_clause, ctx);
+        let mut where_sql = reconstruct_node(where_clause, ctx);
         if !where_sql.is_empty() {
+            // Remove table alias prefixes from column references
+            if let Some(ref alias) = table_alias {
+                where_sql = remove_table_alias_from_columns(&where_sql, alias);
+            }
             parts.push("where".to_string());
             parts.push(where_sql);
         }
@@ -603,13 +616,18 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
 
     parts.push("delete from".to_string());
 
-    // Table name
+    // Table name and alias
+    let mut table_alias: Option<String> = None;
     let table_name = stmt
         .relation
         .as_ref()
         .map(|r| {
             let name = r.relname.to_lowercase();
             ctx.referenced_tables.push(name.clone());
+            // Check for alias
+            if let Some(ref alias) = r.alias {
+                table_alias = Some(alias.aliasname.to_lowercase());
+            }
             if r.schemaname.is_empty() || r.schemaname == "public" {
                 name
             } else {
@@ -619,14 +637,28 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
         .unwrap_or_default();
     parts.push(table_name);
 
-    // WHERE clause
+    // WHERE clause - strip table alias from column references
     if let Some(ref where_clause) = stmt.where_clause {
-        let where_sql = reconstruct_node(where_clause, ctx);
+        let mut where_sql = reconstruct_node(where_clause, ctx);
         if !where_sql.is_empty() {
+            // Remove table alias prefixes from column references
+            if let Some(ref alias) = table_alias {
+                where_sql = remove_table_alias_from_columns(&where_sql, alias);
+            }
             parts.push("where".to_string());
             parts.push(where_sql);
         }
     }
 
     parts.join(" ")
+}
+
+/// Remove table alias prefixes from column references in SQL
+/// e.g., "dt.a > 75" becomes "a > 75" when alias is "dt"
+fn remove_table_alias_from_columns(sql: &str, alias: &str) -> String {
+    // Pattern to match alias.column at word boundaries
+    let pattern = format!(r"\b{}\.", regex::escape(alias));
+    regex::Regex::new(&pattern)
+        .map(|re| re.replace_all(sql, "").to_string())
+        .unwrap_or_else(|_| sql.to_string())
 }
