@@ -294,10 +294,54 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
             }
             return format!("json_extract({})", args_str);
         }
+        "repeat" => {
+            // repeat(string, n) - repeat string n times
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                // Use a recursive CTE approach or simple replacement
+                // For simplicity, use printf with pattern replacement
+                return format!(
+                    "(WITH RECURSIVE _repeat(n, s) AS (SELECT 1, {} UNION ALL SELECT n+1, s || {} FROM _repeat WHERE n < {}) SELECT s FROM _repeat ORDER BY n DESC LIMIT 1)",
+                    args[0], args[0], args[1]
+                );
+            }
+            return format!("repeat({})", args_str);
+        }
+        "generate_series" => {
+            // generate_series(start, stop) or generate_series(start, stop, step)
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let start = &args[0];
+                let stop = &args[1];
+                let step = if args.len() >= 3 { args[2].clone() } else { "1".to_string() };
+                // Return a subquery that generates the series using recursive CTE
+                return format!(
+                    "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM _series)",
+                    start, step, step, step, stop, step, step, stop
+                );
+            }
+            return format!("generate_series({})", args_str);
+        }
+        "pg_input_is_valid" => {
+            // pg_input_is_valid(text, type) - stub that always returns true (1)
+            // In a full implementation, this would validate the input against the type
+            return "1 as \"pg_input_is_valid\"".to_string();
+        }
         _ => {}
     }
 
     // Map PostgreSQL functions to SQLite equivalents
+    // Track if the function name changes (for column alias preservation)
+    let mut original_func_name: Option<&str> = None;
+    
     let sqlite_func = match func_name {
         "now" => "datetime('now')",
         "current_timestamp" => "datetime('now')",
@@ -344,7 +388,10 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
 
         // pg_sleep - stub that returns 0
-        "pg_sleep" => "0",
+        "pg_sleep" => {
+            original_func_name = Some("pg_sleep");
+            "0"
+        },
 
         // Full-Text Search functions
         "to_tsvector" => "to_tsvector",
@@ -374,6 +421,22 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         "tstzrange" => "tstzrange",
         "daterange" => "daterange",
 
+        // Aggregate functions - any_value returns any value from the group (use min as equivalent)
+        "any_value" => {
+            original_func_name = Some("any_value");
+            "min"
+        },
+
+        // String functions
+        "repeat" => "repeat",
+
+        // Set-returning functions - generate_series
+        "generate_series" => "generate_series",
+
+        // Regular expression functions - SQLite has built-in regexp support
+        "regexp" => "regexp",
+        "regexpi" => "regexpi",
+
         _ => {
             // For unknown functions, return the full name if schema-qualified
             // but strip 'pg_catalog' if present as SQLite doesn't have it
@@ -394,9 +457,20 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         || sqlite_func == "date('now')"
         || sqlite_func == "time('now')"
         || sqlite_func == "random()"
-        || sqlite_func == "0"  // pg_sleep stub
         || sqlite_func.starts_with("lower(hex(randomblob(4)))") {
         return sqlite_func.to_string();
+    }
+
+    // For functions that were renamed, we don't add the alias here anymore
+    // because reconstruct_res_target now adds aliases for all function calls
+    if let Some(orig_name) = original_func_name {
+        if sqlite_func == "0" || sqlite_func == "1" {
+            // For constant replacements, just return the value
+            // The alias will be added by reconstruct_res_target
+            return sqlite_func.to_string();
+        }
+        // For other renamed functions, continue with normal processing
+        // The alias will be added by reconstruct_res_target
     }
 
     let base = format!("{}({})", sqlite_func, args_str);
@@ -415,8 +489,6 @@ pub(crate) fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut Tran
             return format!("{} over {}", base, window_sql);
         }
 
-        // For inline window definitions, don't add an alias here
-        // The alias is handled at the ResTarget level (SELECT column alias)
         format!("{} over ({})", base, window_sql)
     } else {
         base.to_string()

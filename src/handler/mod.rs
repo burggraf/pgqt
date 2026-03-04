@@ -475,6 +475,24 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
+        // regexp - pattern matching function (used by ~ operator)
+        conn.create_scalar_function("regexp", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
+        })?;
+
+        // regexpi - case-insensitive pattern matching (used by ~* operator)
+        conn.create_scalar_function("regexpi", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let text: String = ctx.get(1)?;
+            let regex = regex::Regex::new(&format!("(?i){}", pattern))
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
+        })?;
+
         Ok(())
     }
 }

@@ -223,7 +223,8 @@ pub(crate) fn reconstruct_case_expr(case_expr: &CaseExpr, ctx: &mut TranspileCon
     }
 
     parts.push("end".to_string());
-    parts.join(" ")
+    // Add 'case' as alias to preserve column name
+    format!("{} as \"case\"", parts.join(" "))
 }
 
 /// Reconstruct a TypeCast node
@@ -666,12 +667,40 @@ pub(crate) fn reconstruct_res_target(target: &ResTarget, ctx: &mut TranspileCont
     if let Some(ref val) = target.val {
         let val_sql = reconstruct_node(val, ctx);
         if name.is_empty() {
+            // Check if the value is a TypeCast - if so, use the original type name as alias
+            // This preserves column names like 'json', 'jsonb', 'bytea' for casts
+            if let Some(ref inner) = val.node {
+                if let NodeEnum::TypeCast(type_cast) = inner {
+                    let original_type = extract_original_type(&type_cast.type_name);
+                    // For specific PostgreSQL types, preserve the type name as column alias
+                    if matches!(original_type.to_uppercase().as_str(), 
+                        "JSON" | "JSONB" | "BYTEA" | "TEXT" | "VARCHAR" | "CHAR" | 
+                        "INT" | "INTEGER" | "BIGINT" | "SMALLINT" | "REAL" | "DOUBLE PRECISION" |
+                        "BOOLEAN" | "BOOL" | "DATE" | "TIMESTAMP" | "TIMESTAMPTZ" | "INTERVAL") {
+                        return format!("{} as \"{}\"", val_sql, original_type.to_lowercase());
+                    }
+                }
+                // Check if the value is a function call (FuncCall)
+                // If so, add the function name as alias to preserve the column name
+                // This handles both regular aggregates and window functions
+                if let NodeEnum::FuncCall(func_call) = inner {
+                    // Extract function name
+                    if let Some(first_part) = func_call.funcname.first() {
+                        if let Some(NodeEnum::String(s)) = first_part.node.as_ref() {
+                            let func_name = s.sval.to_lowercase();
+                            return format!("{} as \"{}\"", val_sql, func_name);
+                        }
+                    }
+                }
+            }
             val_sql
         } else {
-            format!("{} as \"{}\"", val_sql, name.to_lowercase())
+            // Preserve case for aliases - PostgreSQL only folds unquoted identifiers to lowercase
+            // The parser already handles this, so we preserve the name as-is
+            format!("{} as \"{}\"", val_sql, name)
         }
     } else if !name.is_empty() {
-        format!("\"{}\"", name.to_lowercase())
+        format!("\"{}\"", name)
     } else {
         String::new()
     }
