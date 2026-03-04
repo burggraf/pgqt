@@ -52,19 +52,51 @@ pub mod functions;
 pub mod comparison;
 
 // Re-export core types
+pub use types::ArrayValue;
 
 // Re-export parsing utilities
+pub use utils::parse_array;
 
 // Re-export operators
+pub use operators::{
+    array_overlap,
+    array_contains,
+    array_contained,
+};
 
 // Re-export functions
 pub use functions::{
+    array_append,
+    array_prepend,
+    array_cat,
+    array_concat,
+    array_remove,
+    array_replace,
     array_length_fn,
+    array_lower_fn,
+    array_upper_fn,
+    array_ndims_fn,
+    array_dims_fn,
     array_cardinality,
+    array_position_fn,
+    array_positions_fn,
     array_to_string_fn,
+    string_to_array_fn,
+    array_fill_fn,
+    trim_array_fn,
 };
 
 // Re-export comparison functions
+pub use comparison::{
+    array_eq,
+    array_ne,
+    array_lt,
+    array_gt,
+    array_le,
+    array_ge,
+    array_any_eq,
+    array_all_eq,
+};
 
 #[cfg(test)]
 mod tests {
