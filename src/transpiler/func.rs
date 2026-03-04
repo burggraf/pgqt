@@ -415,19 +415,9 @@ pub(crate) fn add_window_clause(base: &str, func_call: &FuncCall, ctx: &mut Tran
             return format!("{} over {}", base, window_sql);
         }
 
-        // For inline window definitions, add an alias using just the function name
-        // for PostgreSQL compatibility (e.g., 'sum' instead of 'sum(salary) over (...)')
-        let func_name = func_call.funcname.last()
-            .and_then(|n| n.node.as_ref())
-            .and_then(|node| {
-                if let NodeEnum::String(s) = node {
-                    Some(s.sval.to_lowercase())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "window_func".to_string());
-        format!("{} over ({}) as \"{}\"", base, window_sql, func_name)
+        // For inline window definitions, don't add an alias here
+        // The alias is handled at the ResTarget level (SELECT column alias)
+        format!("{} over ({})", base, window_sql)
     } else {
         base.to_string()
     }
