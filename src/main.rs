@@ -45,6 +45,7 @@ mod range;
 mod geo;
 mod plpgsql;
 mod functions;
+mod stats;
 mod handler;
 
 use schema::SearchPath;

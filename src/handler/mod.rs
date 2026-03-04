@@ -66,7 +66,7 @@ impl SqliteHandler {
     /// Register built-in PostgreSQL-compatible functions with SQLite
     pub fn register_builtin_functions(conn: &Connection) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
-        
+
         // pg_get_userbyid - returns username for OID
         conn.create_scalar_function("pg_get_userbyid", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let _oid: i64 = ctx.get(0)?;
@@ -484,7 +484,7 @@ impl SqliteHandler {
             Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
         })?;
 
-        // regexpi - case-insensitive pattern matching (used by ~* operator)
+        // regexpi - case-insensitive pattern matching (used by ~* operator)        
         conn.create_scalar_function("regexpi", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let pattern: String = ctx.get(0)?;
             let text: String = ctx.get(1)?;
@@ -492,6 +492,9 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
             Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
         })?;
+
+        // Register statistical aggregate functions
+        crate::stats::register_statistical_functions(conn)?;
 
         Ok(())
     }
