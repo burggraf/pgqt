@@ -12,7 +12,7 @@ use std::fmt::Write;
 
 /// Transpile PL/pgSQL AST to Lua source code
 pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
-    let mut ctx = TranspileContext::new();
+    let mut ctx = TranspileContext::new(&function.datums);
     
     // Check if this is a SETOF function (uses RETURN NEXT)
     let is_setof = has_return_next(&function.action.block.body);
@@ -27,7 +27,7 @@ pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
     emit_parameters(&mut ctx, function)?;
     
     // Emit variable declarations (from DECLARE block)
-    ctx.emit_line("-- Variable declarations");
+    emit_variable_declarations(&mut ctx, function)?;
     
     // Initialize result set for SETOF functions
     if is_setof {
@@ -50,6 +50,44 @@ pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
     ctx.emit_line(&format!("return {}", func_name));
     
     Ok(ctx.output)
+}
+
+/// Emit variable declarations from DECLARE block
+fn emit_variable_declarations(ctx: &mut TranspileContext, function: &PlpgsqlFunction) -> Result<()> {
+    // Find where parameters end (usually before 'found' variable)
+    let param_count = function.datums.iter()
+        .position(|d| d.var_name.as_deref() == Some("found"))
+        .unwrap_or(function.datums.len());
+    
+    // Emit declarations for variables after parameters (excluding 'found')
+    let mut has_vars = false;
+    for (i, datum) in function.datums.iter().enumerate() {
+        // Skip parameters and 'found'
+        if i < param_count {
+            continue;
+        }
+        if datum.var_name.as_deref() == Some("found") {
+            continue;
+        }
+        
+        if let Some(var_name) = &datum.var_name {
+            if !has_vars {
+                ctx.emit_line("-- Local variables");
+                has_vars = true;
+            }
+            
+            // Initialize with default value if present
+            if let Some(default) = &datum.default_val {
+                let init_val = plpgsql_expr_to_lua(&default.query);
+                ctx.emit_line(&format!("local {} = {}", var_name, init_val));
+            } else {
+                // Initialize to nil
+                ctx.emit_line(&format!("local {} = nil", var_name));
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 /// Check if function body contains RETURN NEXT
@@ -118,18 +156,33 @@ fn has_return_next(stmts: &[PlPgSQLStmt]) -> bool {
 }
 
 /// Context for transpilation
-struct TranspileContext {
+struct TranspileContext<'a> {
     output: String,
     indent_level: usize,
     loop_depth: usize,
+    /// Reference to function's datums for variable name lookup
+    datums: &'a [PlPgSQLDatum],
 }
 
-impl TranspileContext {
-    fn new() -> Self {
+impl<'a> TranspileContext<'a> {
+    fn new(datums: &'a [PlPgSQLDatum]) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
             loop_depth: 0,
+            datums,
+        }
+    }
+    
+    /// Look up variable name by datum index
+    fn get_var_name(&self, index: i64) -> String {
+        if index >= 0 && (index as usize) < self.datums.len() {
+            self.datums[index as usize]
+                .var_name
+                .clone()
+                .unwrap_or_else(|| format!("var_{}", index))
+        } else {
+            format!("var_{}", index)
         }
     }
     
@@ -156,10 +209,20 @@ impl TranspileContext {
 
 /// Emit parameter handling
 fn emit_parameters(ctx: &mut TranspileContext, function: &PlpgsqlFunction) -> Result<()> {
-    if let Some(argnames) = &function.fn_argnames {
+    // Parameters are stored in datums - emit them from the first N datums that are parameters
+    // We can identify parameters by checking if they appear before 'found' (which is auto-added)
+    
+    // Find where parameters end (usually before 'found' variable)
+    let param_count = function.datums.iter()
+        .position(|d| d.var_name.as_deref() == Some("found"))
+        .unwrap_or(function.datums.len());
+    
+    if param_count > 0 {
         ctx.emit_line("-- Parameters");
-        for (i, name) in argnames.iter().enumerate() {
-            ctx.emit_line(&format!("local {} = select({}, ...)", name, i + 1));
+        for (i, datum) in function.datums.iter().take(param_count).enumerate() {
+            if let Some(name) = &datum.var_name {
+                ctx.emit_line(&format!("local {} = select({}, ...)", name, i + 1));
+            }
         }
     }
     Ok(())
@@ -196,7 +259,7 @@ fn emit_statement(ctx: &mut TranspileContext, stmt: &PlPgSQLStmt, is_setof: bool
 fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock, is_setof: bool) -> Result<()> {
     if let Some(exceptions) = &block.exceptions {
         // Block with exception handler - use pcall
-        ctx.emit_line("local _ok, _err = pcall(function()");
+        ctx.emit_line("local _ok, _result_or_err = pcall(function()");
         ctx.indent();
         for stmt in &block.body {
             emit_statement(ctx, stmt, is_setof)?;
@@ -205,37 +268,47 @@ fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock, is_setof: bo
         ctx.emit_line("end)");
         ctx.emit_line("if not _ok then");
         ctx.indent();
+        ctx.emit_line("local _err = _result_or_err");
         ctx.emit_line("local _sqlstate = _err and _err.sqlstate or 'P0001'");
         ctx.emit_line("local _sqlerrm = _err and _err.message or tostring(_err)");
         ctx.emit_line("_ctx.SQLSTATE = _sqlstate");
         ctx.emit_line("_ctx.SQLERRM = _sqlerrm");
         
         // Emit WHEN clauses
-        for (i, exc) in exceptions.iter().enumerate() {
-            let sqlstate = &exc.sqlstate;
+        let exc_list = &exceptions.exc_list;
+        for (i, exc) in exc_list.iter().enumerate() {
+            let cond_name = exc.conditions.first()
+                .map(|c| c.condname.as_str())
+                .unwrap_or("OTHERS");
+            let sqlstate = map_condition_to_sqlstate(cond_name);
+            
             if i == 0 {
                 ctx.emit_line(&format!("if _sqlstate == '{}' then", sqlstate));
             } else {
                 ctx.emit_line(&format!("elseif _sqlstate == '{}' then", sqlstate));
             }
             ctx.indent();
-            for stmt in &exc.stmts {
+            for stmt in &exc.action {
                 emit_statement(ctx, stmt, is_setof)?;
             }
             ctx.dedent();
         }
         
         // Add OTHERS catch-all if not present
-        if !exceptions.iter().any(|e| e.sqlstate == "OTHERS") {
+        if !exc_list.iter().any(|e| e.conditions.first().map(|c| c.condname == "OTHERS").unwrap_or(false)) {
             ctx.emit_line("else");
             ctx.indent();
             ctx.emit_line("error(_err)");
             ctx.dedent();
         }
         
-        ctx.emit_line("end");
+        ctx.emit_line("end");  // Closes the if/elseif/else chain
         ctx.dedent();
-        ctx.emit_line("end");
+        ctx.emit_line("else");
+        ctx.indent();
+        ctx.emit_line("return _result_or_err");  // Return the successful result
+        ctx.dedent();
+        ctx.emit_line("end");  // Closes the "if not _ok then"
     } else {
         // Regular block - just emit statements
         for stmt in &block.body {
@@ -245,10 +318,43 @@ fn emit_block(ctx: &mut TranspileContext, block: &PlPgSQLStmtBlock, is_setof: bo
     Ok(())
 }
 
+/// Map PostgreSQL condition names to SQLSTATE codes
+fn map_condition_to_sqlstate(condname: &str) -> String {
+    match condname {
+        "division_by_zero" => "22012",
+        "unique_violation" => "23505",
+        "foreign_key_violation" => "23503",
+        "check_violation" => "23514",
+        "not_null_violation" => "23502",
+        "no_data_found" => "P0002",
+        "too_many_rows" => "P0003",
+        "raise_exception" => "P0001",
+        "OTHERS" => "OTHERS",
+        // Default to the condition name itself for custom errors
+        other => other,
+    }.to_string()
+}
+
 /// Emit variable assignment
 fn emit_assign(ctx: &mut TranspileContext, assign: &PlPgSQLStmtAssign) -> Result<()> {
-    let expr_lua = transpile_expr(&assign.expr)?;
-    ctx.emit_line(&format!("{} = {}", assign.varname, expr_lua));
+    // Get the variable name from datum index
+    let varname = ctx.get_var_name(assign.varno);
+    
+    // The expression query may include the assignment itself (e.g., "i := i + 1")
+    // We need to extract just the right-hand side
+    let expr_query = &assign.expr.query;
+    
+    // Check if the query contains := (assignment operator)
+    let rhs = if let Some(pos) = expr_query.find(":=") {
+        // Extract the right-hand side after :=
+        expr_query[pos + 2..].trim()
+    } else {
+        expr_query.trim()
+    };
+    
+    // Transpile the right-hand side expression
+    let expr_lua = plpgsql_expr_to_lua(rhs);
+    ctx.emit_line(&format!("{} = {}", varname, expr_lua));
     Ok(())
 }
 
@@ -328,6 +434,9 @@ fn emit_for_i(ctx: &mut TranspileContext, for_i: &PlPgSQLStmtForI, is_setof: boo
         ctx.emit_line(&format!("for {} = {}, {} do", var, lower, upper));
     }
     
+    // Set loop variable for implicit RETURN NEXT
+    ctx.emit_line(&format!("_loop_var = {}", var));
+    
     ctx.indent();
     for stmt in &for_i.body {
         emit_statement(ctx, stmt, is_setof)?;
@@ -382,10 +491,18 @@ fn emit_return(ctx: &mut TranspileContext, ret: &PlPgSQLStmtReturn, is_setof: bo
 
 /// Emit RETURN NEXT statement
 fn emit_return_next(ctx: &mut TranspileContext, ret_next: &PlPgSQLStmtReturnNext) -> Result<()> {
-    let expr_lua = transpile_expr(&ret_next.expr)?;
-    // Accumulate result in a table
-    ctx.emit_line("if _result_set == nil then _result_set = {} end");
-    ctx.emit_line(&format!("table.insert(_result_set, {})", expr_lua));
+    // expr may be None when inside a FOR loop - loop variable is implicit
+    if let Some(expr) = &ret_next.expr {
+        let expr_lua = transpile_expr(expr)?;
+        // Accumulate result in a table
+        ctx.emit_line("if _result_set == nil then _result_set = {} end");
+        ctx.emit_line(&format!("table.insert(_result_set, {})", expr_lua));
+    } else {
+        // No explicit expression - use the loop variable (i in FOR i IN ...)
+        // This is handled by the FOR loop context
+        ctx.emit_line("if _result_set == nil then _result_set = {} end");
+        ctx.emit_line("table.insert(_result_set, _loop_var)");
+    }
     Ok(())
 }
 
@@ -407,7 +524,7 @@ fn emit_raise(ctx: &mut TranspileContext, raise: &PlPgSQLStmtRaise) -> Result<()
         
         if let Some(params) = &raise.params {
             let param_list: Vec<String> = params.iter()
-                .map(|p| transpile_expr(p).unwrap_or_else(|_| "nil".to_string()))
+                .map(|p| plpgsql_expr_to_lua(&p.query))
                 .collect();
             if param_list.is_empty() {
                 ctx.emit_line(&format!("_ctx.raise_exception(\"{}\", {{errcode = \"{}\"}})", message, errcode));
@@ -421,12 +538,13 @@ fn emit_raise(ctx: &mut TranspileContext, raise: &PlPgSQLStmtRaise) -> Result<()
         // DEBUG, INFO, NOTICE, WARNING
         if let Some(params) = &raise.params {
             let param_list: Vec<String> = params.iter()
-                .map(|p| transpile_expr(p).unwrap_or_else(|_| "nil".to_string()))
+                .map(|p| plpgsql_expr_to_lua(&p.query))
                 .collect();
             if param_list.is_empty() {
                 ctx.emit_line(&format!("_ctx.raise(\"{}\", \"{}\")", level, message));
             } else {
-                ctx.emit_line(&format!("_ctx.raise(\"{}\", \"{}\", {})", level, message, param_list.join(", ")));
+                // Pass params as a Lua table
+                ctx.emit_line(&format!("_ctx.raise(\"{}\", \"{}\", {{ {} }})", level, message, param_list.join(", ")));
             }
         } else {
             ctx.emit_line(&format!("_ctx.raise(\"{}\", \"{}\")", level, message));
@@ -469,25 +587,25 @@ fn emit_dyn_execute(ctx: &mut TranspileContext, dyn_exec: &PlPgSQLStmtDynExecute
 /// Emit GET DIAGNOSTICS
 fn emit_get_diag(ctx: &mut TranspileContext, diag: &PlPgSQLStmtGetDiag) -> Result<()> {
     // Map diagnostic items to context properties
-    // PostgreSQL diagnostic item kinds:
-    // 1 = ROW_COUNT, 2 = RESULT_OID, 3 = COMMAND_FUNCTION_CODE, 
-    // 4 = RETURNED_SQLSTATE, 5 = MESSAGE_TEXT, 6 = PG_EXCEPTION_CONTEXT, etc.
+    // PostgreSQL diagnostic item kinds are strings like "ROW_COUNT", "RESULT_OID", etc.
     for item in &diag.diag_items {
-        let value = match item.kind {
-            1 => "_ctx.ROW_COUNT",           // ROW_COUNT
-            2 => "_ctx.RESULT_OID or nil",   // RESULT_OID
-            3 => "_ctx.command_function",    // COMMAND_FUNCTION_CODE
-            4 => "_ctx.SQLSTATE or '00000'", // RETURNED_SQLSTATE
-            5 => "_ctx.SQLERRM or ''",       // MESSAGE_TEXT
-            6 => "_ctx.PG_CONTEXT or ''",    // PG_EXCEPTION_CONTEXT
-            7 => "_ctx.constraint_name",     // CONSTRAINT_NAME
-            8 => "_ctx.schema_name",         // SCHEMA_NAME
-            9 => "_ctx.table_name",          // TABLE_NAME
-            10 => "_ctx.column_name",        // COLUMN_NAME
-            11 => "_ctx.datatype_name",      // DATATYPE_NAME
+        let value = match item.kind.as_str() {
+            "ROW_COUNT" => "_ctx.ROW_COUNT",
+            "RESULT_OID" => "_ctx.RESULT_OID or nil",
+            "RETURNED_SQLSTATE" => "_ctx.SQLSTATE or '00000'",
+            "MESSAGE_TEXT" => "_ctx.SQLERRM or ''",
+            "PG_EXCEPTION_CONTEXT" => "_ctx.PG_CONTEXT or ''",
+            "PG_CONTEXT" => "_ctx.PG_CONTEXT or ''",
+            "CONSTRAINT_NAME" => "_ctx.constraint_name",
+            "SCHEMA_NAME" => "_ctx.schema_name",
+            "TABLE_NAME" => "_ctx.table_name",
+            "COLUMN_NAME" => "_ctx.column_name",
+            "DATATYPE_NAME" => "_ctx.datatype_name",
             _ => "nil",
         };
-        ctx.emit_line(&format!("{} = {}", item.target_name, value));
+        // target is the datum index for the variable
+        let var_name = ctx.get_var_name(item.target);
+        ctx.emit_line(&format!("{} = {}", var_name, value));
     }
     Ok(())
 }
@@ -571,12 +689,118 @@ fn emit_move(ctx: &mut TranspileContext, move_stmt: &PlPgSQLStmtMove) -> Result<
 }
 
 /// Transpile a PL/pgSQL expression to Lua
+/// 
+/// Distinguishes between:
+/// 1. Simple expressions (arithmetic, comparisons, string ops) - direct Lua
+/// 2. SQL queries (SELECT, INSERT, etc.) - execute via _ctx.scalar()
 fn transpile_expr(expr: &PlPgSQLExpr) -> Result<String> {
-    // SQL expressions are executed via _ctx.scalar
-    // For now, we pass the query directly
-    // In a more sophisticated implementation, we'd parse the SQL
-    // and convert variable references to parameters
-    Ok(format!("_ctx.scalar([[SELECT {}]], {{}})", expr.query))
+    let query = expr.query.trim();
+    
+    // Check if this looks like a SQL query
+    let is_sql_query = query.to_uppercase().starts_with("SELECT ")
+        || query.to_uppercase().starts_with("INSERT ")
+        || query.to_uppercase().starts_with("UPDATE ")
+        || query.to_uppercase().starts_with("DELETE ")
+        || query.to_uppercase().starts_with("WITH ")
+        || query.to_uppercase().starts_with("CREATE ")
+        || query.to_uppercase().starts_with("DROP ")
+        || query.to_uppercase().starts_with("ALTER ");
+    
+    if is_sql_query {
+        // SQL query - execute via runtime
+        Ok(format!("_ctx.scalar([[{}]], {{}})", query))
+    } else {
+        // Simple expression - convert to Lua
+        Ok(plpgsql_expr_to_lua(query))
+    }
+}
+
+/// Convert a PL/pgSQL expression to Lua
+fn plpgsql_expr_to_lua(expr: &str) -> String {
+    let mut result = expr.to_string();
+    
+    // Convert PostgreSQL string concatenation (||) to Lua (..)
+    // Be careful not to convert inside string literals
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let chars: Vec<char> = result.chars().collect();
+    let mut new_result = String::new();
+    let mut i = 0;
+    
+    while i < chars.len() {
+        let c = chars[i];
+        
+        // Track string literals
+        if (c == '\'' || c == '"') && (i == 0 || chars[i-1] != '\\') {
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == string_char {
+                in_string = false;
+            }
+            new_result.push(c);
+        } else if !in_string && c == '|' && i + 1 < chars.len() && chars[i + 1] == '|' {
+            // Convert || to ..
+            new_result.push_str("..");
+            i += 1; // Skip next |
+        } else {
+            new_result.push(c);
+        }
+        i += 1;
+    }
+    
+    result = new_result;
+    
+    // Wrap division operations with zero check
+    // Pattern: a / b -> (b ~= 0 and a / b or error("division_by_zero"))
+    // This is a simplified approach - we look for / not inside strings
+    result = wrap_division_with_zero_check(&result);
+    
+    // Convert := to = (assignment operator)
+    result = result.replace(":=", "=");
+    
+    result
+}
+
+/// Wrap division operations with zero check to match PostgreSQL semantics
+fn wrap_division_with_zero_check(expr: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    
+    while i < chars.len() {
+        let c = chars[i];
+        
+        // Track string literals
+        if (c == '\'' || c == '"') && (i == 0 || chars[i-1] != '\\') {
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == string_char {
+                in_string = false;
+            }
+            result.push(c);
+        } else if !in_string && c == '/' {
+            // Found a division operator - we need to find the divisor
+            // For simplicity, just wrap the whole expression in a helper call
+            // This is a compromise - proper solution would parse the full expression
+            result.push(c);
+        } else {
+            result.push(c);
+        }
+        i += 1;
+    }
+    
+    // Check if there's a division in the expression
+    if expr.contains('/') && !in_string {
+        // Wrap the entire expression with a division-by-zero check
+        // This is a simplified approach: use pcall to catch the "inf" result
+        format!("(function() local _r = {}; if _r == math.huge or _r == -math.huge then error({{sqlstate='22012', message='division by zero'}}) end return _r end)()", result)
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]

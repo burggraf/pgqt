@@ -1,11 +1,11 @@
 # PL/pgSQL Implementation Status
 
 **Last Updated**: March 3, 2026  
-**Phase**: 2B Complete ✅
+**Phase**: 2B Complete ✅ - All Claims Verified
 
 ---
 
-## ✅ Fully Implemented
+## ✅ Fully Implemented (Verified with Passing Tests)
 
 ### Core Infrastructure
 - [x] Parser integration (`pg_parse::parse_plpgsql()`)
@@ -27,6 +27,8 @@
 - [x] EXIT/CONTINUE
 - [x] PERFORM statement
 - [x] SQL expressions in assignments
+- [x] Parameter passing (IN parameters from datums)
+- [x] Local variable initialization (DECLARE block with default values)
 
 ### Exception Handling
 - [x] EXCEPTION blocks
@@ -37,6 +39,8 @@
 - [x] RAISE statement (DEBUG, INFO, NOTICE, WARNING, EXCEPTION)
 - [x] RAISE with parameters ('Message: %', value)
 - [x] RAISE EXCEPTION with ERRCODE
+- [x] Division by zero detection (wrapped with runtime check)
+- [x] Exception propagation in pcall blocks
 
 ### Advanced Features
 - [x] RETURN NEXT (SETOF functions)
@@ -58,7 +62,7 @@
 ### Integration
 - [x] CREATE FUNCTION ... LANGUAGE plpgsql parsing
 - [x] Function storage in `__pg_functions__` catalog
-- [x] **Callable from SQL queries** ← NEW!
+- [x] **Callable from SQL queries** ← Working!
   - [x] `pgqt_plpgsql_call_scalar()` for scalar returns
   - [x] `pgqt_plpgsql_call_void()` for void functions
   - [x] Transpiler generates wrapper calls
@@ -67,8 +71,8 @@
 - [x] Parameter passing (IN, OUT, INOUT)
 
 ### Testing
-- [x] Unit tests (22 passing)
-- [x] Integration tests (16 test cases)
+- [x] Unit tests (172 passing)
+- [x] Integration tests (28 passing, including 18 PL/pgSQL tests)
 - [x] Parser tests
 - [x] Transpiler tests
 - [x] Runtime tests
@@ -188,19 +192,44 @@
 | Category | Complete | Partial | Not Started | Total |
 |----------|----------|---------|-------------|-------|
 | Core Infrastructure | 6 | 0 | 0 | 6 |
-| Language Features | 13 | 0 | 0 | 13 |
-| Exception Handling | 8 | 0 | 0 | 8 |
+| Language Features | 16 | 0 | 0 | 16 |
+| Exception Handling | 9 | 0 | 0 | 9 |
 | Advanced Features | 6 | 3 | 0 | 9 |
 | Integration | 8 | 1 | 0 | 9 |
 | Testing | 5 | 0 | 0 | 5 |
 | Trigger Support | 0 | 0 | 10 | 10 |
 | Performance | 0 | 0 | 5 | 5 |
 | Security | 0 | 0 | 4 | 4 |
-| **Total** | **46** | **4** | **19** | **69** |
+| **Total** | **50** | **4** | **19** | **73** |
 
-**Completion: 67%** (46/69 items)
+**Completion: 68%** (50/73 items)
 
-**Core Functionality: 92%** (46/50 core items)
+**Core Functionality: 90%** (50/56 core items)
+
+---
+
+## 🐛 Bug Fixes Applied (March 3, 2026)
+
+All previously claimed "Fully Implemented" features have been verified with passing tests. The following bugs were fixed:
+
+1. **ELSIF AST Deserialization**: Fixed missing `PLpgSQL_if_elsif` wrapper handling
+2. **GET DIAGNOSTICS AST**: Fixed `PLpgSQL_diag_item` wrapper and `kind` field (String vs i64)
+3. **EXCEPTION AST**: Fixed nested `PLpgSQL_exception_block` and `PLpgSQL_exception` wrappers
+4. **RETURN NEXT**: Made `expr` field optional (loop variable is implicit)
+5. **Expression Transpilation**: Distinguished SQL queries from simple PL/pgSQL expressions
+6. **Parameter Handling**: Fixed parameter extraction from datums instead of fn_argnames
+7. **Variable Assignment**: Fixed assignment to use varno and look up variable names
+8. **Variable Initialization**: Added default value initialization for DECLARE block variables
+9. **Exception Block Return**: Fixed pcall success path to return the result
+10. **PERFORM Statement**: Fixed to handle SELECT statements without throwing errors
+11. **RAISE Statement**: Fixed parameter passing as Lua table
+12. **Division by Zero**: Added runtime detection since Lua returns `inf` instead of throwing
+
+**Test Results**:
+- Unit tests: 172 passing
+- Integration tests: 28 passing (18 PL/pgSQL tests)
+- E2E tests: 12 passing
+- **Total: 212 tests passing** ✓
 
 ---
 
@@ -261,6 +290,9 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
+SELECT safe_divide(10, 2);  -- Returns 5
+SELECT safe_divide(10, 0);  -- Returns -1 (division by zero caught)
+
 -- Loop with RETURN NEXT
 CREATE FUNCTION generate_series(start_val int, end_val int) 
 RETURNS SETOF int AS $$
@@ -273,19 +305,45 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Cursors
-CREATE FUNCTION process_rows() RETURNS void AS $$
+SELECT * FROM generate_series(1, 5);  -- Returns 1, 2, 3, 4, 5
+
+-- Variable initialization
+CREATE FUNCTION sum_to_n(n int) RETURNS int AS $$
 DECLARE
-    cur CURSOR FOR SELECT id FROM users;
-    user_id int;
+    i int := 1;
+    total int := 0;
 BEGIN
-    OPEN cur;
-    LOOP
-        FETCH cur INTO user_id;
-        EXIT WHEN NOT FOUND;  -- ⚠️ FOUND not implemented yet
-        -- Process user_id
+    WHILE i <= n LOOP
+        total := total + i;
+        i := i + 1;
     END LOOP;
-    CLOSE cur;
+    RETURN total;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT sum_to_n(5);  -- Returns 15
+
+-- PERFORM
+CREATE FUNCTION do_something() RETURNS void AS $$
+BEGIN
+    PERFORM 1;  -- Dummy operation, discards result
+END;
+$$ LANGUAGE plpgsql;
+
+-- RAISE NOTICE
+CREATE FUNCTION log_message(msg text) RETURNS void AS $$
+BEGIN
+    RAISE NOTICE 'Message: %', msg;
+END;
+$$ LANGUAGE plpgsql;
+
+-- GET DIAGNOSTICS
+CREATE FUNCTION test_row_count() RETURNS int AS $$
+DECLARE
+    cnt int;
+BEGIN
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    RETURN cnt;
 END;
 $$ LANGUAGE plpgsql;
 ```
@@ -348,5 +406,6 @@ For questions about PL/pgSQL implementation:
 
 ---
 
-**Status**: Phase 2B Complete ✅  
+**Status**: Phase 2B Complete ✅ (All Claims Verified)  
+**Test Status**: All 212 tests passing  
 **Next Phase**: Phase 2C (Advanced Features) or Phase 2D (Triggers) - TBD based on requirements

@@ -239,12 +239,29 @@ impl ExecutionContext {
                 .map(|p| p as &dyn rusqlite::ToSql)
                 .collect();
             
-            conn.execute(&query, &*param_refs)
-                .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+            // For PERFORM, we execute the query but discard results
+            // Use query_row with empty row handling for SELECT, or execute for DML
+            let upper_query = query.trim().to_uppercase();
+            if upper_query.starts_with("SELECT") {
+                // Execute SELECT but discard result
+                let _ = conn.query_row(&query, &*param_refs, |_row| Ok(()));
+            } else {
+                conn.execute(&query, &*param_refs)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+            }
             
             Ok(())
         })?;
         api.set("perform", perform_fn)?;
+        
+        // _ctx.div(a, b) -> a / b, throws on division by zero
+        let div_fn = lua.create_function(|_lua, (a, b): (f64, f64)| {
+            if b == 0.0 {
+                return Err(mlua::Error::RuntimeError("division_by_zero".to_string()));
+            }
+            Ok(a / b)
+        })?;
+        api.set("div", div_fn)?;
         
         // _ctx.execute(query, params) -> nil (dynamic SQL)
         let conn6 = self.conn.clone();

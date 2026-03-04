@@ -29,6 +29,9 @@ pub struct PlpgsqlFunction {
     #[allow(dead_code)]
     #[serde(rename = "fn_rettype")]
     pub fn_rettype: Option<i64>,
+    /// Variable declarations (datums) - maps index to variable name
+    #[serde(default, rename = "datums")]
+    pub datums: Vec<PlPgSQLDatum>,
     /// The main action/body of the function
     #[serde(rename = "action")]
     pub action: PlPgSQLAction,
@@ -39,6 +42,63 @@ impl PlpgsqlFunction {
     #[allow(dead_code)]
     pub fn fn_body(&self) -> &Vec<PlPgSQLStmt> {
         &self.action.block.body
+    }
+    
+    /// Look up a variable name by datum index
+    pub fn get_var_name(&self, index: usize) -> Option<&str> {
+        self.datums.get(index).and_then(|d| d.var_name.as_deref())
+    }
+}
+
+/// A datum (variable declaration) in PL/pgSQL
+#[derive(Debug, Clone)]
+pub struct PlPgSQLDatum {
+    pub var_name: Option<String>,
+    pub var_type: Option<String>,
+    pub default_val: Option<PlPgSQLExpr>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLDatum {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        if let Some(obj) = value.as_object() {
+            // Handle PLpgSQL_var wrapper
+            if let Some(var) = obj.get("PLpgSQL_var") {
+                let var_obj = var.as_object().ok_or_else(|| 
+                    serde::de::Error::custom("Expected object in PLpgSQL_var"))?;
+                
+                let var_name = var_obj.get("refname")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                
+                let var_type = var_obj.get("datatype")
+                    .and_then(|d| d.get("PLpgSQL_type"))
+                    .and_then(|t| t.get("typname"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                
+                let default_val = var_obj.get("default_val")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                
+                return Ok(PlPgSQLDatum { var_name, var_type, default_val });
+            }
+            
+            // Handle PLpgSQL_row (record types)
+            if let Some(_row) = obj.get("PLpgSQL_row") {
+                return Ok(PlPgSQLDatum { var_name: None, var_type: Some("record".to_string()), default_val: None });
+            }
+            
+            // Handle PLpgSQL_rec (record variable)
+            if let Some(_rec) = obj.get("PLpgSQL_rec") {
+                return Ok(PlPgSQLDatum { var_name: None, var_type: Some("record".to_string()), default_val: None });
+            }
+        }
+        
+        Ok(PlPgSQLDatum { var_name: None, var_type: None, default_val: None })
     }
 }
 
@@ -188,17 +248,165 @@ impl<'de> Deserialize<'de> for PlPgSQLStmt {
 }
 
 /// BEGIN/END block
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PlPgSQLStmtBlock {
     pub body: Vec<PlPgSQLStmt>,
-    #[serde(default)]
-    pub exceptions: Option<Vec<PlPgSQLException>>,
+    pub exceptions: Option<PlPgSQLExceptionBlock>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLStmtBlock {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        if let Some(obj) = value.as_object() {
+            let body = obj.get("body")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            
+            let exceptions = obj.get("exceptions")
+                .and_then(|v| {
+                    // Handle PLpgSQL_exception_block wrapper
+                    if let Some(exc_obj) = v.as_object() {
+                        if let Some(inner) = exc_obj.get("PLpgSQL_exception_block") {
+                            serde_json::from_value(inner.clone()).ok()
+                        } else {
+                            serde_json::from_value(v.clone()).ok()
+                        }
+                    } else {
+                        None
+                    }
+                });
+            
+            return Ok(PlPgSQLStmtBlock { body, exceptions });
+        }
+        
+        Err(serde::de::Error::custom("Expected object for block"))
+    }
+}
+
+/// Exception block - handles "PLpgSQL_exception_block" wrapper
+#[derive(Debug, Clone)]
+pub struct PlPgSQLExceptionBlock {
+    pub exc_list: Vec<PlPgSQLException>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLExceptionBlock {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        // Handle PLpgSQL_exception_block wrapper
+        let inner = if let Some(obj) = value.as_object() {
+            if let Some(wrapped) = obj.get("PLpgSQL_exception_block") {
+                wrapped.clone()
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+        
+        #[derive(Deserialize)]
+        struct RawExcBlock {
+            #[serde(rename = "exc_list")]
+            exc_list: Vec<PlPgSQLException>,
+        }
+        
+        let raw: RawExcBlock = serde_json::from_value(inner)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        
+        Ok(PlPgSQLExceptionBlock { exc_list: raw.exc_list })
+    }
+}
+
+/// Exception handler - handles "PLpgSQL_exception" wrapper
+#[derive(Debug, Clone)]
+pub struct PlPgSQLException {
+    pub conditions: Vec<PlPgSQLCondition>,
+    pub action: Vec<PlPgSQLStmt>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLException {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        // Handle PLpgSQL_exception wrapper
+        let inner = if let Some(obj) = value.as_object() {
+            if let Some(wrapped) = obj.get("PLpgSQL_exception") {
+                wrapped.clone()
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+        
+        #[derive(Deserialize)]
+        struct RawException {
+            conditions: Vec<PlPgSQLCondition>,
+            action: Vec<PlPgSQLStmt>,
+        }
+        
+        let raw: RawException = serde_json::from_value(inner)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        
+        Ok(PlPgSQLException {
+            conditions: raw.conditions,
+            action: raw.action,
+        })
+    }
+}
+
+/// Exception condition - handles "PLpgSQL_condition" wrapper
+#[derive(Debug, Clone)]
+pub struct PlPgSQLCondition {
+    pub condname: String,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLCondition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        // Handle PLpgSQL_condition wrapper
+        let inner = if let Some(obj) = value.as_object() {
+            if let Some(wrapped) = obj.get("PLpgSQL_condition") {
+                wrapped.clone()
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+        
+        #[derive(Deserialize)]
+        struct RawCondition {
+            condname: String,
+        }
+        
+        let raw: RawCondition = serde_json::from_value(inner)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        
+        Ok(PlPgSQLCondition {
+            condname: raw.condname,
+        })
+    }
 }
 
 /// Variable assignment
 #[derive(Debug, Clone)]
 pub struct PlPgSQLStmtAssign {
-    pub varname: String,
+    pub varno: i64,  // Variable reference number
     pub expr: PlPgSQLExpr,
 }
 
@@ -210,25 +418,16 @@ impl<'de> Deserialize<'de> for PlPgSQLStmtAssign {
         let value = Value::deserialize(deserializer)?;
         
         if let Some(obj) = value.as_object() {
-            // varname can be a string or we might need to look up varno
-            let varname = match obj.get("varname") {
-                Some(Value::String(s)) => s.clone(),
-                _ => {
-                    // If varname is not present, use varno as placeholder
-                    // In a real implementation, we'd look up the variable name from datums
-                    obj.get("varno")
-                        .and_then(|v| v.as_i64())
-                        .map(|n| format!("var_{}", n))
-                        .ok_or_else(|| serde::de::Error::missing_field("varname or varno"))?
-                }
-            };
+            let varno = obj.get("varno")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             
             let expr = obj.get("expr")
                 .ok_or_else(|| serde::de::Error::missing_field("expr"))
                 .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| serde::de::Error::custom(e.to_string())))?;
             
             return Ok(PlPgSQLStmtAssign {
-                varname,
+                varno,
                 expr,
             });
         }
@@ -250,13 +449,47 @@ pub struct PlPgSQLStmtIf {
     pub else_body: Option<Vec<PlPgSQLStmt>>,
 }
 
-/// ELSIF branch
-#[derive(Debug, Clone, Deserialize)]
+/// ELSIF branch - handles "PLpgSQL_if_elsif" wrapper
+#[derive(Debug, Clone)]
 pub struct PlPgSQLStmtIfElsif {
-    #[serde(rename = "cond")]
     pub cond: PlPgSQLExpr,
-    #[serde(rename = "stmts")]
     pub stmts: Vec<PlPgSQLStmt>,
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLStmtIfElsif {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        // Handle PLpgSQL_if_elsif wrapper
+        let inner = if let Some(obj) = value.as_object() {
+            if let Some(wrapped) = obj.get("PLpgSQL_if_elsif") {
+                wrapped.clone()
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+        
+        #[derive(Deserialize)]
+        struct RawElsif {
+            #[serde(rename = "cond")]
+            cond: PlPgSQLExpr,
+            #[serde(rename = "stmts")]
+            stmts: Vec<PlPgSQLStmt>,
+        }
+        
+        let raw: RawElsif = serde_json::from_value(inner)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        
+        Ok(PlPgSQLStmtIfElsif {
+            cond: raw.cond,
+            stmts: raw.stmts,
+        })
+    }
 }
 
 /// LOOP statement
@@ -371,10 +604,11 @@ pub struct PlPgSQLStmtReturn {
 }
 
 /// RETURN NEXT statement (for SETOF functions)
+/// Note: expr may be None when used inside FOR loops where the loop variable is implicit
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlPgSQLStmtReturnNext {
-    #[serde(rename = "expr")]
-    pub expr: PlPgSQLExpr,
+    #[serde(default)]
+    pub expr: Option<PlPgSQLExpr>,
 }
 
 /// RAISE statement
@@ -541,19 +775,51 @@ pub struct PlPgSQLStmtDynExecute {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlPgSQLStmtGetDiag {
     #[allow(dead_code)]
-    #[serde(rename = "is_stacked")]
+    #[serde(default, rename = "is_stacked")]
     pub is_stacked: bool,
     #[serde(rename = "diag_items")]
     pub diag_items: Vec<PlPgSQLDiagItem>,
 }
 
-/// Diagnostic item
-#[derive(Debug, Clone, Deserialize)]
+/// Diagnostic item - handles "PLpgSQL_diag_item" wrapper
+#[derive(Debug, Clone)]
 pub struct PlPgSQLDiagItem {
-    #[serde(rename = "kind")]
-    pub kind: i64,
-    #[serde(rename = "target_name")]
-    pub target_name: String,
+    pub kind: String,  // e.g., "ROW_COUNT", "RESULT_OID"
+    pub target: i64,   // Variable reference number
+}
+
+impl<'de> Deserialize<'de> for PlPgSQLDiagItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        
+        // Handle PLpgSQL_diag_item wrapper
+        let inner = if let Some(obj) = value.as_object() {
+            if let Some(wrapped) = obj.get("PLpgSQL_diag_item") {
+                wrapped.clone()
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+        
+        #[derive(Deserialize)]
+        struct RawDiagItem {
+            kind: String,
+            target: i64,
+        }
+        
+        let raw: RawDiagItem = serde_json::from_value(inner)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        
+        Ok(PlPgSQLDiagItem {
+            kind: raw.kind,
+            target: raw.target,
+        })
+    }
 }
 
 /// CASE statement
@@ -582,15 +848,6 @@ pub struct PlPgSQLCaseWhen {
 pub struct PlPgSQLVariable {
     #[serde(rename = "name")]
     pub name: String,
-}
-
-/// Exception handler
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlPgSQLException {
-    #[serde(rename = "sqlstate")]
-    pub sqlstate: String,
-    #[serde(rename = "stmts")]
-    pub stmts: Vec<PlPgSQLStmt>,
 }
 
 /// OPEN cursor statement
