@@ -24,5 +24,11 @@ chrono = "0.4"
 hex = "0.4"
 lazy_static = "1.4"
 
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
 [dev-dependencies]
 serde_json = { version = "1.0", features = ["preserve_order"] }
