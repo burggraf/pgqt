@@ -126,6 +126,12 @@ pub trait HandlerUtils {
     fn apply_rls_to_query(&self, sql: String, operation_type: crate::transpiler::OperationType, tables: &[String]) -> String {
         use crate::rls_inject::{inject_rls_into_select_sql, inject_rls_into_update_sql, inject_rls_into_delete_sql};
 
+        // If no tables are referenced, skip RLS injection
+        // This avoids issues with queries like "SELECT 1" that have no FROM clause
+        if tables.is_empty() {
+            return sql;
+        }
+
         // Get current user from session
         let session = self.sessions().get(&0);
         let current_user = session.map(|s| s.current_user.clone()).unwrap_or_else(|| "postgres".to_string());
