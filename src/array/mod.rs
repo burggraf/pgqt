@@ -33,7 +33,8 @@
 //! # Examples
 //!
 //! ```rust
-//! use pgqt::array::{parse_array, array_overlap, array_contains};
+//! use pgqt::array::utils::parse_array;
+//! use pgqt::array::operators::{array_overlap, array_contains};
 //!
 //! // Parse an array string
 //! let arr = parse_array("[1,2,3]").unwrap();
@@ -68,6 +69,15 @@ pub use functions::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::array::utils::parse_array;
+    use crate::array::operators::{array_overlap, array_contains, array_contained};
+    use crate::array::comparison::{array_eq, array_lt, array_gt, array_any_eq, array_all_eq};
+    use crate::array::functions::{
+        array_concat, array_append, array_prepend, array_remove, array_replace, array_position_fn,
+        array_length_fn, array_ndims_fn,
+        array_to_string_fn, string_to_array_fn,
+        array_positions_fn, trim_array_fn, array_fill_fn
+    };
 
     #[test]
     fn test_parse_json_array() {
