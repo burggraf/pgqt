@@ -223,8 +223,9 @@ pub(crate) fn reconstruct_case_expr(case_expr: &CaseExpr, ctx: &mut TranspileCon
     }
 
     parts.push("end".to_string());
-    // Add 'case' as alias to preserve column name
-    format!("{} as \"case\"", parts.join(" "))
+    // Don't add alias here - it will be added by reconstruct_res_target if needed
+    // This prevents double aliasing when CASE is used with an explicit alias
+    parts.join(" ")
 }
 
 /// Reconstruct a TypeCast node
@@ -771,6 +772,8 @@ pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx:
 
 /// Reconstruct a RangeFunction node (table function in FROM clause, like LATERAL jsonb_each)
 pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::node::Node as NodeEnum;
+
     // Extract the function calls from the functions field
     // Each item in functions is typically a List containing [FuncCall, empty_alias]
     let func_sql: Vec<String> = range_func
@@ -781,6 +784,40 @@ pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut T
                 if let NodeEnum::List(ref list) = inner {
                     // First item is usually the function call
                     if let Some(first) = list.items.first() {
+                        // Check if this is generate_series - needs special handling
+                        if let Some(ref node_inner) = first.node {
+                            if let NodeEnum::FuncCall(ref func_call) = node_inner {
+                                let func_name = func_call.funcname.first()
+                                    .and_then(|n| n.node.as_ref())
+                                    .and_then(|n| {
+                                        if let NodeEnum::String(s) = n {
+                                            Some(s.sval.to_lowercase())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                
+                                if func_name == "generate_series" {
+                                    // For generate_series in FROM clause, unwrap the subquery
+                                    let args: Vec<String> = func_call
+                                        .args
+                                        .iter()
+                                        .map(|n| reconstruct_node(n, ctx))
+                                        .collect();
+                                    if args.len() >= 2 {
+                                        let start = &args[0];
+                                        let stop = &args[1];
+                                        let step = if args.len() >= 3 { args[2].clone() } else { "1".to_string() };
+                                        // Return just the CTE without the outer parentheses
+                                        return Some(format!(
+                                            "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM _series)",
+                                            start, step, step, step, stop, step, step, stop
+                                        ));
+                                    }
+                                }
+                            }
+                        }
                         return Some(reconstruct_node(first, ctx));
                     }
                 } else {

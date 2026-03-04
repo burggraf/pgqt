@@ -19,7 +19,7 @@ fn has_column_aliases(ctx: &TranspileContext) -> bool {
 fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     let mut union_parts = Vec::new();
 
-    for (i, values_list) in stmt.values_lists.iter().enumerate() {
+    for (_i, values_list) in stmt.values_lists.iter().enumerate() {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
                 let values: Vec<String> = list
@@ -179,18 +179,28 @@ pub(crate) fn reconstruct_distinct_on_select(stmt: &SelectStmt, ctx: &mut Transp
     }
 
     // Preserve LIMIT
-    if let Some(ref limit_count) = stmt.limit_count {
+    let has_limit = if let Some(ref limit_count) = stmt.limit_count {
         let limit_sql = reconstruct_node(limit_count, ctx);
         if !limit_sql.is_empty() && limit_sql.to_uppercase() != "NULL" {
             outer_parts.push("limit".to_string());
             outer_parts.push(limit_sql);
+            true
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
     // Preserve OFFSET
     if let Some(ref limit_offset) = stmt.limit_offset {
         let offset_sql = reconstruct_node(limit_offset, ctx);
         if !offset_sql.is_empty() {
+            // SQLite requires LIMIT when using OFFSET
+            if !has_limit {
+                outer_parts.push("limit".to_string());
+                outer_parts.push("-1".to_string());
+            }
             outer_parts.push("offset".to_string());
             outer_parts.push(offset_sql);
         }
@@ -235,11 +245,80 @@ pub(crate) fn reconstruct_select_stmt_fallback(stmt: &SelectStmt, ctx: &mut Tran
     parts.join(" ")
 }
 
+/// Reconstruct a set operation statement (UNION, INTERSECT, EXCEPT)
+pub(crate) fn reconstruct_set_operation_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::SetOperation;
+
+    let op_str = match stmt.op() {
+        SetOperation::SetopUnion => if stmt.all { "union all" } else { "union" },
+        SetOperation::SetopIntersect => "intersect",
+        SetOperation::SetopExcept => "except",
+        _ => "union",
+    };
+
+    // Reconstruct left and right sides
+    // Don't wrap in parentheses - SQLite doesn't allow them when ORDER BY is at the end
+    let left_sql = stmt.larg.as_ref()
+        .map(|l| reconstruct_select_stmt(l, ctx))
+        .unwrap_or_default();
+
+    let right_sql = stmt.rarg.as_ref()
+        .map(|r| reconstruct_select_stmt(r, ctx))
+        .unwrap_or_default();
+
+    let mut result = format!("{} {} {}", left_sql, op_str, right_sql);
+
+    // Add ORDER BY if present (applies to the whole result)
+    if !stmt.sort_clause.is_empty() {
+        let sorts: Vec<String> = stmt.sort_clause
+            .iter()
+            .map(|n| reconstruct_sort_by(n, ctx))
+            .collect();
+        result.push_str(&format!(" order by {}", sorts.join(", ")));
+    }
+
+    // Add LIMIT if present
+    let has_limit = if let Some(ref limit_count) = stmt.limit_count {
+        let limit_sql = reconstruct_node(limit_count, ctx);
+        if limit_sql.to_uppercase() == "NULL" {
+            result.push_str(" limit -1");
+            true
+        } else if !limit_sql.is_empty() {
+            result.push_str(&format!(" limit {}", limit_sql));
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Add OFFSET if present
+    if let Some(ref limit_offset) = stmt.limit_offset {
+        let offset_sql = reconstruct_node(limit_offset, ctx);
+        if !offset_sql.is_empty() {
+            // SQLite requires LIMIT when using OFFSET
+            if !has_limit {
+                result.push_str(" limit -1");
+            }
+            result.push_str(&format!(" offset {}", offset_sql));
+        }
+    }
+
+    result
+}
+
 /// Reconstruct a SELECT statement
 pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     // Check if this is a VALUES statement (used in INSERT)
     if !stmt.values_lists.is_empty() {
         return reconstruct_values_stmt(stmt, ctx);
+    }
+
+    // Handle set operations (UNION, INTERSECT, EXCEPT)
+    // SetOperation::Undefined = 0, SetopNone = 1, SetopUnion = 2, SetopIntersect = 3, SetopExcept = 4
+    if stmt.op > 1 {
+        return reconstruct_set_operation_stmt(stmt, ctx);
     }
 
     // Handle DISTINCT ON - transform to ROW_NUMBER() window function
@@ -331,22 +410,33 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
     }
 
     // LIMIT clause
-    if let Some(ref limit_count) = stmt.limit_count {
+    let has_limit = if let Some(ref limit_count) = stmt.limit_count {
         let limit_sql = reconstruct_node(limit_count, ctx);
         // Check for NULL (which represents LIMIT ALL)
         if limit_sql.to_uppercase() == "NULL" {
             parts.push("limit".to_string());
             parts.push("-1".to_string());
+            true
         } else if !limit_sql.is_empty() {
             parts.push("limit".to_string());
             parts.push(limit_sql);
+            true
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
     // OFFSET clause
     if let Some(ref limit_offset) = stmt.limit_offset {
         let offset_sql = reconstruct_node(limit_offset, ctx);
         if !offset_sql.is_empty() {
+            // SQLite requires LIMIT when using OFFSET
+            if !has_limit {
+                parts.push("limit".to_string());
+                parts.push("-1".to_string());
+            }
             parts.push("offset".to_string());
             parts.push(offset_sql);
         }

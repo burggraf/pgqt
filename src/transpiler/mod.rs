@@ -468,4 +468,24 @@ VALUES
 
         assert!(result.sql.contains("json_remove"), "Should use json_remove: {}", result.sql);
     }
+
+    #[test]
+    fn test_offset_without_limit() {
+        // SQLite requires LIMIT when using OFFSET
+        let result = transpile_with_metadata("SELECT 1 OFFSET 0");
+        println!("Transpiled OFFSET without LIMIT: {}", result.sql);
+        assert!(result.sql.contains("limit"), "Should add LIMIT when OFFSET is present: {}", result.sql);
+        assert!(result.sql.contains("offset"), "Should contain OFFSET: {}", result.sql);
+    }
+
+    #[test]
+    fn test_subquery_with_offset() {
+        // Test that subquery with OFFSET works correctly
+        let result = transpile_with_metadata("SELECT foo FROM (SELECT 1 OFFSET 0) AS foo");
+        println!("Transpiled subquery with OFFSET: {}", result.sql);
+        assert!(result.sql.contains("limit"), "Should add LIMIT in subquery: {}", result.sql);
+        // The column should be accessible as 'foo' from the outer query
+        // The transpiled SQL should be: select foo from (select 1 limit -1 offset 0) as foo
+        assert!(result.sql.contains("as foo"), "Should have alias 'foo': {}", result.sql);
+    }
 }

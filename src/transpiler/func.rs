@@ -333,7 +333,41 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         "pg_input_is_valid" => {
             // pg_input_is_valid(text, type) - stub that always returns true (1)
             // In a full implementation, this would validate the input against the type
-            return "1 as \"pg_input_is_valid\"".to_string();
+            // Return just the value - the alias will be added by reconstruct_res_target
+            return "1".to_string();
+        }
+        "extract" => {
+            // extract(field FROM source) - extract date/time field
+            // In SQLite, we use strftime or specific functions
+            let args: Vec<String> = func_call
+                .args
+                .iter()
+                .map(|n| reconstruct_node(n, ctx))
+                .collect();
+            if args.len() >= 2 {
+                let field = args[0].trim_matches('\'');
+                let source = &args[1];
+                // Map PostgreSQL extract fields to SQLite equivalents
+                let sqlite_expr = match field.to_lowercase().as_str() {
+                    "year" => format!("cast(strftime('%Y', {}) as integer)", source),
+                    "month" => format!("cast(strftime('%m', {}) as integer)", source),
+                    "day" => format!("cast(strftime('%d', {}) as integer)", source),
+                    "hour" => format!("cast(strftime('%H', {}) as integer)", source),
+                    "minute" => format!("cast(strftime('%M', {}) as integer)", source),
+                    "second" => format!("cast(strftime('%S', {}) as integer)", source),
+                    "dow" => format!("cast(strftime('%w', {}) as integer)", source), // day of week (0-6, Sunday=0)
+                    "doy" => format!("cast(strftime('%j', {}) as integer)", source), // day of year (001-366)
+                    "week" => format!("cast(strftime('%W', {}) as integer)", source), // week of year (00-53)
+                    "quarter" => format!("(cast(strftime('%m', {}) as integer) + 2) / 3", source),
+                    "epoch" => format!("strftime('%s', {})", source),
+                    "millennium" => format!("(cast(strftime('%Y', {}) as integer) + 999) / 1000", source),
+                    "century" => format!("(cast(strftime('%Y', {}) as integer) + 99) / 100", source),
+                    "decade" => format!("cast(strftime('%Y', {}) as integer) / 10", source),
+                    _ => format!("strftime('{}', {})", field, source),
+                };
+                return sqlite_expr;
+            }
+            return format!("extract({})", args_str);
         }
         _ => {}
     }
@@ -391,6 +425,30 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         "pg_sleep" => {
             original_func_name = Some("pg_sleep");
             "0"
+        }
+        // Statistical aggregate functions - SQLite doesn't have built-in support
+        // We use custom implementations via SQLite custom functions
+        "stddev_pop" => "stddev_pop",
+        "stddev_samp" => "stddev_samp",
+        "var_pop" => "var_pop",
+        "var_samp" => "var_samp",
+        "covar_pop" => "covar_pop",
+        "covar_samp" => "covar_samp",
+        "corr" => "corr",
+        "regr_slope" => "regr_slope",
+        "regr_intercept" => "regr_intercept",
+        "regr_count" => "regr_count",
+        "regr_r2" => "regr_r2",
+        "regr_avgx" => "regr_avgx",
+        "regr_avgy" => "regr_avgy",
+        "regr_sxx" => "regr_sxx",
+        "regr_syy" => "regr_syy",
+        "regr_sxy" => "regr_sxy",
+
+        // Timezone conversion - stub that returns the input unchanged
+        "timezone" => {
+            original_func_name = Some("timezone");
+            "0"  // Will be handled specially below
         },
 
         // Full-Text Search functions
@@ -467,6 +525,17 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         if sqlite_func == "0" || sqlite_func == "1" {
             // For constant replacements, just return the value
             // The alias will be added by reconstruct_res_target
+            // Special case for timezone - return the second argument (the timestamp)
+            if orig_name == "timezone" {
+                let args: Vec<String> = func_call
+                    .args
+                    .iter()
+                    .map(|n| reconstruct_node(n, ctx))
+                    .collect();
+                if args.len() >= 2 {
+                    return args[1].clone(); // Return the timestamp argument
+                }
+            }
             return sqlite_func.to_string();
         }
         // For other renamed functions, continue with normal processing
