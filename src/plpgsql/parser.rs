@@ -55,7 +55,7 @@ fn extract_function_metadata(sql: &str) -> Result<FunctionMetadata> {
         .map_err(|e| anyhow::anyhow!("Failed to parse CREATE FUNCTION: {}", e))?;
     
     // Get the first statement
-    let stmt = result.protobuf.stmts.get(0)
+    let stmt = result.protobuf.stmts.first()
         .and_then(|s| s.stmt.as_ref())
         .ok_or_else(|| anyhow::anyhow!("No statement found in SQL"))?;
     

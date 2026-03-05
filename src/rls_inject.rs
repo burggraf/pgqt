@@ -32,18 +32,15 @@ use anyhow::Result;
 /// ```
 pub fn inject_rls_into_select_sql(original_sql: &str, rls_where: &str) -> String {
     // Parse to understand the structure
-    match pg_query::parse(original_sql) {
-        Ok(parsed) => {
-            if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
-                if let Some(ref stmt_node) = raw_stmt.stmt {
-                    use pg_query::protobuf::node::Node as NodeEnum;
-                    if let Some(NodeEnum::SelectStmt(select_stmt)) = stmt_node.node.as_ref() {
-                        return inject_into_select_struct(select_stmt, original_sql, rls_where);
-                    }
+    if let Ok(parsed) = pg_query::parse(original_sql) {
+        if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::SelectStmt(select_stmt)) = stmt_node.node.as_ref() {
+                    return inject_into_select_struct(select_stmt, original_sql, rls_where);
                 }
             }
         }
-        Err(_) => {}
     }
     
     // Fallback: return original with RLS appended (best effort)
@@ -85,18 +82,15 @@ fn inject_into_select_struct(select_stmt: &pg_query::protobuf::SelectStmt, origi
 
 /// Injects an RLS WHERE clause into an UPDATE statement
 pub fn inject_rls_into_update_sql(original_sql: &str, rls_where: &str) -> String {
-    match pg_query::parse(original_sql) {
-        Ok(parsed) => {
-            if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
-                if let Some(ref stmt_node) = raw_stmt.stmt {
-                    use pg_query::protobuf::node::Node as NodeEnum;
-                    if let Some(NodeEnum::UpdateStmt(update_stmt)) = stmt_node.node.as_ref() {
-                        return inject_into_update_struct(update_stmt, original_sql, rls_where);
-                    }
+    if let Ok(parsed) = pg_query::parse(original_sql) {
+        if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::UpdateStmt(update_stmt)) = stmt_node.node.as_ref() {
+                    return inject_into_update_struct(update_stmt, original_sql, rls_where);
                 }
             }
         }
-        Err(_) => {}
     }
     
     format!("{} WHERE ({})", original_sql, rls_where)
@@ -143,18 +137,15 @@ pub fn inject_rls_into_delete_sql(original_sql: &str, rls_where: &str) -> String
 ///
 /// For multiple VALUES rows, each row is checked individually.
 pub fn inject_rls_into_insert_sql(original_sql: &str, with_check_expr: &str) -> Result<String> {
-    match pg_query::parse(original_sql) {
-        Ok(parsed) => {
-            if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
-                if let Some(ref stmt_node) = raw_stmt.stmt {
-                    use pg_query::protobuf::node::Node as NodeEnum;
-                    if let Some(NodeEnum::InsertStmt(insert_stmt)) = stmt_node.node.as_ref() {
-                        return transform_insert_to_select(insert_stmt, original_sql, with_check_expr);
-                    }
+    if let Ok(parsed) = pg_query::parse(original_sql) {
+        if let Some(raw_stmt) = parsed.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::InsertStmt(insert_stmt)) = stmt_node.node.as_ref() {
+                    return transform_insert_to_select(insert_stmt, original_sql, with_check_expr);
                 }
             }
         }
-        Err(_) => {}
     }
     
     Err(anyhow::anyhow!("Could not parse INSERT statement for RLS injection"))

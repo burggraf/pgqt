@@ -84,7 +84,7 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::RangeFunction(ref range_func) => reconstruct_range_function(range_func, ctx),
             NodeEnum::SetToDefault(_) => {
                 if let Some(ref table_name) = ctx.current_table {
-                    if let Some(ref col_aliases) = ctx.values_column_aliases.get(ctx.current_column_index) {
+                    if let Some(col_aliases) = ctx.values_column_aliases.get(ctx.current_column_index) {
                         if let Some(default_expr) = ctx.get_column_default(table_name, col_aliases) {
                             let sqlite_default = transform_default_expression(&default_expr);
                             return sqlite_default;
@@ -432,8 +432,8 @@ pub(crate) fn is_json_array_string(node: &Node) -> bool {
 /// Reconstruct an AExpr node (operators)
 pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
     // Check if operands are array expressions before reconstructing
-    let lexpr_is_array = a_expr.lexpr.as_ref().map_or(false, |n| is_array_expr(n) || is_json_array_string(n));
-    let rexpr_is_array = a_expr.rexpr.as_ref().map_or(false, |n| is_array_expr(n) || is_json_array_string(n));
+    let lexpr_is_array = a_expr.lexpr.as_ref().is_some_and(|n| is_array_expr(n) || is_json_array_string(n));
+    let rexpr_is_array = a_expr.rexpr.as_ref().is_some_and(|n| is_array_expr(n) || is_json_array_string(n));
     
     let lexpr_sql = a_expr
         .lexpr
@@ -456,7 +456,7 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             }
             None
         })
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
 
     // Handle IN expressions
     match a_expr.kind() {

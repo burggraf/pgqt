@@ -5,6 +5,7 @@
 
 /// Information about a table column
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ColumnInfo {
     pub name: String,
     pub original_type: String,
@@ -32,6 +33,7 @@ pub trait MetadataProvider: Send + Sync {
 /// A no-op metadata provider that returns no information
 ///
 /// Used when no catalog access is needed or available.
+#[allow(dead_code)]
 pub struct NoOpMetadataProvider;
 
 impl MetadataProvider for NoOpMetadataProvider {
@@ -45,6 +47,7 @@ impl MetadataProvider for NoOpMetadataProvider {
 }
 
 impl NoOpMetadataProvider {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

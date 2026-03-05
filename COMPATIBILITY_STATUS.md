@@ -16,9 +16,9 @@ This document tracks the current state of PostgreSQL compatibility and identifie
 
 ## High-Priority Future Work
 
-### 1. INSERT Logic Improvements
-- **Automatic Padding**: Detect when an `INSERT` has fewer values than the table has columns. Fetch the schema from the catalog and pad with `DEFAULT` or `NULL` to match Postgres behavior.
-- **DEFAULT Keyword**: Improve support for the `DEFAULT` keyword in `VALUES` lists, ensuring it maps to the correct SQLite behavior or omitted columns.
+### 1. INSERT Logic Improvements ✅ COMPLETE
+- **Automatic Padding**: ✅ Implemented. Detects when an `INSERT` has fewer values than the table has columns. Fetches the schema from the catalog and pads with `DEFAULT` or `NULL` to match PostgreSQL behavior.
+- **DEFAULT Keyword**: ✅ Implemented. Supports the `DEFAULT` keyword in `VALUES` lists, resolving it to the correct SQLite default expressions (e.g., `now()` → `datetime('now')`).
 
 ### 2. Column Metadata & Naming
 - **Anonymous Columns**: Map SQLite's default column names (often the expression text) to PostgreSQL's `?column?` convention for unnamed results.

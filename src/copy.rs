@@ -27,8 +27,10 @@ use std::sync::{Arc, Mutex};
 
 /// COPY operation state
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum CopyState {
     /// No active COPY operation
+    #[default]
     Idle,
     /// COPY FROM STDIN in progress
     FromStdin {
@@ -43,16 +45,13 @@ pub enum CopyState {
     },
 }
 
-impl Default for CopyState {
-    fn default() -> Self {
-        CopyState::Idle
-    }
-}
 
 /// COPY data format
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CopyFormat {
     /// Text format (tab-delimited, default)
+    #[default]
     Text,
     /// CSV format (comma-delimited)
     Csv,
@@ -71,11 +70,6 @@ impl CopyFormat {
     }
 }
 
-impl Default for CopyFormat {
-    fn default() -> Self {
-        CopyFormat::Text
-    }
-}
 
 /// COPY command options
 #[derive(Debug, Clone, PartialEq)]

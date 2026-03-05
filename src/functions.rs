@@ -184,7 +184,7 @@ fn substitute_parameters(body: &str, args: &[Value]) -> Result<String> {
     
     // If no $1, $2 found, try named parameters (simple identifier replacement)
     // This handles cases like "SELECT a + b" where parameters are named
-    if !result.contains('$') && args.len() > 0 {
+    if !result.contains('$') && !args.is_empty() {
         // Try to parse the SQL to find column references that match parameter names
         // For now, use a simple heuristic: if the body has simple identifiers that aren't keywords
         // This is a temporary workaround - proper solution requires SQL parsing
@@ -267,7 +267,7 @@ mod tests {
     fn test_quote_value() {
         assert_eq!(quote_value(&Value::Null), "NULL");
         assert_eq!(quote_value(&Value::Integer(42)), "42");
-        assert_eq!(quote_value(&Value::Real(3.14)), "3.14");
+        assert_eq!(quote_value(&Value::Real(std::f64::consts::PI)), "3.141592653589793");
         assert_eq!(quote_value(&Value::Text("hello".to_string())), "'hello'");
         assert_eq!(quote_value(&Value::Text("O'Brien".to_string())), "'O''Brien'");
     }

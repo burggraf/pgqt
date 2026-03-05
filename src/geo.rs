@@ -80,7 +80,7 @@ impl FromStr for Lseg {
         };
         // Expecting ((x1,y1),(x2,y2)) or (x1,y1),(x2,y2) or x1,y1,x2,y2
         // Simplest: split by common delimiters and take 4 floats
-        let parts: Vec<&str> = s.split(|c| c == ',' || c == '(' || c == ')').filter(|s| !s.trim().is_empty()).collect();
+        let parts: Vec<&str> = s.split([',', '(', ')']).filter(|s| !s.trim().is_empty()).collect();
         if parts.len() == 4 {
             let x1 = parts[0].trim().parse::<f64>().map_err(|e| e.to_string())?;
             let y1 = parts[1].trim().parse::<f64>().map_err(|e| e.to_string())?;
@@ -114,7 +114,7 @@ impl FromStr for Box {
         } else {
             s
         };
-        let parts: Vec<&str> = s.split(|c| c == ',' || c == '(' || c == ')').filter(|s| !s.trim().is_empty()).collect();
+        let parts: Vec<&str> = s.split([',', '(', ')']).filter(|s| !s.trim().is_empty()).collect();
         if parts.len() == 4 {
             let x1 = parts[0].trim().parse::<f64>().map_err(|e| e.to_string())?;
             let y1 = parts[1].trim().parse::<f64>().map_err(|e| e.to_string())?;
@@ -155,7 +155,7 @@ impl FromStr for Circle {
             s
         };
         
-        let parts: Vec<&str> = s.split(|c| c == ',' || c == '(' || c == ')' || c == '<' || c == '>').filter(|s| !s.trim().is_empty()).collect();
+        let parts: Vec<&str> = s.split([',', '(', ')', '<', '>']).filter(|s| !s.trim().is_empty()).collect();
         if parts.len() == 3 {
             let x = parts[0].trim().parse::<f64>().map_err(|e| e.to_string())?;
             let y = parts[1].trim().parse::<f64>().map_err(|e| e.to_string())?;

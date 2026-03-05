@@ -195,7 +195,7 @@ pub fn extract_default_from_constraints(constraints: &str) -> Option<String> {
         let after_default = &constraints[idx + 7..].trim();
         // Take everything until the next constraint keyword
         let end_idx = after_default
-            .find(|c: char| c == ',' || c == '(' || c == ')')
+            .find([',', '(', ')'])
             .unwrap_or(after_default.len());
         let default_expr = after_default[..end_idx].trim();
         if !default_expr.is_empty() {

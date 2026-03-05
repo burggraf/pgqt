@@ -103,7 +103,7 @@ pub fn extract_distinct_on_exprs(stmt: &SelectStmt) -> Vec<String> {
                                                     None
                                                 }
                                             })
-                                            .last()
+                                            .next_back()
                                             .unwrap_or_default()
                                     })
                                     .unwrap_or_default();
@@ -204,7 +204,7 @@ fn extract_expr_string(node: &NodeEnum) -> Option<String> {
                                             None
                                         }
                                     })
-                                    .last()
+                                    .next_back()
                                     .unwrap_or_default()
                             })
                             .unwrap_or_default();

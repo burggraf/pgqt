@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn test_l2_distance_basic() {
         let result = l2_distance("[1, 1]", "[2, 2]").unwrap();
-        assert!((result - 1.41421356).abs() < 0.0001);
+        assert!((result - std::f64::consts::SQRT_2).abs() < 0.0001);
     }
 
     #[test]

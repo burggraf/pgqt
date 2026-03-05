@@ -481,10 +481,8 @@ fn emit_return(ctx: &mut TranspileContext, ret: &PlPgSQLStmtReturn, is_setof: bo
         } else {
             ctx.emit_line(&format!("return {}", expr_lua));
         }
-    } else {
-        if !is_setof {
-            ctx.emit_line("return");
-        }
+    } else if !is_setof {
+        ctx.emit_line("return");
     }
     Ok(())
 }

@@ -235,7 +235,9 @@ fn test_insert_statement() {
     let input = "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')";
     let result = transpile(input);
     assert!(result.contains("insert into"));
-    assert!(result.contains("values"));
+    // INSERT with explicit columns is transpiled to SELECT ... AS ... format
+    assert!(result.contains("select") || result.contains("SELECT"));
+    assert!(result.contains("'Alice'"));
 }
 
 #[test]

@@ -15,6 +15,7 @@ use crate::catalog::{store_table_metadata, store_relation_metadata};
 use crate::schema::SearchPath;
 use crate::handler::SessionContext;
 use crate::handler::utils::HandlerUtils;
+#[allow(unused_imports)]
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};

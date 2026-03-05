@@ -19,7 +19,7 @@ fn has_column_aliases(ctx: &TranspileContext) -> bool {
 fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
     let mut union_parts = Vec::new();
 
-    for (_i, values_list) in stmt.values_lists.iter().enumerate() {
+    for values_list in stmt.values_lists.iter() {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
                 let values: Vec<String> = list

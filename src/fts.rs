@@ -309,16 +309,14 @@ pub fn websearch_to_tsquery_impl(config: &str, query: &str) -> String {
                 if upper == "OR" {
                     result.push_str(" OR ");
                     last_was_or = true;
-                } else {
-                    if !is_stop_word(&current_term, config) {
-                        let lexeme = stem_word(&current_term);
-                        if lexeme.len() >= 2 {
-                            if !result.is_empty() && !last_was_or {
-                                result.push_str(" AND ");
-                            }
-                            result.push_str(&lexeme);
-                            last_was_or = false;
+                } else if !is_stop_word(&current_term, config) {
+                    let lexeme = stem_word(&current_term);
+                    if lexeme.len() >= 2 {
+                        if !result.is_empty() && !last_was_or {
+                            result.push_str(" AND ");
                         }
+                        result.push_str(&lexeme);
+                        last_was_or = false;
                     }
                 }
                 current_term.clear();
@@ -376,7 +374,7 @@ fn convert_pg_tsquery_to_fts5(query: &str) -> String {
                         chars.next(); // consume '>'
                         // Phrase search - we'll collect terms and quote them
                         // For now, just use AND as approximation
-                        result.push_str(" ");
+                        result.push(' ');
                         pending_and = false;
                     }
                 } else {

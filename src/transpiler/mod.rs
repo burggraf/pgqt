@@ -44,6 +44,7 @@ pub mod window;
 pub mod metadata;
 
 // Re-export metadata types
+#[allow(unused_imports)]
 pub use metadata::{ColumnInfo, MetadataProvider, NoOpMetadataProvider};
 pub use context::{
     OperationType, 

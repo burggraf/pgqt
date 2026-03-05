@@ -24,7 +24,7 @@ pub fn parse_json_array(input: &str) -> Result<ArrayValue, String> {
         (e.starts_with('[') && e.ends_with(']')) || (e.starts_with('{') && e.ends_with('}'))
     });
 
-    if all_arrays && elements.len() > 0 {
+    if all_arrays && !elements.is_empty() {
         let inner_arrays: Result<Vec<ArrayValue>, String> = elements
             .iter()
             .map(|e| parse_array(e))

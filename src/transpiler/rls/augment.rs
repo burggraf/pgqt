@@ -94,10 +94,7 @@ pub(crate) fn reconstruct_select_stmt_with_rls(
 ) -> String {
     
     let rls_predicate = if !table_name.is_empty() && !rls_ctx.bypass_rls {
-        match get_rls_where_clause(conn, table_name, rls_ctx, "SELECT") {
-            Ok(pred) => pred,
-            Err(_) => None,
-        }
+        get_rls_where_clause(conn, table_name, rls_ctx, "SELECT").unwrap_or_default()
     } else {
         None
     };
@@ -242,10 +239,7 @@ pub(crate) fn reconstruct_insert_stmt_with_rls(
             Ok(true) => {
                 let policies = get_applicable_policies(conn, table_name, "INSERT", &rls_ctx.user_roles).unwrap_or_default();
                 if policies.iter().any(|p| p.with_check_expr.is_some()) {
-                    match get_rls_where_clause(conn, table_name, rls_ctx, "INSERT") {
-                        Ok(pred) => pred,
-                        Err(_) => None,
-                    }
+                    get_rls_where_clause(conn, table_name, rls_ctx, "INSERT").unwrap_or_default()
                 } else {
                     None
                 }
@@ -347,10 +341,7 @@ pub(crate) fn reconstruct_update_stmt_with_rls(
 ) -> String {
     
     let using_predicate = if !table_name.is_empty() && !rls_ctx.bypass_rls {
-        match get_rls_where_clause(conn, table_name, rls_ctx, "UPDATE") {
-            Ok(pred) => pred,
-            Err(_) => None,
-        }
+        get_rls_where_clause(conn, table_name, rls_ctx, "UPDATE").unwrap_or_default()
     } else {
         None
     };
@@ -446,10 +437,7 @@ pub(crate) fn reconstruct_delete_stmt_with_rls(
 ) -> String {
     
     let rls_predicate = if !table_name.is_empty() && !rls_ctx.bypass_rls {
-        match get_rls_where_clause(conn, table_name, rls_ctx, "DELETE") {
-            Ok(pred) => pred,
-            Err(_) => None,
-        }
+        get_rls_where_clause(conn, table_name, rls_ctx, "DELETE").unwrap_or_default()
     } else {
         None
     };

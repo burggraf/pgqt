@@ -362,7 +362,7 @@ pub(crate) fn reconstruct_constraint(constraint: &Constraint, ctx: &mut Transpil
         }
         pg_query::protobuf::ConstrType::ConstrPrimary => {
             // Skip PRIMARY KEY if type already includes it (e.g., SERIAL -> integer primary key autoincrement)
-            return None;
+            None
         }
         pg_query::protobuf::ConstrType::ConstrUnique => Some("UNIQUE".to_string()),
         pg_query::protobuf::ConstrType::ConstrCheck => {

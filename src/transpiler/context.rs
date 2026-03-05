@@ -58,6 +58,12 @@ pub struct TranspileContext {
     pub current_table: Option<String>,
 }
 
+impl Default for TranspileContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TranspileContext {
     pub fn new() -> Self {
         Self {
@@ -84,8 +90,9 @@ impl TranspileContext {
             current_table: None,
         }
     }
-    
+
     /// Create a new context with a metadata provider
+    #[allow(dead_code)]
     pub fn with_metadata_provider(provider: Arc<dyn MetadataProvider>) -> Self {
         Self {
             referenced_tables: Vec::new(),

@@ -140,7 +140,7 @@ impl ExecutionContext {
                 row.get(0)
             }).optional().map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
             
-            Ok(sqlite_to_lua(lua, result.unwrap_or(SqliteValue::Null))?)
+            sqlite_to_lua(lua, result.unwrap_or(SqliteValue::Null))
         })?;
         api.set("scalar", scalar_fn)?;
         
