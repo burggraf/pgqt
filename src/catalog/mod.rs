@@ -39,7 +39,7 @@ pub use table::{
     populate_pg_attribute, populate_pg_index, populate_pg_constraint,
 };
 #[allow(unused_imports)]
-pub use table::{store_column_metadata, get_table_metadata, get_column_metadata, delete_table_metadata};
+pub use table::{store_column_metadata, get_table_metadata, get_column_metadata, delete_table_metadata, get_table_columns_with_defaults, extract_default_from_constraints};
 pub use function::{store_function, get_function, drop_function};
 pub use rls::{is_rls_enabled, is_rls_forced, get_applicable_policies};
 #[allow(unused_imports)]

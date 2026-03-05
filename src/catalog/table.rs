@@ -133,6 +133,78 @@ pub fn delete_table_metadata(conn: &Connection, table_name: &str) -> Result<()> 
     Ok(())
 }
 
+/// Get column metadata including default expressions for a table
+/// 
+/// Returns column information in the order they appear in the table,
+/// including default expressions from the catalog.
+pub fn get_table_columns_with_defaults(conn: &Connection, table_name: &str) -> Result<Vec<ColumnMetadata>> {
+    let mut stmt = conn.prepare(
+        "SELECT table_name, column_name, original_type, constraints
+         FROM __pg_meta__
+         WHERE table_name = ?1
+         ORDER BY rowid"
+    )?;
+
+    let rows = stmt.query_map([table_name], |row| {
+        Ok(ColumnMetadata {
+            table_name: row.get(0)?,
+            column_name: row.get(1)?,
+            original_type: row.get(2)?,
+            constraints: row.get(3)?,
+        })
+    })?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    
+    // If no metadata in catalog, fall back to pragma_table_info
+    if result.is_empty() {
+        let mut pragma_stmt = conn.prepare(
+            "SELECT name, type, cid, dflt_value FROM pragma_table_info(?1) ORDER BY cid"
+        )?;
+        
+        let pragma_rows = pragma_stmt.query_map([table_name], |row| {
+            let col_name: String = row.get(0)?;
+            let col_type: String = row.get(1)?;
+            let dflt_value: Option<String> = row.get(3)?;
+            
+            Ok(ColumnMetadata {
+                table_name: table_name.to_string(),
+                column_name: col_name,
+                original_type: col_type,
+                constraints: dflt_value.map(|d| format!("DEFAULT {}", d)),
+            })
+        })?;
+        
+        for row in pragma_rows {
+            result.push(row?);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Extract default expression from constraints string
+/// 
+/// Parses a constraints string like "NOT NULL DEFAULT 5" and extracts "5"
+pub fn extract_default_from_constraints(constraints: &str) -> Option<String> {
+    let upper = constraints.to_uppercase();
+    if let Some(idx) = upper.find("DEFAULT") {
+        let after_default = &constraints[idx + 7..].trim();
+        // Take everything until the next constraint keyword
+        let end_idx = after_default
+            .find(|c: char| c == ',' || c == '(' || c == ')')
+            .unwrap_or(after_default.len());
+        let default_expr = after_default[..end_idx].trim();
+        if !default_expr.is_empty() {
+            return Some(default_expr.to_string());
+        }
+    }
+    None
+}
+
 /// Populate __pg_attribute__ for a given table from sqlite metadata
 pub fn populate_pg_attribute(conn: &Connection, table_name: &str) -> Result<()> {
     

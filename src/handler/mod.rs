@@ -577,6 +577,8 @@ impl SqliteHandler {
     }
 }
 
+use crate::transpiler::metadata::{ColumnInfo, MetadataProvider};
+
 // Implement HandlerUtils trait for SqliteHandler
 impl HandlerUtils for SqliteHandler {
     fn conn(&self) -> &Arc<Mutex<Connection>> {
@@ -593,6 +595,52 @@ impl HandlerUtils for SqliteHandler {
 
     fn functions(&self) -> &Arc<DashMap<String, crate::catalog::FunctionMetadata>> {
         &self.functions
+    }
+}
+
+impl MetadataProvider for SqliteHandler {
+    fn get_table_columns(&self, table_name: &str) -> Option<Vec<ColumnInfo>> {
+        let conn = self.conn.lock().unwrap();
+        
+        match crate::catalog::get_table_columns_with_defaults(&conn, table_name) {
+            Ok(metadata) => {
+                let columns: Vec<ColumnInfo> = metadata
+                    .into_iter()
+                    .map(|m| {
+                        let default_expr = m.constraints.as_ref()
+                            .and_then(|c| crate::catalog::extract_default_from_constraints(c));
+                        
+                        ColumnInfo {
+                            name: m.column_name,
+                            original_type: m.original_type,
+                            default_expr,
+                            is_nullable: m.constraints.as_ref()
+                                .map(|c| !c.to_uppercase().contains("NOT NULL"))
+                                .unwrap_or(true),
+                        }
+                    })
+                    .collect();
+                
+                if columns.is_empty() {
+                    None
+                } else {
+                    Some(columns)
+                }
+            }
+            Err(_) => None,
+        }
+    }
+    
+    fn get_column_default(&self, table_name: &str, column_name: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        
+        match crate::catalog::get_column_metadata(&conn, table_name, column_name) {
+            Ok(Some(metadata)) => {
+                metadata.constraints
+                    .and_then(|c| crate::catalog::extract_default_from_constraints(&c))
+            }
+            _ => None,
+        }
     }
 }
 
