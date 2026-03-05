@@ -504,4 +504,13 @@ VALUES
         // The transpiled SQL should be: select foo from (select 1 limit -1 offset 0) as foo
         assert!(result.sql.contains("as foo"), "Should have alias 'foo': {}", result.sql);
     }
+
+    #[test]
+    fn test_range_contains_single_value() {
+        // Test that r @> '15' uses range_contains, not array_contains
+        let result = transpile_with_metadata("SELECT id FROM test_ranges WHERE r @> '15'");
+        println!("Transpiled range contains: {}", result.sql);
+        assert!(result.sql.contains("range_contains"), "Should use range_contains for single value: {}", result.sql);
+        assert!(!result.sql.contains("array_contains"), "Should NOT use array_contains: {}", result.sql);
+    }
 }
