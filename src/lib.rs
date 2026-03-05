@@ -29,6 +29,7 @@ pub mod distinct_on;
 pub mod fts;
 pub mod functions;
 pub mod geo;
+pub mod handler;
 pub mod plpgsql;
 pub mod range;
 pub mod rls;

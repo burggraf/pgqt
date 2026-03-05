@@ -13,12 +13,15 @@ use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
 
 // Submodules
+pub mod errors;
 pub mod query;
+pub mod rewriter;
 pub mod transaction;
 pub mod utils;
 
 // Re-export commonly used items
 pub use query::QueryExecution;
+pub use rewriter::{ResultSetRewriter, map_original_type_to_pg_type};
 pub use utils::HandlerUtils;
 
 /// Session context for each client connection
@@ -617,6 +620,7 @@ impl MetadataProvider for SqliteHandler {
                             is_nullable: m.constraints.as_ref()
                                 .map(|c| !c.to_uppercase().contains("NOT NULL"))
                                 .unwrap_or(true),
+                            type_oid: None,
                         }
                     })
                     .collect();

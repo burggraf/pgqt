@@ -18,8 +18,8 @@ use crate::handler::utils::HandlerUtils;
 #[allow(unused_imports)]
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
-use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
-use pgwire::api::Type;
+use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
+use rusqlite::Statement;
 
 /// Trait for query execution methods
 pub trait QueryExecution: HandlerUtils + Clone {
@@ -184,7 +184,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
             Ok(result)
         } else if is_select {
-            self.execute_select(&conn, &sqlite_sql)
+            self.execute_select_with_tables(&conn, &sqlite_sql, &transpile_result.referenced_tables)
         } else {
             // Handle multiple statements (e.g., from TRUNCATE or DROP with multiple tables)
             let statements: Vec<&str> = sqlite_sql.split("; ").collect();
@@ -244,18 +244,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a SELECT statement and return results
     fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
+        self.execute_select_with_tables(conn, sql, &[])
+    }
+
+    /// Execute a SELECT statement with known referenced tables for type inference
+    fn execute_select_with_tables(&self, conn: &Connection, sql: &str, referenced_tables: &[String]) -> Result<Vec<Response>> {
         let mut stmt = conn.prepare(sql)?;
         let col_count = stmt.column_count();
 
-        let fields: Arc<Vec<FieldInfo>> = Arc::new(
-            (0..col_count)
-                .map(|i| {
-                    let col_name = stmt.column_name(i).unwrap_or("?column?").to_string();
-
-                    FieldInfo::new(col_name, None, None, Type::TEXT, FieldFormat::Text)
-                })
-                .collect(),
-        );
+        // Build field info using the already-locked connection
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn)?);
 
         let mut data_rows = Vec::new();
         let mut rows = stmt.query([])?;
@@ -264,9 +262,18 @@ pub trait QueryExecution: HandlerUtils + Clone {
             let mut encoder = DataRowEncoder::new(fields.clone());
 
             for i in 0..col_count {
+                let field_type = fields[i].datatype();
+                
                 // Try to get value as different types and convert to string
                 let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
-                    .map(|v| v.map(|x| x.to_string()))
+                    .map(|v| v.map(|x| {
+                        // For boolean columns, convert 1/0 to PostgreSQL's 't'/'f' format
+                        if *field_type == pgwire::api::Type::BOOL {
+                            if x == 1 { "t".to_string() } else { "f".to_string() }
+                        } else {
+                            x.to_string()
+                        }
+                    }))
                     .or_else(|| row.get::<_, Option<f64>>(i).ok()
                         .map(|v| v.map(|x| x.to_string())))
                     .or_else(|| row.get::<_, Option<String>>(i).ok())
@@ -286,6 +293,98 @@ pub trait QueryExecution: HandlerUtils + Clone {
             fields,
             row_stream,
         ))])
+    }
+
+    /// Build field info for a SQLite statement using the rewriter's type mapping
+    fn build_field_info(
+        &self,
+        sqlite_stmt: &Statement,
+        referenced_tables: &[String],
+        conn: &Connection,
+    ) -> Result<Vec<FieldInfo>> {
+        use crate::handler::rewriter::{map_original_type_to_pg_type, ColumnFieldInfo};
+        use pgwire::api::results::{FieldFormat, FieldInfo};
+        use pgwire::api::Type;
+        use std::collections::HashMap;
+
+        let col_count = sqlite_stmt.column_count();
+        let mut fields = Vec::with_capacity(col_count);
+
+        // Build a map of table -> columns from the catalog using the already-locked connection
+        let mut table_columns: HashMap<String, Vec<ColumnFieldInfo>> = HashMap::new();
+        
+        for table_name in referenced_tables {
+            if let Ok(columns) = crate::catalog::get_table_columns_with_defaults(conn, table_name) {
+                let field_infos: Vec<ColumnFieldInfo> = columns
+                    .iter()
+                    .map(|col| {
+                        let pg_type = map_original_type_to_pg_type(&col.original_type);
+                        ColumnFieldInfo {
+                            name: col.column_name.clone(),
+                            table_name: Some(table_name.clone()),
+                            original_type: Some(col.original_type.clone()),
+                            pg_type,
+                        }
+                    })
+                    .collect();
+                table_columns.insert(table_name.clone(), field_infos);
+            }
+        }
+
+        for i in 0..col_count {
+            let col_name = sqlite_stmt.column_name(i)?.to_string();
+            
+            // Check if this is a known column from one of the referenced tables
+            let mut found = false;
+            for table_name in referenced_tables {
+                if let Some(columns) = table_columns.get(table_name) {
+                    for col in columns {
+                        if col.name == col_name {
+                            fields.push(FieldInfo::new(
+                                col_name.clone(),
+                                None,
+                                None,
+                                col.pg_type.clone(),
+                                FieldFormat::Text,
+                            ));
+                            found = true;
+                            break;
+                        }
+                    }
+                    if found { break; }
+                }
+            }
+
+            if found {
+                continue;
+            }
+
+            // For expressions, use PostgreSQL's ?column? convention
+            let lower_name = col_name.to_lowercase();
+            let is_expression = col_name.contains('(') || col_name.contains(')') ||
+                               col_name.contains('+') || col_name.contains('-') ||
+                               col_name.contains('*') || col_name.contains('/') ||
+                               col_name.contains(' ') ||
+                               col_name.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
+
+            let pg_type = if lower_name.starts_with("count(") {
+                Type::INT8
+            } else if lower_name.starts_with("sum(") || lower_name.starts_with("avg(") {
+                Type::NUMERIC
+            } else {
+                Type::TEXT
+            };
+
+            let name = if is_expression || col_name == "?column?" {
+                "?column?".to_string()
+            } else {
+                col_name
+            };
+
+            fields.push(FieldInfo::new(name, None, None, pg_type, FieldFormat::Text));
+        }
+
+        Ok(fields)
     }
 
     /// Execute a non-SELECT statement (INSERT, UPDATE, DELETE, DDL)

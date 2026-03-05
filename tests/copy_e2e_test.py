@@ -27,8 +27,8 @@ def test_copy_from_stdin_text(proxy):
     
     cur.execute("SELECT * FROM copy_text ORDER BY id")
     rows = cur.fetchall()
-    # Proxy currently returns everything as TEXT
-    assert rows == [('1', 'alice'), ('2', 'bob'), ('3', 'charlie')]
+    # With proper type inference, INT columns return integers
+    assert rows == [(1, 'alice'), (2, 'bob'), (3, 'charlie')]
     
     print("✓ COPY FROM STDIN (text) works")
     cur.close()
@@ -50,7 +50,7 @@ def test_copy_from_stdin_csv(proxy):
     
     cur.execute("SELECT * FROM copy_csv ORDER BY id")
     rows = cur.fetchall()
-    assert rows == [('1', 'alice', 'New York'), ('2', 'bob', 'London'), ('3', 'charlie', 'Paris')]
+    assert rows == [(1, 'alice', 'New York'), (2, 'bob', 'London'), (3, 'charlie', 'Paris')]
     
     print("✓ COPY FROM STDIN (CSV) works")
     cur.close()
@@ -147,7 +147,7 @@ def test_copy_binary(proxy):
     
     cur.execute("SELECT * FROM copy_binary_import ORDER BY id")
     rows = cur.fetchall()
-    assert rows == [('1', 'alice'), ('2', 'bob')]
+    assert rows == [(1, 'alice'), (2, 'bob')]
     
     print("✓ COPY (BINARY) works")
     cur.close()

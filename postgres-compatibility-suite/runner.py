@@ -36,8 +36,10 @@ def execute_and_compare(conn_ref, conn_test, sql_stmt):
     """Executes a single statement on both connections and compares results."""
     res_ref = None
     err_ref = None
+    err_ref_code = None
     res_test = None
     err_test = None
+    err_test_code = None
     
     # Execute on reference (Postgres)
     try:
@@ -49,6 +51,10 @@ def execute_and_compare(conn_ref, conn_test, sql_stmt):
                 "rows": cur.fetchall()
             }
         cur.close()
+    except psycopg2.Error as e:
+        err_ref_code = e.pgcode
+        err_ref = f"{e.pgcode}: {e.pgerror}" if e.pgcode else str(e)
+        conn_ref.rollback()
     except Exception as e:
         err_ref = str(e)
         conn_ref.rollback()
@@ -63,6 +69,10 @@ def execute_and_compare(conn_ref, conn_test, sql_stmt):
                 "rows": cur.fetchall()
             }
         cur.close()
+    except psycopg2.Error as e:
+        err_test_code = e.pgcode
+        err_test = f"{e.pgcode}: {e.pgerror}" if e.pgcode else str(e)
+        conn_test.rollback()
     except Exception as e:
         err_test = str(e)
         conn_test.rollback()
@@ -74,7 +84,9 @@ def execute_and_compare(conn_ref, conn_test, sql_stmt):
             pytest.fail(f"Statement should have failed with: {err_ref}\nStatement: {sql_stmt}")
     else:
         if err_test:
-            pytest.fail(f"Statement failed on proxy: {err_test}\nStatement: {sql_stmt}")
+            # Include SQLSTATE code in failure message for better diagnostics
+            code_info = f" (SQLSTATE: {err_test_code})" if err_test_code else ""
+            pytest.fail(f"Statement failed on proxy{code_info}: {err_test}\nStatement: {sql_stmt}")
         
         # Compare results if any
         if res_ref:

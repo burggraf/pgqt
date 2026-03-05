@@ -20,10 +20,12 @@ use futures::stream;
 use pgwire::api::copy::CopyHandler as PgWireCopyHandler;
 use pgwire::api::results::{CopyResponse, Response};
 use pgwire::api::ClientInfo;
-use pgwire::error::{ErrorInfo, PgWireError, PgWireResult};
+use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::copy::{CopyData, CopyDone, CopyFail};
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
+
+use crate::handler::errors::{PgError, PgErrorCode};
 
 /// COPY operation state
 #[derive(Debug, Clone, PartialEq)]
@@ -676,11 +678,9 @@ impl PgWireCopyHandler for CopyHandler {
         C: ClientInfo + Unpin + Send + Sync,
     {
         let mut buffer = self.buffer.lock().map_err(|e| {
-            PgWireError::UserError(Box::new(ErrorInfo::new(
-                "ERROR".to_owned(),
-                "XX000".to_owned(),
-                format!("Lock error: {}", e),
-            )))
+            PgWireError::UserError(Box::new(
+                PgError::internal(format!("Lock error: {}", e)).into_error_info()
+            ))
         })?;
 
         // Append data to buffer
@@ -697,31 +697,26 @@ impl PgWireCopyHandler for CopyHandler {
         match self.process_buffer() {
             Ok(row_count) => {
                 let mut count = self.row_count.lock().map_err(|e| {
-                    PgWireError::UserError(Box::new(ErrorInfo::new(
-                        "ERROR".to_owned(),
-                        "XX000".to_owned(),
-                        format!("Lock error: {}", e),
-                    )))
+                    PgWireError::UserError(Box::new(
+                        PgError::internal(format!("Lock error: {}", e)).into_error_info()
+                    ))
                 })?;
                 *count = row_count;
 
                 // Clear buffer
                 let mut buffer = self.buffer.lock().map_err(|e| {
-                    PgWireError::UserError(Box::new(ErrorInfo::new(
-                        "ERROR".to_owned(),
-                        "XX000".to_owned(),
-                        format!("Lock error: {}", e),
-                    )))
+                    PgWireError::UserError(Box::new(
+                        PgError::internal(format!("Lock error: {}", e)).into_error_info()
+                    ))
                 })?;
                 buffer.clear();
 
                 Ok(())
             }
-            Err(e) => Err(PgWireError::UserError(Box::new(ErrorInfo::new(
-                "ERROR".to_owned(),
-                "22P04".to_owned(),  // bad_copy_file_format
-                format!("COPY data parsing error: {}", e),
-            )))),
+            Err(e) => Err(PgWireError::UserError(Box::new(
+                PgError::new(PgErrorCode::InvalidParameterValue, 
+                    format!("COPY data parsing error: {}", e)).into_error_info()
+            ))),
         }
     }
 
@@ -732,11 +727,10 @@ impl PgWireCopyHandler for CopyHandler {
         // Reset state
         let _ = self.reset_state();
 
-        PgWireError::UserError(Box::new(ErrorInfo::new(
-            "ERROR".to_owned(),
-            "57014".to_owned(),  // query_canceled
-            format!("COPY failed: {}", fail.message),
-        )))
+        PgWireError::UserError(Box::new(
+            PgError::new(PgErrorCode::QueryCanceled, 
+                format!("COPY failed: {}", fail.message)).into_error_info()
+        ))
     }
 }
 

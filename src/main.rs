@@ -31,6 +31,8 @@ use pgwire::error::{ErrorInfo, PgWireResult};
 use pgwire::tokio::process_socket;
 use tokio::net::TcpListener;
 
+use crate::handler::errors::PgError;
+
 mod catalog;
 mod copy;
 mod distinct_on;
@@ -159,11 +161,8 @@ impl SimpleQueryHandler for SqliteHandler {
             Ok(responses) => Ok(responses),
             Err(e) => {
                 eprintln!("Error executing query: {}", e);
-                Ok(vec![Response::Error(Box::new(ErrorInfo::new(
-                    "ERROR".to_owned(),
-                    "XX000".to_owned(),
-                    e.to_string(),
-                )))])
+                let pg_err = PgError::from_anyhow(e);
+                Ok(vec![Response::Error(Box::new(pg_err.into_error_info()))])
             }
         }
     }

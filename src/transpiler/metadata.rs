@@ -11,6 +11,39 @@ pub struct ColumnInfo {
     pub original_type: String,
     pub default_expr: Option<String>,
     pub is_nullable: bool,
+    /// Optional type OID for PostgreSQL type mapping
+    #[allow(dead_code)]
+    pub type_oid: Option<u32>,
+}
+
+impl ColumnInfo {
+    /// Create a new ColumnInfo with basic information
+    pub fn new(name: String, original_type: String, is_nullable: bool) -> Self {
+        Self {
+            name,
+            original_type,
+            default_expr: None,
+            is_nullable,
+            type_oid: None,
+        }
+    }
+
+    /// Create a ColumnInfo with all fields
+    pub fn with_all(
+        name: String,
+        original_type: String,
+        default_expr: Option<String>,
+        is_nullable: bool,
+        type_oid: Option<u32>,
+    ) -> Self {
+        Self {
+            name,
+            original_type,
+            default_expr,
+            is_nullable,
+            type_oid,
+        }
+    }
 }
 
 /// Trait for providing table metadata to the transpiler
@@ -28,6 +61,21 @@ pub trait MetadataProvider: Send + Sync {
     ///
     /// Returns the default expression string, or None if no default.
     fn get_column_default(&self, table_name: &str, column_name: &str) -> Option<String>;
+
+    /// Get the PostgreSQL type OID for a column
+    ///
+    /// Returns the OID if known, or None if the type is unknown.
+    /// This is used by the result set rewriter to provide accurate type metadata.
+    #[allow(dead_code)]
+    fn get_column_type_oid(&self, table_name: &str, column_name: &str) -> Option<u32> {
+        // Default implementation: look up column info and extract type OID
+        self.get_table_columns(table_name)
+            .and_then(|cols| {
+                cols.into_iter()
+                    .find(|c| c.name == column_name)
+                    .and_then(|c| c.type_oid)
+            })
+    }
 }
 
 /// A no-op metadata provider that returns no information
