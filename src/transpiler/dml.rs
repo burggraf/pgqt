@@ -547,9 +547,9 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
 }
 
 /// Reconstruct a VALUES statement (used in INSERT)
+
 pub(crate) fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileContext) -> String {
-    // Check if this VALUES has column aliases (via coldeflist in RangeSubselect)
-    // If so, we need to convert to UNION ALL SELECT because SQLite doesn't support column aliases on VALUES
+    
     if has_column_aliases(ctx) {
         return reconstruct_values_as_union_all(stmt, ctx);
     }
@@ -559,12 +559,21 @@ pub(crate) fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
     for values_list in &stmt.values_lists {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
+                ctx.current_column_index = 0;
+                
                 let values: Vec<String> = list
                     .items
                     .iter()
-                    .map(|n| reconstruct_node(n, ctx))
+                    .map(|n| {
+                        let val = reconstruct_node(n, ctx);
+                        ctx.current_column_index += 1;
+                        val
+                    })
                     .collect();
-                values_parts.push(format!("({})", values.join(", ")));
+                
+                let padded_values = pad_values_if_needed(values, ctx);
+                
+                values_parts.push(format!("({})", padded_values.join(", ")));
             }
         }
     }
@@ -572,6 +581,60 @@ pub(crate) fn reconstruct_values_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
     format!("values {}", values_parts.join(", "))
 }
 
+/// Pad VALUES list with DEFAULTs if needed to match column count
+fn pad_values_if_needed(values: Vec<String>, ctx: &TranspileContext) -> Vec<String> {
+    let expected_count = ctx.values_column_aliases.len();
+    
+    if expected_count == 0 || values.len() >= expected_count {
+        return values;
+    }
+    
+    let mut result = values;
+    
+    for idx in result.len()..expected_count {
+        if let Some(ref table_name) = ctx.current_table {
+            if let Some(col_name) = ctx.values_column_aliases.get(idx) {
+                if let Some(default_expr) = ctx.get_column_default(table_name, col_name) {
+                    result.push(transform_default_expression(&default_expr));
+                } else {
+                    result.push("NULL".to_string());
+                }
+            } else {
+                result.push("NULL".to_string());
+            }
+        } else {
+            result.push("NULL".to_string());
+        }
+    }
+    
+    result
+}
+
+/// Transform PostgreSQL default expressions to SQLite equivalents
+fn transform_default_expression(expr: &str) -> String {
+    let upper = expr.trim().to_uppercase();
+    
+    match upper.as_str() {
+        "NOW()" | "CURRENT_TIMESTAMP" | "CURRENT_TIMESTAMP()" => {
+            "datetime('now')".to_string()
+        }
+        "CURRENT_DATE" | "CURRENT_DATE()" => {
+            "date('now')".to_string()
+        }
+        "CURRENT_TIME" | "CURRENT_TIME()" => {
+            "time('now')".to_string()
+        }
+        "TRUE" => "1".to_string(),
+        "FALSE" => "0".to_string(),
+        _ => {
+            if upper.starts_with("NEXTVAL") {
+                "NULL".to_string()
+            } else {
+                expr.to_string()
+            }
+        }
+    }
+}
 /// Reconstruct a SortBy node (ORDER BY)
 pub(crate) fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> String {
     if let Some(ref inner) = node.node {

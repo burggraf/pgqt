@@ -82,7 +82,17 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::ArrayExpr(ref array_expr) => reconstruct_array_expr(array_expr, ctx),
             NodeEnum::AArrayExpr(ref a_array_expr) => reconstruct_a_array_expr(a_array_expr, ctx),
             NodeEnum::RangeFunction(ref range_func) => reconstruct_range_function(range_func, ctx),
-            NodeEnum::SetToDefault(_) => "/* DEFAULT */ NULL".to_string(),
+            NodeEnum::SetToDefault(_) => {
+                if let Some(ref table_name) = ctx.current_table {
+                    if let Some(ref col_aliases) = ctx.values_column_aliases.get(ctx.current_column_index) {
+                        if let Some(default_expr) = ctx.get_column_default(table_name, col_aliases) {
+                            let sqlite_default = transform_default_expression(&default_expr);
+                            return sqlite_default;
+                        }
+                    }
+                }
+                "NULL".to_string()
+            },
             NodeEnum::WindowDef(ref window_def) => {
                 // Handle named window definitions (e.g., WINDOW w AS (PARTITION BY ...))
                 let window_sql = crate::transpiler::window::reconstruct_window_def(window_def, ctx);
@@ -952,4 +962,37 @@ pub(crate) fn is_limit_all(node: &Node) -> bool {
         }
     }
     false
+}
+
+/// Transform PostgreSQL default expressions to SQLite equivalents
+/// 
+/// Handles common PostgreSQL default expressions like:
+/// - now() -> datetime('now')
+/// - current_timestamp -> datetime('now')
+/// - nextval('seq') -> NULL (SQLite handles autoincrement separately)
+
+
+pub(crate) fn transform_default_expression(expr: &str) -> String {
+    let upper = expr.trim().to_uppercase();
+    
+    match upper.as_str() {
+        "NOW()" | "CURRENT_TIMESTAMP" | "CURRENT_TIMESTAMP()" => {
+            "datetime(now)".to_string()
+        }
+        "CURRENT_DATE" | "CURRENT_DATE()" => {
+            "date(now)".to_string()
+        }
+        "CURRENT_TIME" | "CURRENT_TIME()" => {
+            "time(now)".to_string()
+        }
+        "TRUE" => "1".to_string(),
+        "FALSE" => "0".to_string(),
+        _ => {
+            if upper.starts_with("NEXTVAL") {
+                "NULL".to_string()
+            } else {
+                expr.to_string()
+            }
+        }
+    }
 }
