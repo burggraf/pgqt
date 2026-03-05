@@ -134,18 +134,18 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
     // Lookup function in registry
     let mapping = ctx.registry.functions.mappings.get(func_name).or_else(|| ctx.registry.functions.mappings.get(&full_func_name));
 
-    let mut original_func_name: Option<&str> = None;
+    let mut _original_func_name: Option<&str> = None;
     let sqlite_func = match mapping {
         Some(FunctionMapping::Simple(name)) => name.to_string(),
         Some(FunctionMapping::Rewrite(rewrite)) => {
             if func_name == "pg_sleep" || func_name == "timezone" || func_name == "any_value" {
-                original_func_name = Some(func_name);
+                _original_func_name = Some(func_name);
             }
             rewrite.to_string()
         },
         Some(FunctionMapping::Complex(func)) => {
             if func_name == "timezone" {
-                original_func_name = Some("timezone");
+                _original_func_name = Some("timezone");
             }
             return func(&args); // For complex mappings, return immediately. This handles formatting directly.
         },
@@ -188,7 +188,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
 
     // Handle constant replacements for tracking rename (like any_value to min, etc. - those take arguments)
     // Actually pg_sleep maps to "0"
-    if let Some(orig_name) = original_func_name {
+    if let Some(_orig_name) = _original_func_name {
         if sqlite_func == "0" || sqlite_func == "1" {
             // Constant replacement
             return sqlite_func.to_string();

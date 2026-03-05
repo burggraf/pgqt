@@ -4,6 +4,7 @@ pub enum FunctionMapping {
     Simple(&'static str),
     Rewrite(&'static str),
     Complex(fn(args: &[String]) -> String),
+    #[allow(dead_code)]
     NoOp,
 }
 
