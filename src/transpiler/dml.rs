@@ -600,13 +600,14 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
 
     parts.push("insert into".to_string());
 
-    // Table name
+    
     let table_name = stmt
         .relation
         .as_ref()
         .map(|r| {
             let name = r.relname.to_lowercase();
             ctx.referenced_tables.push(name.clone());
+            ctx.current_table = Some(name.clone()); 
             if r.schemaname.is_empty() || r.schemaname == "public" {
                 name
             } else {
@@ -614,11 +615,21 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
             }
         })
         .unwrap_or_default();
-    parts.push(table_name);
+    parts.push(table_name.clone());
 
-    // Columns
-    if !stmt.cols.is_empty() {
-        let cols: Vec<String> = stmt
+    
+    let columns: Vec<String>;
+    if stmt.cols.is_empty() {
+        
+        if let Some(table_cols) = ctx.get_table_columns(&table_name) {
+            columns = table_cols.iter().map(|c| c.name.clone()).collect();
+            parts.push(format!("({})", columns.join(", ")));
+        } else {
+            
+            columns = Vec::new();
+        }
+    } else {
+        columns = stmt
             .cols
             .iter()
             .filter_map(|n| {
@@ -630,14 +641,20 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
                 None
             })
             .collect();
-        parts.push(format!("({})", cols.join(", ")));
+        parts.push(format!("({})", columns.join(", ")));
     }
 
-    // VALUES or SELECT
+    
+    ctx.values_column_aliases = columns;
+
+    
     if let Some(ref select_stmt) = stmt.select_stmt {
         let select_sql = reconstruct_node(select_stmt, ctx);
         parts.push(select_sql);
     }
+    
+    ctx.current_table = None;
+    ctx.values_column_aliases.clear();
 
     parts.join(" ")
 }
