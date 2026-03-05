@@ -56,6 +56,8 @@ pub struct TranspileContext {
     pub current_column_index: usize,
     /// Current table name when processing INSERT (for metadata lookups)
     pub current_table: Option<String>,
+    /// Whether we are inside a VALUES clause (for column naming: column1, column2, ...)
+    pub in_values_clause: bool,
 }
 
 impl Default for TranspileContext {
@@ -75,6 +77,7 @@ impl TranspileContext {
             metadata_provider: None,
             current_column_index: 0,
             current_table: None,
+            in_values_clause: false,
         }
     }
 
@@ -88,6 +91,7 @@ impl TranspileContext {
             metadata_provider: None,
             current_column_index: 0,
             current_table: None,
+            in_values_clause: false,
         }
     }
 
@@ -103,6 +107,7 @@ impl TranspileContext {
             metadata_provider: Some(provider),
             current_column_index: 0,
             current_table: None,
+            in_values_clause: false,
         }
     }
     

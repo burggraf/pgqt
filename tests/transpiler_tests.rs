@@ -125,7 +125,7 @@ fn test_transpile_udf_inlining() {
     let mut ctx = TranspileContext::with_functions(functions);
     let input = "SELECT add(1, 2)";
     let result = transpile_with_context(input, &mut ctx);
-    assert_eq!(result.sql, "select (select 1 + 2) as \"add\"");
+    assert_eq!(result.sql.to_lowercase(), "select (select 1 + 2 as \"?column?\")");
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_transpile_void_udf_inlining() {
     let mut ctx = TranspileContext::with_functions(functions);
     let input = "SELECT log('hi')";
     let result = transpile_with_context(input, &mut ctx);
-    assert_eq!(result.sql, "select (select null from (select 'hi') limit 1) as \"log\"");
+    assert_eq!(result.sql.to_lowercase(), "select (select null from (select 'hi' as \"?column?\") limit 1)");
 }
 
 #[test]

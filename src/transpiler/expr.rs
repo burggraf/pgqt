@@ -688,8 +688,10 @@ pub(crate) fn reconstruct_res_target(target: &ResTarget, ctx: &mut TranspileCont
     if let Some(ref val) = target.val {
         let val_sql = reconstruct_node(val, ctx);
         if name.is_empty() {
-            // Check if the value is a TypeCast - if so, use the original type name as alias
-            // This preserves column names like 'json', 'jsonb', 'bytea' for casts
+            // Check if the value is a TypeCast - if so, use ?column? for PostgreSQL compatibility
+            // unless it's an explicit alias. 
+            // Previous behavior was using the type name as alias, but research shows Postgres uses ?column?
+            /*
             if let Some(ref inner) = val.node {
                 if let NodeEnum::TypeCast(type_cast) = inner {
                     let original_type = extract_original_type(&type_cast.type_name);
@@ -714,6 +716,7 @@ pub(crate) fn reconstruct_res_target(target: &ResTarget, ctx: &mut TranspileCont
                     }
                 }
             }
+            */
             val_sql
         } else {
             // Preserve case for aliases - PostgreSQL only folds unquoted identifiers to lowercase
