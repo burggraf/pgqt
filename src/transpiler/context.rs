@@ -2,6 +2,7 @@
 
 use dashmap::DashMap;
 use std::sync::Arc;
+use super::metadata::{ColumnInfo, MetadataProvider};
 
 /// Metadata for a column extracted from a CREATE TABLE statement
 #[derive(Debug, Clone)]
@@ -49,6 +50,12 @@ pub struct TranspileContext {
     pub values_column_aliases: Vec<String>,
     /// Whether we're currently in a subquery context (for VALUES handling)
     pub in_subquery: bool,
+    /// Metadata provider for schema lookups during transpilation
+    metadata_provider: Option<Arc<dyn MetadataProvider>>,
+    /// Current column index when processing VALUES (for DEFAULT resolution)
+    pub current_column_index: usize,
+    /// Current table name when processing INSERT (for metadata lookups)
+    pub current_table: Option<String>,
 }
 
 impl TranspileContext {
@@ -59,6 +66,9 @@ impl TranspileContext {
             functions: None,
             values_column_aliases: Vec::new(),
             in_subquery: false,
+            metadata_provider: None,
+            current_column_index: 0,
+            current_table: None,
         }
     }
 
@@ -69,7 +79,41 @@ impl TranspileContext {
             functions: Some(functions),
             values_column_aliases: Vec::new(),
             in_subquery: false,
+            metadata_provider: None,
+            current_column_index: 0,
+            current_table: None,
         }
+    }
+    
+    /// Create a new context with a metadata provider
+    pub fn with_metadata_provider(provider: Arc<dyn MetadataProvider>) -> Self {
+        Self {
+            referenced_tables: Vec::new(),
+            errors: Vec::new(),
+            functions: None,
+            values_column_aliases: Vec::new(),
+            in_subquery: false,
+            metadata_provider: Some(provider),
+            current_column_index: 0,
+            current_table: None,
+        }
+    }
+    
+    /// Set the metadata provider
+    pub fn set_metadata_provider(&mut self, provider: Arc<dyn MetadataProvider>) {
+        self.metadata_provider = Some(provider);
+    }
+    
+    /// Get column information for a table
+    pub fn get_table_columns(&self, table_name: &str) -> Option<Vec<ColumnInfo>> {
+        self.metadata_provider.as_ref()
+            .and_then(|p| p.get_table_columns(table_name))
+    }
+    
+    /// Get default expression for a column
+    pub fn get_column_default(&self, table_name: &str, column_name: &str) -> Option<String> {
+        self.metadata_provider.as_ref()
+            .and_then(|p| p.get_column_default(table_name, column_name))
     }
 
     pub fn add_error(&mut self, error: String) {
