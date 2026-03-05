@@ -198,7 +198,6 @@ impl PgError {
                 Self::new(PgErrorCode::DataException,
                     format!("Integer value {} out of range at index {}", val, idx))
             }
-            #[cfg(feature = "functions")]
             rusqlite::Error::UserFunctionError(e) => {
                 // Check for specific user function error messages
                 let msg = e.to_string();

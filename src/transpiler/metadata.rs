@@ -16,36 +16,6 @@ pub struct ColumnInfo {
     pub type_oid: Option<u32>,
 }
 
-impl ColumnInfo {
-    /// Create a new ColumnInfo with basic information
-    pub fn new(name: String, original_type: String, is_nullable: bool) -> Self {
-        Self {
-            name,
-            original_type,
-            default_expr: None,
-            is_nullable,
-            type_oid: None,
-        }
-    }
-
-    /// Create a ColumnInfo with all fields
-    pub fn with_all(
-        name: String,
-        original_type: String,
-        default_expr: Option<String>,
-        is_nullable: bool,
-        type_oid: Option<u32>,
-    ) -> Self {
-        Self {
-            name,
-            original_type,
-            default_expr,
-            is_nullable,
-            type_oid,
-        }
-    }
-}
-
 /// Trait for providing table metadata to the transpiler
 ///
 /// Implementations of this trait allow the transpiler to query

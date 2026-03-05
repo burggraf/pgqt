@@ -27,7 +27,7 @@ use clap::Parser;
 use pgwire::api::query::SimpleQueryHandler;
 use pgwire::api::results::Response;
 use pgwire::api::{ClientInfo, PgWireServerHandlers};
-use pgwire::error::{ErrorInfo, PgWireResult};
+use pgwire::error::PgWireResult;
 use pgwire::tokio::process_socket;
 use tokio::net::TcpListener;
 

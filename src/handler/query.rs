@@ -242,11 +242,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
     }
 
-    /// Execute a SELECT statement and return results
-    fn execute_select(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
-        self.execute_select_with_tables(conn, sql, &[])
-    }
-
     /// Execute a SELECT statement with known referenced tables for type inference
     fn execute_select_with_tables(&self, conn: &Connection, sql: &str, referenced_tables: &[String]) -> Result<Vec<Response>> {
         let mut stmt = conn.prepare(sql)?;
@@ -321,8 +316,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
                         let pg_type = map_original_type_to_pg_type(&col.original_type);
                         ColumnFieldInfo {
                             name: col.column_name.clone(),
-                            table_name: Some(table_name.clone()),
-                            original_type: Some(col.original_type.clone()),
                             pg_type,
                         }
                     })

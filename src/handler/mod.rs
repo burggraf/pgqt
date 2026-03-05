@@ -21,7 +21,6 @@ pub mod utils;
 
 // Re-export commonly used items
 pub use query::QueryExecution;
-pub use rewriter::{ResultSetRewriter, map_original_type_to_pg_type};
 pub use utils::HandlerUtils;
 
 /// Session context for each client connection
