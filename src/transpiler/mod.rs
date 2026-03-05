@@ -41,6 +41,10 @@ pub mod rls;
 pub mod window;
 
 // Re-exports from context
+pub mod metadata;
+
+// Re-export metadata types
+pub use metadata::{ColumnInfo, MetadataProvider, NoOpMetadataProvider};
 pub use context::{
     OperationType, 
     TranspileContext, 
