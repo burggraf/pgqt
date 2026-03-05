@@ -31,6 +31,7 @@ use crate::copy::{CopyStatement, CopyDirection, CopyOptions, CopyFormat};
 
 
 // Submodules
+pub mod registry;
 pub mod context;
 mod utils;
 pub mod ddl;

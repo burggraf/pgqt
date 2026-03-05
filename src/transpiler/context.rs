@@ -46,6 +46,7 @@ pub struct TranspileContext {
     pub referenced_tables: Vec<String>,
     pub errors: Vec<String>,
     pub functions: Option<Arc<DashMap<String, crate::catalog::FunctionMetadata>>>,
+    pub registry: Arc<crate::transpiler::registry::Registry>,
     /// Column aliases for VALUES statements (when VALUES is used with AS alias (col1, col2))
     pub values_column_aliases: Vec<String>,
     /// Whether we're currently in a subquery context (for VALUES handling)
@@ -72,6 +73,7 @@ impl TranspileContext {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
             functions: None,
+            registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
             in_subquery: false,
             metadata_provider: None,
@@ -86,6 +88,7 @@ impl TranspileContext {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
             functions: Some(functions),
+            registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
             in_subquery: false,
             metadata_provider: None,
@@ -102,6 +105,7 @@ impl TranspileContext {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
             functions: None,
+            registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
             in_subquery: false,
             metadata_provider: Some(provider),

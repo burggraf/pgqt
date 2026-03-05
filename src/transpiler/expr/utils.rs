@@ -51,7 +51,7 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
     let original_type = extract_original_type(&type_cast.type_name);
-    let sqlite_type = rewrite_type_for_sqlite(&original_type);
+    let sqlite_type = rewrite_type_for_sqlite(&original_type, &ctx.registry);
 
     // Validate boolean literals
     if original_type.to_uppercase() == "BOOLEAN" || original_type.to_uppercase() == "BOOL" {

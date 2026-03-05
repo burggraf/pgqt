@@ -116,397 +116,64 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         }
     }
 
-    // Build args string - handle agg_star (count(*)) case
+    // Process arguments
+    let mut args: Vec<String> = Vec::new();
+    if !func_call.agg_star {
+        for n in &func_call.args {
+            args.push(reconstruct_node(n, ctx));
+        }
+    }
     let args_str = if func_call.agg_star {
         "*".to_string()
     } else {
-        let args: Vec<String> = func_call
-            .args
-            .iter()
-            .map(|n| reconstruct_node(n, ctx))
-            .collect();
         args.join(", ")
     };
 
-    // Handle functions that need special argument processing
-    match func_name {
-        "jsonb_path_exists" => {
-            // jsonb_path_exists(json, path) -> json_type(json, path) IS NOT NULL
-            // Handle PostgreSQL JSONPath wildcards like $.skills[*]
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let path = &args[1];
-                // Strip [*] wildcard - SQLite doesn't support it directly
-                // $.skills[*] -> $.skills (check if array exists and has elements)
-                let clean_path = path.replace("[*]", "");
-                // Check if the path exists and for arrays, check they have elements
-                return format!(
-                    "CASE WHEN json_type({}, {}) = 'array' THEN json_array_length(json_extract({}, {})) > 0 ELSE json_type({}, {}) IS NOT NULL END",
-                    args[0], clean_path, args[0], clean_path, args[0], clean_path
-                );
-            }
-            return format!("json_type({}) IS NOT NULL", args_str);
-        }
-        "jsonb_path_match" => {
-            // jsonb_path_match(json, path) -> json_extract(json, path) = true
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let clean_path = args[1].replace("[*]", "");
-                return format!("json_extract({}, {}) = 1", args[0], clean_path);
-            }
-            return format!("json_extract({}) = 1", args_str);
-        }
-        "jsonb_path_query" => {
-            // jsonb_path_query(json, path) -> json_extract(json, path)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let clean_path = args[1].replace("[*]", "");
-                return format!("json_extract({}, {})", args[0], clean_path);
-            }
-            return format!("json_extract({})", args_str);
-        }
-        "jsonb_path_query_array" => {
-            // jsonb_path_query_array(json, path) -> json_extract(json, path) (returns as array)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let clean_path = args[1].replace("[*]", "");
-                return format!("json_extract({}, {})", args[0], clean_path);
-            }
-            return format!("json_extract({})", args_str);
-        }
-        "jsonb_path_query_first" => {
-            // jsonb_path_query_first(json, path) -> json_extract(json, path) (returns first match)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let clean_path = args[1].replace("[*]", "");
-                return format!("json_extract({}, {})", args[0], clean_path);
-            }
-            return format!("json_extract({})", args_str);
-        }
-        "jsonb_typeof" => {
-            // jsonb_typeof(json) -> json_type(json) (returns type name)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if !args.is_empty() {
-                // SQLite json_type returns 'null', 'true', 'false', 'integer', 'real', 'text', 'array', 'object'
-                // PostgreSQL jsonb_typeof returns 'object', 'array', 'string', 'number', 'boolean', 'null'
-                // We need to map SQLite types to PostgreSQL types
-                return format!(
-                    "CASE json_type({0}) \
-                    WHEN 'true' THEN 'boolean' \
-                    WHEN 'false' THEN 'boolean' \
-                    WHEN 'integer' THEN 'number' \
-                    WHEN 'real' THEN 'number' \
-                    WHEN 'text' THEN 'string' \
-                    ELSE json_type({0}) END",
-                    args[0]
-                );
-            }
-            return "json_type(".to_string() + &args_str + ")";
-        }
-        "jsonb_object_keys" => {
-            // jsonb_object_keys(json) -> extract keys from json object
-            // PostgreSQL returns a set of keys, but we return as JSON array for SQLite
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if !args.is_empty() {
-                // Return keys as a JSON array using a subquery
-                return format!(
-                    "(SELECT json_group_array(key) FROM json_each({}))",
-                    args[0]
-                );
-            }
-            return format!("(SELECT json_group_array(key) FROM json_each({}))", args_str);
-        }
-        "jsonb_each" | "json_each" => {
-            // jsonb_each(json) -> json_each(json) in SQLite
-            // This returns key/value pairs as rows
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if !args.is_empty() {
-                return format!("json_each({})", args[0]);
-            }
-            return format!("json_each({})", args_str);
-        }
-        "jsonb_array_elements" => {
-            // jsonb_array_elements(json) -> json_each(json) for arrays
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if !args.is_empty() {
-                return format!("json_each({})", args[0]);
-            }
-            return format!("json_each({})", args_str);
-        }
-        "jsonb_extract_path" => {
-            // jsonb_extract_path(json, keys...) -> json_extract(json, path)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                // Build path from the keys
-                return format!("json_extract({}, {})", args[0], args[1..].join(", "));
-            }
-            return format!("json_extract({})", args_str);
-        }
-        "jsonb_extract_path_text" => {
-            // jsonb_extract_path_text(json, keys...) -> json_extract() with ->>
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                return format!("json_extract({}, {})", args[0], args[1..].join(", "));
-            }
-            return format!("json_extract({})", args_str);
-        }
-        "repeat" => {
-            // repeat(string, n) - repeat string n times
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                // Use a recursive CTE approach or simple replacement
-                // For simplicity, use printf with pattern replacement
-                return format!(
-                    "(WITH RECURSIVE _repeat(n, s) AS (SELECT 1, {} UNION ALL SELECT n+1, s || {} FROM _repeat WHERE n < {}) SELECT s FROM _repeat ORDER BY n DESC LIMIT 1)",
-                    args[0], args[0], args[1]
-                );
-            }
-            return format!("repeat({})", args_str);
-        }
-        "generate_series" => {
-            // generate_series(start, stop) or generate_series(start, stop, step)
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let start = &args[0];
-                let stop = &args[1];
-                let step = if args.len() >= 3 { args[2].clone() } else { "1".to_string() };
-                // Return a subquery that generates the series using recursive CTE
-                return format!(
-                    "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM _series)",
-                    start, step, step, step, stop, step, step, stop
-                );
-            }
-            return format!("generate_series({})", args_str);
-        }
-        "pg_input_is_valid" => {
-            // pg_input_is_valid(text, type) - stub that always returns true (1)
-            // In a full implementation, this would validate the input against the type
-            // Return just the value - the alias will be added by reconstruct_res_target
-            return "1".to_string();
-        }
-        "extract" => {
-            // extract(field FROM source) - extract date/time field
-            // In SQLite, we use strftime or specific functions
-            let args: Vec<String> = func_call
-                .args
-                .iter()
-                .map(|n| reconstruct_node(n, ctx))
-                .collect();
-            if args.len() >= 2 {
-                let field = args[0].trim_matches('\'');
-                let source = &args[1];
-                // Map PostgreSQL extract fields to SQLite equivalents
-                let sqlite_expr = match field.to_lowercase().as_str() {
-                    "year" => format!("cast(strftime('%Y', {}) as integer)", source),
-                    "month" => format!("cast(strftime('%m', {}) as integer)", source),
-                    "day" => format!("cast(strftime('%d', {}) as integer)", source),
-                    "hour" => format!("cast(strftime('%H', {}) as integer)", source),
-                    "minute" => format!("cast(strftime('%M', {}) as integer)", source),
-                    "second" => format!("cast(strftime('%S', {}) as integer)", source),
-                    "dow" => format!("cast(strftime('%w', {}) as integer)", source), // day of week (0-6, Sunday=0)
-                    "doy" => format!("cast(strftime('%j', {}) as integer)", source), // day of year (001-366)
-                    "week" => format!("cast(strftime('%W', {}) as integer)", source), // week of year (00-53)
-                    "quarter" => format!("(cast(strftime('%m', {}) as integer) + 2) / 3", source),
-                    "epoch" => format!("strftime('%s', {})", source),
-                    "millennium" => format!("(cast(strftime('%Y', {}) as integer) + 999) / 1000", source),
-                    "century" => format!("(cast(strftime('%Y', {}) as integer) + 99) / 100", source),
-                    "decade" => format!("cast(strftime('%Y', {}) as integer) / 10", source),
-                    _ => format!("strftime('{}', {})", field, source),
-                };
-                return sqlite_expr;
-            }
-            return format!("extract({})", args_str);
-        }
-        _ => {}
-    }
-
-    // Map PostgreSQL functions to SQLite equivalents
-    // Track if the function name changes (for column alias preservation)
-    let mut original_func_name: Option<&str> = None;
+    use crate::transpiler::registry::FunctionMapping;
     
-    let sqlite_func = match func_name {
-        "now" => "datetime('now')",
-        "current_timestamp" => "datetime('now')",
-        "current_date" => "date('now')",
-        "current_time" => "time('now')",
-        "random" => "random()",
-        "floor" => "floor",
-        "ceil" => "ceil",
-        "abs" => "abs",
-        "coalesce" => "coalesce",
-        "nullif" => "nullif",
-        "length" => "length",
-        "lower" => "lower",
-        "upper" => "upper",
-        "trim" => "trim",
-        "ltrim" => "ltrim",
-        "rtrim" => "rtrim",
-        "substr" => "substr",
-        "replace" => "replace",
-        "round" => "round",
-        // System catalog functions - strip schema and return as-is for now
-        "pg_get_userbyid" => "pg_get_userbyid",
-        "pg_table_is_visible" => "pg_table_is_visible",
-        "pg_type_is_visible" => "pg_type_is_visible",
-        "pg_function_is_visible" => "pg_function_is_visible",
-        "format_type" => "format_type",
-        "current_schema" => "current_schema",
-        "current_schemas" => "current_schemas",
-        "current_database" => "current_database",
-        "current_setting" => "current_setting",
-        "pg_my_temp_schema" => "pg_my_temp_schema",
-        "pg_get_expr" => "pg_get_expr",
-        "pg_get_indexdef" => "pg_get_indexdef",
-        "obj_description" => "obj_description",
-        "pg_get_constraintdef" => "pg_get_constraintdef",
-        "pg_encoding_to_char" => "pg_encoding_to_char",
-        "array_to_string" => "array_to_string",
-        "array_length" => "array_length",
-        "pg_table_size" => "pg_table_size",
-        "pg_total_relation_size" => "pg_total_relation_size",
-        "pg_size_pretty" => "pg_size_pretty",
-        // UUID generation
-        "gen_random_uuid" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
-        "uuid_generate_v4" => "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
+    // Lookup function in registry
+    let mapping = ctx.registry.functions.mappings.get(func_name).or_else(|| ctx.registry.functions.mappings.get(&full_func_name));
 
-        // pg_sleep - stub that returns 0
-        "pg_sleep" => {
-            original_func_name = Some("pg_sleep");
-            "0"
-        }
-        // Statistical aggregate functions - SQLite doesn't have built-in support
-        // We use custom implementations via SQLite custom functions
-        "stddev_pop" => "stddev_pop",
-        "stddev_samp" => "stddev_samp",
-        "var_pop" => "var_pop",
-        "var_samp" => "var_samp",
-        "covar_pop" => "covar_pop",
-        "covar_samp" => "covar_samp",
-        "corr" => "corr",
-        "regr_slope" => "regr_slope",
-        "regr_intercept" => "regr_intercept",
-        "regr_count" => "regr_count",
-        "regr_r2" => "regr_r2",
-        "regr_avgx" => "regr_avgx",
-        "regr_avgy" => "regr_avgy",
-        "regr_sxx" => "regr_sxx",
-        "regr_syy" => "regr_syy",
-        "regr_sxy" => "regr_sxy",
-
-        // Timezone conversion - stub that returns the input unchanged
-        "timezone" => {
-            original_func_name = Some("timezone");
-            "0"  // Will be handled specially below
-        },
-
-        // Full-Text Search functions
-        "to_tsvector" => "to_tsvector",
-        "to_tsquery" => "to_tsquery",
-        "plainto_tsquery" => "plainto_tsquery",
-        "phraseto_tsquery" => "phraseto_tsquery",
-        "websearch_to_tsquery" => "websearch_to_tsquery",
-        "ts_rank" => "ts_rank",
-        "ts_rank_cd" => "ts_rank_cd",
-        "ts_headline" => "ts_headline",
-        "setweight" => "setweight",
-        "strip" => "strip",
-        "numnode" => "numnode",
-        "querytree" => "querytree",
-        "ts_rewrite" => "ts_rewrite",
-        "ts_lexize" => "ts_lexize",
-        "ts_debug" => "ts_debug",
-        "ts_stat" => "ts_stat",
-        "array_to_tsvector" => "array_to_tsvector",
-        "jsonb_to_tsvector" => "jsonb_to_tsvector",
-
-        // Range constructor functions
-        "int4range" => "int4range",
-        "int8range" => "int8range",
-        "numrange" => "numrange",
-        "tsrange" => "tsrange",
-        "tstzrange" => "tstzrange",
-        "daterange" => "daterange",
-
-        // Aggregate functions - any_value returns any value from the group (use min as equivalent)
-        "any_value" => {
-            original_func_name = Some("any_value");
-            "min"
-        },
-
-        // String functions
-        "repeat" => "repeat",
-
-        // Set-returning functions - generate_series
-        "generate_series" => "generate_series",
-
-        // Regular expression functions - SQLite has built-in regexp support
-        "regexp" => "regexp",
-        "regexpi" => "regexpi",
-
-        _ => {
-            // For unknown functions, return the full name if schema-qualified
-            // but strip 'pg_catalog' if present as SQLite doesn't have it
-            if func_parts.len() > 1 {
-                if func_parts[0] == "pg_catalog" {
-                    let base = format!("{}({})", func_name, args_str);
-                    return add_window_clause(&base, func_call, ctx);
-                }
-                let base = format!("{}({})", full_func_name, args_str);
-                return add_window_clause(&base, func_call, ctx);
+    let mut original_func_name: Option<&str> = None;
+    let sqlite_func = match mapping {
+        Some(FunctionMapping::Simple(name)) => name.to_string(),
+        Some(FunctionMapping::Rewrite(rewrite)) => {
+            if func_name == "pg_sleep" || func_name == "timezone" || func_name == "any_value" {
+                original_func_name = Some(func_name);
             }
-            func_name
+            rewrite.to_string()
+        },
+        Some(FunctionMapping::Complex(func)) => {
+            if func_name == "timezone" {
+                original_func_name = Some("timezone");
+            }
+            return func(&args); // For complex mappings, return immediately. This handles formatting directly.
+        },
+        Some(FunctionMapping::NoOp) => {
+            return "NULL".to_string();
+        },
+        None => {
+            if ctx.registry.stubbing_mode {
+                // Return NULL for unknown functions when stubbing is enabled
+                // except for schema-qualified where we might strip 'pg_catalog'
+                if func_parts.len() > 1 && func_parts[0] == "pg_catalog" {
+                    func_name.to_string()
+                } else if func_parts.len() > 1 {
+                    full_func_name.to_string()
+                } else {
+                    func_name.to_string()
+                }
+            } else {
+                if func_parts.len() > 1 {
+                    if func_parts[0] == "pg_catalog" {
+                        func_name.to_string()
+                    } else {
+                        full_func_name.to_string()
+                    }
+                } else {
+                    func_name.to_string()
+                }
+            }
         }
     };
 
@@ -519,27 +186,13 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         return sqlite_func.to_string();
     }
 
-    // For functions that were renamed, we don't add the alias here anymore
-    // because reconstruct_res_target now adds aliases for all function calls
+    // Handle constant replacements for tracking rename (like any_value to min, etc. - those take arguments)
+    // Actually pg_sleep maps to "0"
     if let Some(orig_name) = original_func_name {
         if sqlite_func == "0" || sqlite_func == "1" {
-            // For constant replacements, just return the value
-            // The alias will be added by reconstruct_res_target
-            // Special case for timezone - return the second argument (the timestamp)
-            if orig_name == "timezone" {
-                let args: Vec<String> = func_call
-                    .args
-                    .iter()
-                    .map(|n| reconstruct_node(n, ctx))
-                    .collect();
-                if args.len() >= 2 {
-                    return args[1].clone(); // Return the timestamp argument
-                }
-            }
+            // Constant replacement
             return sqlite_func.to_string();
         }
-        // For other renamed functions, continue with normal processing
-        // The alias will be added by reconstruct_res_target
     }
 
     let base = format!("{}({})", sqlite_func, args_str);
