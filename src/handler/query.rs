@@ -15,12 +15,15 @@ use crate::catalog::{store_table_metadata, store_relation_metadata};
 use crate::schema::SearchPath;
 use crate::handler::SessionContext;
 use crate::handler::utils::HandlerUtils;
+use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
 use pgwire::api::Type;
 
 /// Trait for query execution methods
-pub trait QueryExecution: HandlerUtils {
+pub trait QueryExecution: HandlerUtils + Clone {
+    fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider>;
+    
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         let upper_sql = sql.trim().to_uppercase();
@@ -92,6 +95,7 @@ pub trait QueryExecution: HandlerUtils {
         }
 
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
+        ctx.set_metadata_provider(self.as_metadata_provider());
         let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
 
         // Check for transpilation errors (e.g., unknown pseudo-type)

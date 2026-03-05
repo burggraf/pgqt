@@ -649,4 +649,8 @@ impl QueryExecution for SqliteHandler {
     fn copy_handler(&self) -> &copy::CopyHandler {
         &self.copy_handler
     }
+    
+    fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider> {
+        Arc::new(self.clone())
+    }
 }
