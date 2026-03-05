@@ -98,6 +98,9 @@ pub(super) fn rewrite_type_for_sqlite(pg_type: &str) -> String {
         || upper.starts_with("CHARACTER")
         || upper.starts_with("BPCHAR")
         || upper == "TEXT"
+        || upper == "REGCLASS"
+        || upper == "VARBIT"
+        || upper == "BIT VARYING"
     {
         return "text".to_string();
     }

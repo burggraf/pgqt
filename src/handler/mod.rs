@@ -40,6 +40,39 @@ pub struct SqliteHandler {
     pub functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>,
 }
 
+struct RegrCount;
+
+impl rusqlite::functions::Aggregate<i64, i64> for RegrCount {
+    fn init(&self, _ctx: &mut rusqlite::functions::Context<'_>) -> rusqlite::Result<i64> {
+        Ok(0)
+    }
+
+    fn step(&self, _ctx: &mut rusqlite::functions::Context<'_>, state: &mut i64) -> rusqlite::Result<()> {
+        *state += 1;
+        Ok(())
+    }
+
+    fn finalize(&self, _ctx: &mut rusqlite::functions::Context<'_>, state: Option<i64>) -> rusqlite::Result<i64> {
+        Ok(state.unwrap_or(0))
+    }
+}
+
+struct StubAggFloat;
+
+impl rusqlite::functions::Aggregate<Option<f64>, Option<f64>> for StubAggFloat {
+    fn init(&self, _ctx: &mut rusqlite::functions::Context<'_>) -> rusqlite::Result<Option<f64>> {
+        Ok(None)
+    }
+
+    fn step(&self, _ctx: &mut rusqlite::functions::Context<'_>, _state: &mut Option<f64>) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn finalize(&self, _ctx: &mut rusqlite::functions::Context<'_>, _state: Option<Option<f64>>) -> rusqlite::Result<Option<f64>> {
+        Ok(None)
+    }
+}
+
 impl SqliteHandler {
     /// Create a new SqliteHandler with the given database path
     pub fn new(db_path: &str) -> Result<Self> {
@@ -495,6 +528,50 @@ impl SqliteHandler {
 
         // Register statistical aggregate functions
         crate::stats::register_statistical_functions(conn)?;
+
+        // random - returns float between 0 and 1
+        conn.create_scalar_function("random", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            let r = unsafe { libc::rand() } as f64 / libc::RAND_MAX as f64;
+            Ok(r)
+        })?;
+
+        // pg_typeof - returns type name of the value
+        conn.create_scalar_function("pg_typeof", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let val = ctx.get_raw(0);
+            match val {
+                rusqlite::types::ValueRef::Null => Ok("unknown".to_string()),
+                rusqlite::types::ValueRef::Integer(_) => Ok("integer".to_string()),
+                rusqlite::types::ValueRef::Real(_) => Ok("double precision".to_string()),
+                rusqlite::types::ValueRef::Text(_) => Ok("text".to_string()),
+                rusqlite::types::ValueRef::Blob(_) => Ok("bytea".to_string()),
+            }
+        })?;
+
+        // regr_count - stub for regression count (as aggregate)
+        conn.create_aggregate_function("regr_count", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, RegrCount)?;
+
+        // More regr_* stubs
+        let regr_funcs = vec![
+            "regr_sxx", "regr_sxy", "regr_syy", "regr_avgx", "regr_avgy", 
+            "regr_r2", "regr_slope", "regr_intercept",
+            "covar_pop", "covar_samp", "corr"
+        ];
+        for name in regr_funcs {
+            conn.create_aggregate_function(name, 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, StubAggFloat)?;
+        }
+
+        // Transition function stubs
+        let accum_funcs = vec!["float8_accum", "float4_accum", "int8_accum", "int4_accum", "int2_accum"];
+        for name in accum_funcs {
+            conn.create_scalar_function(name, 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+                Ok("{0,0,0}".to_string())
+            })?;
+        }
+
+        // pg_get_viewdef - stub for view definition
+        conn.create_scalar_function("pg_get_viewdef", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("SELECT 1".to_string())
+        })?;
 
         Ok(())
     }

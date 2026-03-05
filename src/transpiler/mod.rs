@@ -263,6 +263,17 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     errors: Vec::new(),
                 }
             }
+            NodeEnum::ViewStmt(ref view_stmt) => {
+                let sql = ddl::reconstruct_view_stmt(view_stmt, ctx);
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: ctx.referenced_tables.clone(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
             _ => TranspileResult {
                 sql: node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
                 create_table_metadata: None, 

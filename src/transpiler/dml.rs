@@ -274,10 +274,27 @@ fn reconstruct_with_clause(with_clause: &pg_query::protobuf::WithClause, ctx: &m
                 };
                 // CTE query
                 let query_sql = if let Some(ref query) = cte.ctequery {
-                    reconstruct_node(query, ctx)
+                    // Save and clear values_column_aliases for the CTE query
+                    // as CTEs don't inherit aliases from the outer subquery.
+                    let saved_aliases = ctx.values_column_aliases.clone();
+                    ctx.values_column_aliases.clear();
+                    let sql = reconstruct_node(query, ctx);
+                    ctx.values_column_aliases = saved_aliases;
+                    sql
                 } else {
                     String::new()
                 };
+
+                // Handle SEARCH and CYCLE clauses (Postgres 14+)
+                // These are not supported in SQLite and can cause infinite loops
+                // if ignored in recursive CTEs.
+                if cte.search_clause.is_some() {
+                    ctx.add_error("SEARCH clause in CTE is not supported".to_string());
+                }
+                if cte.cycle_clause.is_some() {
+                    ctx.add_error("CYCLE clause in CTE is not supported".to_string());
+                }
+
                 return Some(format!("{}{} AS ({})", name, col_aliases, query_sql));
             }
         }
@@ -407,7 +424,26 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
         let columns: Vec<String> = stmt
             .target_list
             .iter()
-            .map(|n| reconstruct_node(n, ctx))
+            .enumerate()
+            .map(|(idx, n)| {
+                let col = reconstruct_node(n, ctx);
+                // If we are in a subquery and have column aliases, apply them
+                // only if the ResTarget didn't already have an explicit name
+                if !ctx.values_column_aliases.is_empty() && idx < ctx.values_column_aliases.len() {
+                    if let Some(ref inner) = n.node {
+                        if let NodeEnum::ResTarget(ref target) = inner {
+                            if target.name.is_empty() {
+                                // Add the alias if not already aliased by reconstruct_res_target
+                                // and not a star expression (SQLite doesn't support * AS alias)
+                                if col != "*" && !col.to_lowercase().contains(" as ") {
+                                    return format!("{} AS \"{}\"", col, ctx.values_column_aliases[idx]);
+                                }
+                            }
+                        }
+                    }
+                }
+                col
+            })
             .collect();
         parts.push(columns.join(", "));
     }

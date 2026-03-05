@@ -7,7 +7,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt, 
-    IndexStmt, CopyStmt
+    IndexStmt, CopyStmt, ViewStmt
 };
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
 use crate::transpiler::reconstruct_node;
@@ -824,5 +824,45 @@ pub(crate) fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: 
         _ => {}
     }
 
+    parts.join(" ")
+}
+
+/// Reconstruct a CREATE VIEW statement
+pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext) -> String {
+    let mut parts = Vec::new();
+    
+    // SQLite doesn't support CREATE OR REPLACE VIEW, so we just use CREATE VIEW
+    parts.push("create view".to_string());
+    
+    if let Some(ref relation) = stmt.view {
+        let name = relation.relname.to_lowercase();
+        if relation.schemaname.is_empty() || relation.schemaname == "public" {
+            parts.push(name);
+        } else {
+            parts.push(format!("{}.{}", relation.schemaname.to_lowercase(), name));
+        }
+    }
+    
+    // Column aliases: CREATE VIEW v(x, y)
+    if !stmt.aliases.is_empty() {
+        let cols: Vec<String> = stmt.aliases.iter().filter_map(|n| {
+            if let Some(ref inner) = n.node {
+                if let NodeEnum::String(ref s) = inner {
+                    return Some(s.sval.to_lowercase());
+                }
+            }
+            None
+        }).collect();
+        if !cols.is_empty() {
+            parts.push(format!("({})", cols.join(", ")));
+        }
+    }
+    
+    parts.push("as".to_string());
+    
+    if let Some(ref query) = stmt.query {
+        parts.push(reconstruct_node(query, ctx));
+    }
+    
     parts.join(" ")
 }
