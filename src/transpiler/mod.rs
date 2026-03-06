@@ -312,6 +312,9 @@ mod tests {
     use super::*;
 
     #[test]
+    }
+
+    #[test]
     fn test_drop_table_cascade() {
         // CASCADE should be stripped for SQLite compatibility
         let result = transpile_with_metadata("DROP TABLE IF EXISTS test_jsonb CASCADE");

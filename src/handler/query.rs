@@ -27,6 +27,14 @@ pub trait QueryExecution: HandlerUtils + Clone {
     
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
+        let result = crate::transpiler::transpile_with_metadata(sql);
+        if !result.errors.is_empty() {
+            return Err(anyhow::anyhow!(result.errors.join("\n")));
+        }
+        let transpiled = result.sql;
+        println!("DEBUG: Original: {}", sql);
+        println!("DEBUG: Transpiled: {}", transpiled);
+        let sql = &transpiled;
         let upper_sql = sql.trim().to_uppercase();
 
         // Transaction Control commands

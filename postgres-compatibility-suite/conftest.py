@@ -108,18 +108,21 @@ def drop_all_tables(conn, catalog_table):
                     pass
 
         else:
-            # SQLite/PGQT: get tables from sqlite_master
+            # SQLite/PGQT: get tables and views from sqlite_master
             cur.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type = 'table'
+                SELECT name, type FROM sqlite_master
+                WHERE type IN ('table', 'view')
                 AND name NOT LIKE 'sqlite_%'
                 AND name NOT LIKE '__pg_%'
             """)
-            tables = [row[0] for row in cur.fetchall()]
+            items = cur.fetchall()
 
-            for table in tables:
+            for name, type in items:
                 try:
-                    cur.execute(f'DROP TABLE IF EXISTS "{table}"')
+                    if type == 'table':
+                        cur.execute(f'DROP TABLE IF EXISTS "{name}"')
+                    else:
+                        cur.execute(f'DROP VIEW IF EXISTS "{name}"')
                 except Exception:
                     pass
 

@@ -22,7 +22,7 @@ mod stmt;
 mod operators;
 
 use pg_query::protobuf::node::Node as NodeEnum;
-use pg_query::protobuf::{Node, BoolExpr, TypeCast};
+use pg_query::protobuf::{Node, BoolExpr, TypeCast, BooleanTest};
 use crate::transpiler::TranspileContext;
 use crate::transpiler::func::reconstruct_func_call;
 use crate::transpiler::dml::reconstruct_select_stmt;
@@ -73,6 +73,19 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::SelectStmt(ref select_stmt) => reconstruct_select_stmt(select_stmt, ctx),
             NodeEnum::SubLink(ref sub_link) => stmt::reconstruct_sub_link(sub_link, ctx),
             NodeEnum::NullTest(ref null_test) => stmt::reconstruct_null_test(null_test, ctx),
+            NodeEnum::BooleanTest(ref boolean_test) => {
+                let arg = boolean_test.arg.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
+                let test_type = match boolean_test.booltesttype() {
+                    pg_query::protobuf::BoolTestType::IsTrue => "IS TRUE",
+                    pg_query::protobuf::BoolTestType::IsNotTrue => "IS NOT TRUE",
+                    pg_query::protobuf::BoolTestType::IsFalse => "IS FALSE",
+                    pg_query::protobuf::BoolTestType::IsNotFalse => "IS NOT FALSE",
+                    pg_query::protobuf::BoolTestType::IsUnknown => "IS NULL",
+                    pg_query::protobuf::BoolTestType::IsNotUnknown => "IS NOT NULL",
+                    _ => "",
+                };
+                format!("{} {}", arg, test_type)
+            }
             NodeEnum::CaseExpr(ref case_expr) => stmt::reconstruct_case_expr(case_expr, ctx),
             NodeEnum::CoalesceExpr(ref coalesce_expr) => {
                 stmt::reconstruct_coalesce_expr(coalesce_expr, ctx)

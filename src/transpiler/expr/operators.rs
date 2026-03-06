@@ -114,8 +114,11 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             
             if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_left(&lexpr_sql, &rexpr_sql)
-            } else {
+            } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_left(&lexpr_sql, &rexpr_sql)
+            } else {
+                // Default to bitwise shift for integers
+                format!("{} << {}", lexpr_sql, rexpr_sql)
             }
         },
         ">>" => {
@@ -124,8 +127,11 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             
             if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_right(&lexpr_sql, &rexpr_sql)
-            } else {
+            } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_right(&lexpr_sql, &rexpr_sql)
+            } else {
+                // Default to bitwise shift for integers
+                format!("{} >> {}", lexpr_sql, rexpr_sql)
             }
         },
         "<<|" => {

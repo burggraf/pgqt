@@ -193,6 +193,20 @@ impl Registry {
         functions.register("uuid_generate_v4", FunctionMapping::Rewrite("lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"));
         functions.register("pg_sleep", FunctionMapping::Rewrite("0"));
         functions.register("any_value", FunctionMapping::Rewrite("min"));
+        functions.register("booleq", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                format!("{} = {}", args[0], args[1])
+            } else {
+                "NULL".to_string()
+            }
+        }));
+        functions.register("boolne", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                format!("{} <> {}", args[0], args[1])
+            } else {
+                "NULL".to_string()
+            }
+        }));
 
         functions.register("jsonb_path_exists", FunctionMapping::Complex(|args| {
             if args.len() >= 2 {

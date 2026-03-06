@@ -72,7 +72,11 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
             let valid_true = matches!(inner.as_str(), "t" | "tr" | "tru" | "true" | "y" | "ye" | "yes" | "on" | "1");
             let valid_false = matches!(inner.as_str(), "f" | "fa" | "fal" | "fals" | "false" | "n" | "no" | "of" | "off" | "0");
 
-            if !valid_true && !valid_false {
+            if valid_true {
+                return "1".to_string();
+            } else if valid_false {
+                return "0".to_string();
+            } else {
                 ctx.add_error(format!("invalid input syntax for type boolean: \"{}\"", &inner_val[1..inner_val.len()-1]));
             }
         }
