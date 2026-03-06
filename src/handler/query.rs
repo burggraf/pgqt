@@ -27,6 +27,30 @@ pub trait QueryExecution: HandlerUtils + Clone {
     
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
+        // Check for commands BEFORE transpilation (transpiler may convert them)
+        let original_upper = sql.trim().to_uppercase();
+        
+        // SHOW commands
+        if original_upper == "SHOW ALL" {
+            return self.handle_show_all();
+        }
+        if original_upper.starts_with("SHOW ") && !original_upper.starts_with("SHOW ALL") {
+            return self.handle_show_config(sql);
+        }
+        if original_upper == "SHOW SEARCH_PATH" {
+            return self.handle_show_search_path();
+        }
+        
+        // DROP FUNCTION (transpiler doesn't handle this, it deparses to invalid SQL)
+        if original_upper.starts_with("DROP FUNCTION") {
+            return self.handle_drop_function(sql);
+        }
+        
+        // SET search_path (transpiler converts this to "select 1")
+        if original_upper.starts_with("SET SEARCH_PATH") {
+            return self.handle_set_search_path(sql);
+        }
+
         let result = crate::transpiler::transpile_with_metadata(sql);
         if !result.errors.is_empty() {
             return Err(anyhow::anyhow!(result.errors.join("\n")));
@@ -34,8 +58,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let transpiled = result.sql;
         println!("DEBUG: Original: {}", sql);
         println!("DEBUG: Transpiled: {}", transpiled);
-        let sql = &transpiled;
-        let upper_sql = sql.trim().to_uppercase();
+        let upper_sql = transpiled.trim().to_uppercase();
 
         // Transaction Control commands
         if crate::handler::transaction::is_transaction_control(sql) {
@@ -117,39 +140,14 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return self.handle_drop_schema(sql);
         }
 
-        // Handle SET search_path
-        if upper_sql.starts_with("SET SEARCH_PATH") {
-            return self.handle_set_search_path(sql);
-        }
-
         // Handle EXPLAIN with PostgreSQL-specific options (e.g., EXPLAIN (costs off) SELECT ...)
         if upper_sql.starts_with("EXPLAIN") {
             return self.handle_explain(sql);
         }
 
-        // Handle SHOW search_path
-        if upper_sql == "SHOW SEARCH_PATH" {
-            return self.handle_show_search_path();
-        }
-
-        // Handle SHOW ALL
-        if upper_sql == "SHOW ALL" {
-            return self.handle_show_all();
-        }
-
-        // Handle SHOW <config_param>
-        if upper_sql.starts_with("SHOW ") && !upper_sql.starts_with("SHOW ALL") {
-            return self.handle_show_config(sql);
-        }
-
         // Handle CREATE FUNCTION
         if upper_sql.starts_with("CREATE FUNCTION") || upper_sql.starts_with("CREATE OR REPLACE FUNCTION") {
             return self.handle_create_function(sql);
-        }
-
-        // Handle DROP FUNCTION
-        if upper_sql.starts_with("DROP FUNCTION") {
-            return self.handle_drop_function(sql);
         }
 
         // Try to handle simple function calls like SELECT func(arg1, arg2)

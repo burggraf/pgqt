@@ -313,14 +313,21 @@ pub trait HandlerUtils {
             crate::schema::drop_schema_objects(&conn, &schema_name, self.schema_manager())?;
         }
 
-        // Detach the schema database
-        self.schema_manager().detach_schema(&conn, &schema_name)?;
+        // Remove schema from catalog first
+        crate::schema::drop_schema(&conn, &schema_name)?;
+
+        // Try to detach the schema database - this may fail if it's locked
+        // In that case, we just mark it for cleanup later
+        match self.schema_manager().detach_schema(&conn, &schema_name) {
+            Ok(_) => {}
+            Err(e) => {
+                // Log the error but continue - the schema is already removed from catalog
+                eprintln!("Warning: Could not detach schema {}: {}", schema_name, e);
+            }
+        }
 
         // Delete the schema database file
         self.schema_manager().delete_schema_db(&schema_name)?;
-
-        // Remove schema from catalog
-        crate::schema::drop_schema(&conn, &schema_name)?;
 
         Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))])
     }

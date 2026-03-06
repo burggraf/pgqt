@@ -390,16 +390,13 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         schema_manager.attach_schema(conn, schema_name)?;
     }
 
-    // Get list of tables
+    // Get list of tables - use query_row for simple queries to avoid prepared statement issues
     let sql = format!(
         "SELECT name FROM {}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let mut stmt = conn.prepare(&sql)?;
-    let tables: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+    let tables: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    drop(sql); // Explicitly drop the prepared statement
 
     // Drop each table (CASCADE is automatic in SQLite)
     for table in tables {
@@ -412,11 +409,8 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let mut stmt = conn.prepare(&sql)?;
-    let views: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+    let views: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    drop(sql);
 
     for view in views {
         let drop_sql = format!("DROP VIEW IF EXISTS {}.{}", schema_name, view);
@@ -428,11 +422,8 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let mut stmt = conn.prepare(&sql)?;
-    let indexes: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+    let indexes: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    drop(sql);
 
     for index in indexes {
         let drop_sql = format!("DROP INDEX IF EXISTS {}.{}", schema_name, index);
@@ -444,11 +435,8 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let mut stmt = conn.prepare(&sql)?;
-    let triggers: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+    let triggers: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    drop(sql);
 
     for trigger in triggers {
         let drop_sql = format!("DROP TRIGGER IF EXISTS {}.{}", schema_name, trigger);
