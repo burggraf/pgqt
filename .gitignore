@@ -7,6 +7,6 @@ test_pg_lite_meta*.db
 /venv
 tests/__pycache__/
 postgres-compatibility-suite/__pycache__/
-postgres-compatability-suite/test_db.db*
+postgres-compatibility-suite/*.db*
 prompts/*
 .worktrees/
