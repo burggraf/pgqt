@@ -506,17 +506,19 @@ impl SqliteHandler {
         })?;
 
         conn.create_scalar_function("lower", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let range: String = ctx.get(0)?;
-            crate::range::lower(&range, RangeType::Int4)
-                .map(|opt| opt.unwrap_or_default())
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            let val: String = ctx.get(0)?;
+            match crate::range::lower(&val, RangeType::Int4) {
+                Ok(opt) => Ok(opt.unwrap_or_default()),
+                Err(_) => Ok(val.to_lowercase()),
+            }
         })?;
 
         conn.create_scalar_function("upper", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            let range: String = ctx.get(0)?;
-            crate::range::upper(&range, RangeType::Int4)
-                .map(|opt| opt.unwrap_or_default())
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+            let val: String = ctx.get(0)?;
+            match crate::range::upper(&val, RangeType::Int4) {
+                Ok(opt) => Ok(opt.unwrap_or_default()),
+                Err(_) => Ok(val.to_uppercase()),
+            }
         })?;
 
         // regexp - pattern matching function (used by ~ operator)
