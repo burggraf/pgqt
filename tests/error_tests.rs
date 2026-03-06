@@ -3,8 +3,6 @@
 //! These tests verify that PostgreSQL SQLSTATE codes are correctly returned
 //! for various error conditions.
 
-use std::sync::{Arc, Mutex};
-use rusqlite::Connection;
 use pgqt::handler::SqliteHandler;
 use pgqt::handler::query::QueryExecution;
 

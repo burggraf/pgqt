@@ -1,4 +1,4 @@
-use pgwire::api::results::{Response, Tag};
+use pgwire::api::results::Response;
 use std::fs;
 use pgqt::handler::SqliteHandler;
 use pgqt::handler::query::QueryExecution;
@@ -42,7 +42,7 @@ fn test_transaction_rollback() {
     // Verify row does not exist
     let res = handler.execute_query("SELECT * FROM tx_test").unwrap();
     match &res[0] {
-        Response::Query(q) => {
+        Response::Query(_q) => {
             // Can't easily count stream items here without async, 
             // but we can query raw connection to verify
             let conn = handler.conn.lock().unwrap();

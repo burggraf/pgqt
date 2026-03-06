@@ -22,7 +22,7 @@ mod stmt;
 mod operators;
 
 use pg_query::protobuf::node::Node as NodeEnum;
-use pg_query::protobuf::{Node, BoolExpr, TypeCast, BooleanTest};
+use pg_query::protobuf::{Node, BoolExpr, TypeCast};
 use crate::transpiler::TranspileContext;
 use crate::transpiler::func::reconstruct_func_call;
 use crate::transpiler::dml::reconstruct_select_stmt;
