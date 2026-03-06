@@ -29,17 +29,77 @@ pub trait QueryExecution: HandlerUtils + Clone {
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         let upper_sql = sql.trim().to_uppercase();
 
-        // Ignore transaction control statements - SQLite handles transactions automatically
-        // PostgreSQL transaction control:
-        // - BEGIN / START TRANSACTION: start a transaction
-        // - COMMIT / END: commit the transaction
-        // - ROLLBACK / ABORT: roll back the transaction
-        if upper_sql == "BEGIN" || upper_sql == "COMMIT" || upper_sql == "ROLLBACK" || upper_sql == "END"
-            || upper_sql == "ABORT" || upper_sql.starts_with("START TRANSACTION") {
-            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+        // Transaction Control commands
+        if crate::handler::transaction::is_transaction_control(sql) {
+            let mut session_clone = {
+                let session_ref = self.sessions().get(&0).unwrap_or_else(|| {
+                    self.sessions().insert(0, SessionContext {
+                        authenticated_user: "postgres".to_string(),
+                        current_user: "postgres".to_string(),
+                        search_path: SearchPath::default(),
+                        transaction_status: crate::handler::TransactionStatus::Idle,
+                        savepoints: Vec::new(),
+                    });
+                    self.sessions().get(&0).unwrap()
+                });
+                session_ref.clone()
+            };
+
+            let prev_status = session_clone.transaction_status.clone();
+            if let Some(res) = crate::handler::transaction::handle_transaction_control(sql, &mut session_clone) {
+                // If the transaction state changed from Idle to InTransaction, we should execute SQLite BEGIN
+                let conn = self.conn().lock().unwrap();
+                if prev_status == crate::handler::TransactionStatus::Idle && session_clone.transaction_status == crate::handler::TransactionStatus::InTransaction {
+                    let _ = conn.execute("BEGIN", []);
+                } else if prev_status != crate::handler::TransactionStatus::Idle && session_clone.transaction_status == crate::handler::TransactionStatus::Idle {
+                    if upper_sql.starts_with("ROLLBACK") {
+                        let _ = conn.execute("ROLLBACK", []);
+                    } else {
+                        let _ = conn.execute("COMMIT", []);
+                    }
+                } else if upper_sql.starts_with("SAVEPOINT ") {
+                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let sp_name = parts[1].trim_end_matches(';');
+                        let _ = conn.execute(&format!("SAVEPOINT {}", sp_name), []);
+                    }
+                } else if upper_sql.starts_with("ROLLBACK TO ") {
+                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
+                    let sp_name = if parts.len() >= 4 { parts[3] } else { parts[2] }.trim_end_matches(';');
+                    let _ = conn.execute(&format!("ROLLBACK TO {}", sp_name), []);
+                } else if upper_sql.starts_with("RELEASE ") {
+                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
+                    let sp_name = if parts.len() >= 3 { parts[2] } else { parts[1] }.trim_end_matches(';');
+                    let _ = conn.execute(&format!("RELEASE {}", sp_name), []);
+                }
+
+                self.sessions().insert(0, session_clone);
+                return res;
+            }
         }
 
-        // Handle CREATE SCHEMA
+        // Before executing anything else, check transaction error state
+        {
+            let session = self.sessions().get(&0).unwrap_or_else(|| {
+                self.sessions().insert(0, SessionContext {
+                    authenticated_user: "postgres".to_string(),
+                    current_user: "postgres".to_string(),
+                    search_path: SearchPath::default(),
+                    transaction_status: crate::handler::TransactionStatus::Idle,
+                    savepoints: Vec::new(),
+                });
+                self.sessions().get(&0).unwrap()
+            });
+
+            if session.transaction_status == crate::handler::TransactionStatus::InError {
+                if !upper_sql.starts_with("ROLLBACK") {
+                    return Err(anyhow::anyhow!("25P02: current transaction is aborted, commands ignored until end of transaction block"));
+                }
+            }
+        }
+
+        let execute_result = (|| -> Result<Vec<Response>> {
+            // Handle CREATE SCHEMA
         if upper_sql.starts_with("CREATE SCHEMA") {
             return self.handle_create_schema(sql);
         }
@@ -118,7 +178,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                     self.sessions().insert(0, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(),
+                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
                     });
                     self.sessions().get_mut(&0).unwrap()
                 });
@@ -163,7 +223,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                     self.sessions().insert(0, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(),
+                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
                     });
                     self.sessions().get(&0).unwrap()
                 });
@@ -202,6 +262,18 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 self.execute_statement(&conn, &sqlite_sql)
             }
         }
+        })();
+
+        // Check for error and update transaction status
+        if execute_result.is_err() {
+            let mut session_clone = self.sessions().get(&0).unwrap().clone();
+            if session_clone.transaction_status == crate::handler::TransactionStatus::InTransaction {
+                session_clone.transaction_status = crate::handler::TransactionStatus::InError;
+                self.sessions().insert(0, session_clone);
+            }
+        }
+
+        execute_result
     }
 
     /// Handle COPY statement

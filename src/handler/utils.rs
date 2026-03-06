@@ -33,7 +33,7 @@ pub trait HandlerUtils {
             self.sessions().insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
                 current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
+                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
             self.sessions().get(&0).unwrap()
         });
@@ -345,7 +345,7 @@ pub trait HandlerUtils {
             self.sessions().insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
                 current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
+                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
             self.sessions().get_mut(&0).unwrap()
         });
@@ -360,7 +360,7 @@ pub trait HandlerUtils {
             self.sessions().insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
                 current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
+                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
             self.sessions().get(&0).unwrap()
         });
@@ -483,7 +483,7 @@ pub trait HandlerUtils {
             self.sessions().insert(0, SessionContext {
                 authenticated_user: "postgres".to_string(),
                 current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
+                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
             self.sessions().get(&0).unwrap()
         });
@@ -530,7 +530,7 @@ pub trait HandlerUtils {
                     self.sessions().insert(0, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(),
+                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
                     });
                     self.sessions().get(&0).unwrap()
                 });

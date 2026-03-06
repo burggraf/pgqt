@@ -152,7 +152,7 @@ impl SimpleQueryHandler for SqliteHandler {
             self.sessions.insert(0, SessionContext {
                 authenticated_user: user.clone(),
                 current_user: user,
-                search_path: SearchPath::default(),
+                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
         }
 

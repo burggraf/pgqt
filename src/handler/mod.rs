@@ -23,6 +23,13 @@ pub mod utils;
 pub use query::QueryExecution;
 pub use utils::HandlerUtils;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionStatus {
+    Idle,           // Not in a transaction
+    InTransaction,  // BEGIN called, no errors
+    InError,        // Command failed inside transaction, must ROLLBACK
+}
+
 /// Session context for each client connection
 #[derive(Debug, Clone)]
 pub struct SessionContext {
@@ -30,6 +37,8 @@ pub struct SessionContext {
     pub authenticated_user: String,
     pub current_user: String,
     pub search_path: SearchPath,
+    pub transaction_status: TransactionStatus,
+    pub savepoints: Vec<String>,
 }
 
 /// PostgreSQL-to-SQLite proxy handler
