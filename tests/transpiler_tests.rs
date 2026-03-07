@@ -288,3 +288,34 @@ fn test_alias() {
     let result = transpile(input);
     assert!(result.contains("as"));
 }
+
+#[test]
+fn test_transpile_recursive_cte_limit() {
+    let input = "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n < 100) SELECT sum(n) FROM t;";
+    let result = transpile(input);
+    // Should contain LIMIT 100 (default max_recursion_depth)
+    assert!(result.to_lowercase().contains("limit 100"));
+}
+
+#[test]
+fn test_transpile_anonymous_column_names() {
+    // Basic anonymous column
+    let input = "SELECT 1 + 1";
+    let result = transpile(input);
+    assert!(result.to_lowercase().contains("as \"?column?\""));
+
+    // CASE expression
+    let input = "SELECT CASE WHEN 1=1 THEN 1 END";
+    let result = transpile(input);
+    assert!(result.to_lowercase().contains("as \"case\""));
+
+    // CAST expression
+    let input = "SELECT '123'::int";
+    let result = transpile(input);
+    assert!(result.to_lowercase().contains("as \"int4\""));
+
+    // Function call
+    let input = "SELECT lower('HI')";
+    let result = transpile(input);
+    assert!(result.to_lowercase().contains("as \"lower\""));
+}

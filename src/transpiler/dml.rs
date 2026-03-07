@@ -286,7 +286,7 @@ fn reconstruct_with_clause(with_clause: &pg_query::protobuf::WithClause, ctx: &m
                     String::new()
                 };
                 // CTE query
-                let query_sql = if let Some(ref query) = cte.ctequery {
+                let mut query_sql = if let Some(ref query) = cte.ctequery {
                     // Save and clear values_column_aliases for the CTE query
                     // as CTEs don't inherit aliases from the outer subquery.
                     let saved_aliases = ctx.values_column_aliases.clone();
@@ -297,6 +297,12 @@ fn reconstruct_with_clause(with_clause: &pg_query::protobuf::WithClause, ctx: &m
                 } else {
                     String::new()
                 };
+
+                // Apply recursion limit for recursive CTEs in SQLite
+                // to prevent infinite loops/crashes
+                if with_clause.recursive && !query_sql.to_lowercase().contains(" limit ") {
+                    query_sql = format!("{} LIMIT {}", query_sql, ctx.max_recursion_depth);
+                }
 
                 // Handle SEARCH and CYCLE clauses (Postgres 14+)
                 // These are not supported in SQLite and can cause infinite loops
@@ -503,11 +509,19 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
                                     // Function calls get the function name
                                     if let Some(ref val) = target.val {
                                         if let Some(NodeEnum::FuncCall(ref fc)) = val.node {
-                                            if let Some(first) = fc.funcname.first() {
+                                            if let Some(first) = fc.funcname.last() {
                                                 if let Some(NodeEnum::String(ref s)) = first.node {
                                                     return format!("{} AS \"{}\"", col, s.sval.to_lowercase());
                                                 }
                                             }
+                                        }
+
+                                        if let Some(NodeEnum::CaseExpr(_)) = val.node {
+                                            return format!("{} AS \"case\"", col);
+                                        }
+
+                                        if let Some(NodeEnum::CoalesceExpr(_)) = val.node {
+                                            return format!("{} AS \"coalesce\"", col);
                                         }
                                     }
 

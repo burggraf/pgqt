@@ -59,6 +59,8 @@ pub struct TranspileContext {
     pub current_table: Option<String>,
     /// Whether we are inside a VALUES clause (for column naming: column1, column2, ...)
     pub in_values_clause: bool,
+    /// Maximum recursion depth for recursive CTEs
+    pub max_recursion_depth: usize,
 }
 
 impl Default for TranspileContext {
@@ -80,6 +82,7 @@ impl TranspileContext {
             current_column_index: 0,
             current_table: None,
             in_values_clause: false,
+            max_recursion_depth: 100,
         }
     }
 
@@ -95,6 +98,7 @@ impl TranspileContext {
             current_column_index: 0,
             current_table: None,
             in_values_clause: false,
+            max_recursion_depth: 100,
         }
     }
 
@@ -112,6 +116,7 @@ impl TranspileContext {
             current_column_index: 0,
             current_table: None,
             in_values_clause: false,
+            max_recursion_depth: 100,
         }
     }
     

@@ -6,12 +6,14 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 
 ### 1.1 Proxy Stability for Recursive CTEs
 - **Problem**: `with.sql` causes proxy hangs/crashes, likely due to uncontrolled recursion or memory limits in the transpiled SQLite logic.
-- **Action**: Implement a hard recursion depth limit in `src/transpiler/window.rs` (or equivalent) and ensure proper error handling for deep recursion.
+- **Action**: Implement a hard recursion depth limit in `src/transpiler/dml.rs` and ensure proper error handling for deep recursion.
+- **Status**: Completed (Added `max_recursion_depth` to `TranspileContext` and injected `LIMIT` into recursive CTEs).
 - **Metric**: `with.sql` should either pass or return a controlled error instead of crashing.
 
 ### 1.2 Anonymous Column Naming
 - **Problem**: PostgreSQL defaults to `?column?` for unnamed results; SQLite often uses the expression text. Tests like `case.sql` fail on column name mismatches.
 - **Action**: Update `reconstruct_select` in `src/transpiler/dml.rs` to automatically alias any unnamed `ResTarget` to `?column?` or the appropriate Postgres-compatible name.
+- **Status**: Completed (Updated `reconstruct_select` to apply default aliases: `?column?`, function names, `case`, `coalesce`, and type names for casts).
 - **Metric**: Passing `case.sql` and `select.sql`.
 
 ### 1.3 Robust INSERT Padding
