@@ -345,7 +345,15 @@ pub(crate) fn reconstruct_set_operation_stmt(stmt: &SelectStmt, ctx: &mut Transp
     // Reconstruct left and right sides
     // Don't wrap in parentheses - SQLite doesn't allow them when ORDER BY is at the end
     let left_sql = stmt.larg.as_ref()
-        .map(|l| reconstruct_select_stmt(l, ctx))
+        .map(|l| {
+            let sql = reconstruct_select_stmt(l, ctx);
+            if l.op > 1 || !l.sort_clause.is_empty() || l.limit_count.is_some() || l.limit_offset.is_some() {
+                // Left side is a nested set operation or has clauses that need wrapping
+                format!("select * from ({})", sql)
+            } else {
+                sql
+            }
+        })
         .unwrap_or_default();
 
     // If the right side is itself a set operation (e.g., UNION (SELECT x UNION ALL SELECT y)),
@@ -353,8 +361,8 @@ pub(crate) fn reconstruct_set_operation_stmt(stmt: &SelectStmt, ctx: &mut Transp
     let right_sql = stmt.rarg.as_ref()
         .map(|r| {
             let sql = reconstruct_select_stmt(r, ctx);
-            if r.op > 1 {
-                // Right side is a nested set operation - wrap to preserve precedence
+            if r.op > 1 || !r.sort_clause.is_empty() || r.limit_count.is_some() || r.limit_offset.is_some() {
+                // Right side is a nested set operation or has clauses that need wrapping
                 format!("select * from ({})", sql)
             } else {
                 sql

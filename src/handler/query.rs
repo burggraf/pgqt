@@ -446,7 +446,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 Type::TEXT
             };
 
-            let name = if is_expression || col_name == "?column?" {
+            let name = if col_name == "?column?" || (is_expression && !col_name.contains(" as ")) {
                 "?column?".to_string()
             } else {
                 col_name

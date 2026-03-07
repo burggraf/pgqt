@@ -33,6 +33,7 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 ### 2.2 Advanced Set Operators
 - **Problem**: `(SELECT ...) UNION (SELECT ...) ORDER BY ...` fails when combined with `INTERSECT` because of incorrect clause ordering in the transpiled SQL.
 - **Action**: Fix the `SelectStmt` reconstruction logic to properly wrap set operations in subqueries when an `ORDER BY` is present on a specific branch.
+- **Status**: Completed (Updated `reconstruct_set_operation_stmt` to wrap nested set operations, or branches with `ORDER BY`/`LIMIT`, in `SELECT * FROM (...)` subqueries for SQLite compatibility).
 - **Metric**: Passing `union.sql`.
 
 ### 2.3 Subquery Array Indexing
