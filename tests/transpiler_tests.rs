@@ -366,3 +366,11 @@ fn test_transpile_insert_padding_with_default() {
     assert!(result.sql.to_lowercase().contains("select null as a, 7 as b, 5 as c") || 
             result.sql.to_lowercase().contains("values (null, 7, 5)"));
 }
+
+#[test]
+fn test_transpile_repeat_function() {
+    let input = "SELECT repeat('a', 3)";
+    let result = transpile(input);
+    // Transpiler should preserve the function name
+    assert!(result.to_lowercase().contains("repeat('a', 3)"));
+}

@@ -352,3 +352,30 @@ fn test_parse_returns_void() {
     assert_eq!(metadata.return_type_kind, ReturnTypeKind::Void);
     assert_eq!(metadata.return_type, "VOID");
 }
+
+#[test]
+fn test_builtin_repeat_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    SqliteHandler::register_builtin_functions(&conn).unwrap();
+    
+    let mut stmt = conn.prepare("SELECT repeat('ab', 3)").unwrap();
+    let result: String = stmt.query_row([], |row| row.get(0)).unwrap();
+    assert_eq!(result, "ababab");
+    
+    let mut stmt = conn.prepare("SELECT repeat('a', 0)").unwrap();
+    let result: String = stmt.query_row([], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+    
+    let mut stmt = conn.prepare("SELECT repeat('a', -5)").unwrap();
+    let result: String = stmt.query_row([], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+}
+
+#[test]
+fn test_builtin_repeat_function_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "INSERT INTO t (b) VALUES (repeat('x', 5))";
+    let result = transpile(input);
+    assert!(result.to_lowercase().contains("repeat('x', 5)"));
+}

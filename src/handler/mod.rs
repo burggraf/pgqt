@@ -135,6 +135,17 @@ impl SqliteHandler {
             Ok(true)
         })?;
 
+        // repeat(text, int) - repeats text N times
+        conn.create_scalar_function("repeat", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let s: String = ctx.get(0)?;
+            let n: i64 = ctx.get(1)?;
+            if n <= 0 {
+                Ok("".to_string())
+            } else {
+                Ok(s.repeat(n as usize))
+            }
+        })?;
+
         // format_type - formats type OID to type name
         conn.create_scalar_function("format_type", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let type_oid: i64 = ctx.get(0)?;

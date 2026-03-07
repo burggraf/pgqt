@@ -26,7 +26,8 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 
 ### 2.1 String & Math Functions
 - **Problem**: `repeat()` and other common string functions are missing.
-- **Action**: Implement `repeat(text, int)` as a SQLite user-defined function (UDF) in `src/functions.rs`.
+- **Action**: Implement `repeat(text, int)` as a SQLite user-defined function (UDF) in `src/handler/mod.rs`.
+- **Status**: Completed (Implemented `repeat(text, int)` as a Rust-based SQLite UDF).
 - **Metric**: Passing `delete.sql` (which uses `repeat` for test data generation).
 
 ### 2.2 Advanced Set Operators
