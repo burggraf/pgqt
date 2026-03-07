@@ -26,15 +26,22 @@ fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext
     for values_list in stmt.values_lists.iter() {
         if let Some(ref inner) = values_list.node {
             if let NodeEnum::List(list) = inner {
+                ctx.current_column_index = 0;
                 let values: Vec<String> = list
                     .items
                     .iter()
-                    .map(|n| reconstruct_node(n, ctx))
+                    .map(|n| {
+                        let val = reconstruct_node(n, ctx);
+                        ctx.current_column_index += 1;
+                        val
+                    })
                     .collect();
+
+                let padded_values = pad_values_if_needed(values, ctx);
 
                 if !ctx.values_column_aliases.is_empty() {
                     // Add column aliases: SELECT value1 AS alias1, value2 AS alias2
-                    let aliased_values: Vec<String> = values
+                    let aliased_values: Vec<String> = padded_values
                         .iter()
                         .enumerate()
                         .map(|(idx, val)| {
@@ -50,7 +57,7 @@ fn reconstruct_values_as_union_all(stmt: &SelectStmt, ctx: &mut TranspileContext
                 } else {
                     // No aliases - use column1, column2, etc. (handled by select target list reconstruction usually,
                     // but reconstruct_values_as_union_all is called directly, so we add them here)
-                    let aliased_values: Vec<String> = values
+                    let aliased_values: Vec<String> = padded_values
                         .iter()
                         .enumerate()
                         .map(|(idx, val)| {

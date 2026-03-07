@@ -319,3 +319,50 @@ fn test_transpile_anonymous_column_names() {
     let result = transpile(input);
     assert!(result.to_lowercase().contains("as \"lower\""));
 }
+
+#[test]
+fn test_transpile_insert_padding_with_default() {
+    use pgqt::transpiler::{TranspileContext, transpile_with_context};
+    use pgqt::transpiler::metadata::{ColumnInfo, MetadataProvider};
+
+    struct TestMetadataProvider;
+    impl MetadataProvider for TestMetadataProvider {
+        fn get_table_columns(&self, table_name: &str) -> Option<Vec<ColumnInfo>> {
+            if table_name == "t" {
+                Some(vec![
+                    ColumnInfo { name: "a".to_string(), original_type: "integer".to_string(), is_nullable: true, default_expr: None, type_oid: None },
+                    ColumnInfo { name: "b".to_string(), original_type: "integer".to_string(), is_nullable: true, default_expr: None, type_oid: None },
+                    ColumnInfo { name: "c".to_string(), original_type: "integer".to_string(), is_nullable: true, default_expr: Some("5".to_string()), type_oid: None },
+                ])
+            } else {
+                None
+            }
+        }
+        fn get_column_default(&self, table_name: &str, column_name: &str) -> Option<String> {
+            if table_name == "t" && column_name == "c" {
+                Some("5".to_string())
+            } else {
+                None
+            }
+        }
+    }
+
+    let mut ctx = TranspileContext::new();
+    ctx.set_metadata_provider(std::sync::Arc::new(TestMetadataProvider));
+
+    // Test: INSERT INTO t VALUES (1) -> should pad to (1, NULL, 5)
+    let input = "INSERT INTO t VALUES (1)";
+    let result = transpile_with_context(input, &mut ctx);
+    println!("SQL 1: {}", result.sql);
+    assert!(result.sql.contains("(a, b, c)"));
+    assert!(result.sql.to_lowercase().contains("select 1 as a, null as b, 5 as c") || 
+            result.sql.to_lowercase().contains("values (1, null, 5)"));
+
+    // Test: INSERT INTO t VALUES (DEFAULT, 7) -> should pad to (NULL, 7, 5)
+    let input = "INSERT INTO t VALUES (DEFAULT, 7)";
+    let result = transpile_with_context(input, &mut ctx);
+    println!("SQL 2: {}", result.sql);
+    assert!(result.sql.contains("(a, b, c)"));
+    assert!(result.sql.to_lowercase().contains("select null as a, 7 as b, 5 as c") || 
+            result.sql.to_lowercase().contains("values (null, 7, 5)"));
+}

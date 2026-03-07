@@ -19,6 +19,7 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 ### 1.3 Robust INSERT Padding
 - **Problem**: `INSERT INTO t VALUES (DEFAULT, 7)` fails when `t` has 3 columns. The current padding logic doesn't seem to account for `DEFAULT` placeholders correctly.
 - **Action**: Refine the `INSERT` transpilation in `src/transpiler/dml.rs` to ensure padding triggers whenever the `VALUES` list count is less than the table's column count, even when `DEFAULT` is present.
+- **Status**: Completed (Updated `reconstruct_values_as_union_all` to support padding and fixed `current_column_index` tracking to correctly resolve `DEFAULT` placeholders).
 - **Metric**: Passing `insert.sql`.
 
 ## Phase 2: Feature Parity & Polyfills (Medium Impact)
