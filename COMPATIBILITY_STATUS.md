@@ -3,14 +3,16 @@
 This document tracks the current state of PostgreSQL compatibility and identified work items based on the `postgres-compatibility-suite`.
 
 ## Current Status (March 2026)
-- **Files Passing**: 14
-- **Files Failing**: 35
+- **Files Passing**: 16 (including 13 `sqltest` specific files, plus `boolean.sql`, `varchar.sql`, `char.sql`)
+- **Files Failing**: 34
 - **Recent Wins**:
-    - Full CTE (WITH clause) support including recursive CTEs.
+    - Full CTE (WITH clause) support including recursive CTEs (Note: Large recursive CTEs may still hit memory limits).
     - Fixed subquery column aliasing (e.g., `(VALUES (1)) v(x)`).
     - Basic `CREATE VIEW` transpilation.
     - Hang prevention for unsupported `SEARCH` and `CYCLE` clauses.
     - Multiple system function stubs (`pg_typeof`, `random`, `regr_count`).
+    - Fixed `INSERT` with `DEFAULT` keyword (though some padding edge cases remain).
+    - Basic `BOOLEAN`, `VARCHAR`, and `CHAR` type support and operator compatibility.
 
 ---
 
