@@ -127,6 +127,48 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
                 let window_sql = crate::transpiler::window::reconstruct_window_def(window_def, ctx);
                 format!("{} as ({})", window_def.name.clone(), window_sql)
             }
+            NodeEnum::AIndirection(ref ind) => {
+                let mut arg = ind.arg.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
+                
+                // If the argument is a SubLink (subquery), ensure it's parenthesized correctly
+                if let Some(ref arg_node) = ind.arg {
+                    if let Some(NodeEnum::SubLink(_)) = arg_node.node {
+                        if !arg.starts_with('(') {
+                            arg = format!("({})", arg);
+                        }
+                    }
+                }
+
+                let mut json_path = "$".to_string();
+                
+                for node in &ind.indirection {
+                    if let Some(ref inner) = node.node {
+                        match inner {
+                            NodeEnum::AIndices(ref indices) => {
+                                if let Some(ref uidx) = indices.uidx {
+                                    let idx_sql = reconstruct_node(uidx, ctx);
+                                    if let Ok(idx) = idx_sql.parse::<i64>() {
+                                        json_path.push_str(&format!("[{}]", idx - 1));
+                                    } else {
+                                        // Dynamic index: $[idx-1]
+                                        json_path.push_str(&format!("[{} - 1]", idx_sql));
+                                    }
+                                }
+                            }
+                            NodeEnum::String(ref s) => {
+                                json_path.push_str(&format!(".{}", s.sval));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                
+                if json_path == "$" {
+                    arg
+                } else {
+                    format!("json_extract({}, '{}')", arg, json_path)
+                }
+            }
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }
     } else {

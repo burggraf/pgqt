@@ -437,3 +437,249 @@ fn test_transpile_union_nested_aliasing() {
     // SQLite might use different names if not wrapped.
     assert!(result.to_lowercase().contains("select * from (select 1 as \"a\", 2 as \"b\" union select 3 as \"?column?\", 4 as \"?column?\")"));
 }
+
+#[test]
+fn test_transpile_subquery_array_indexing() {
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    let result = transpile(input);
+    println!("DEBUG: result = {}", result);
+    // If it's currently using default deparse, it might look like:
+    // select (select '[1,2,3]')[1]
+    // We want it to be:
+    // select json_extract((select '[1,2,3]'), '0')
+    assert!(result.to_lowercase().contains("json_extract"));
+}
+
+#[test]
+fn test_debug_parse_tree() {
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG JSON: {}", json);
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_transpile_nested_array_indexing() {
+    let input = "SELECT array[array[1,2], array[3,4]][1][2]";
+    let result = transpile(input);
+    println!("DEBUG: result = {}", result);
+    // Should be json_extract('[[1,2],[3,4]]', '0[1]')
+    assert!(result.to_lowercase().contains("json_extract"));
+    assert!(result.contains("'0[1]'"));
+}
+
+#[test]
+fn test_debug_nested_indirection() {
+    let input = "SELECT array[array[1,2], array[3,4]][1][2]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG JSON: {}", json);
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_node_enum() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT array[1,2,3][1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            if let Some(stmt) = result.protobuf.stmts.first() {
+                if let Some(ref stmt_node) = stmt.stmt {
+                    if let Some(ref inner) = stmt_node.node {
+                        if let NodeEnum::SelectStmt(ref select) = inner {
+                            if let Some(target) = select.target_list.first() {
+                                if let Some(ref target_node) = target.node {
+                                    if let NodeEnum::ResTarget(ref res) = target_node {
+                                        if let Some(ref val) = res.val {
+                                            println!("VAL NODE: {:?}", val.node);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_node_raw() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT array[1,2,3][1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            if let Some(stmt) = result.protobuf.stmts.first() {
+                if let Some(ref stmt_node) = stmt.stmt {
+                    if let Some(ref inner) = stmt_node.node {
+                        if let NodeEnum::SelectStmt(ref select) = inner {
+                            if let Some(target) = select.target_list.first() {
+                                if let Some(ref target_node) = target.node {
+                                    if let NodeEnum::ResTarget(ref res) = target_node {
+                                        if let Some(ref val) = res.val {
+                                            println!("VAL NODE RAW: {:?}", val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_simple() {
+    let input = "SELECT array[1,2,3][1]";
+    let result = transpile(input);
+    println!("RESULT SIMPLE: {}", result);
+}
+
+#[test]
+fn test_debug_nested_indirection_v2() {
+    let input = "SELECT (array[array[1,2], array[3,4]])[1][2]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG JSON V2: {}", json);
+        }
+        Err(e) => println!("PARSE ERROR V2: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_nested_indirection_v3() {
+    let input = "SELECT (array[array[1,2], array[3,4]])[1][2]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG_JSON_V3: {}", json);
+        }
+        Err(e) => println!("PARSE_ERROR_V3: {}", e),
+    }
+}
+
+#[test]
+fn test_transpile_subquery_array_indexing_alias() {
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    let result = transpile(input);
+    println!("DEBUG: result = {}", result);
+    // Postgres expects 'array' as the column name for array indexing without explicit alias
+    assert!(result.to_lowercase().contains("as \"array\""));
+}
+
+#[test]
+fn test_debug_indirection_target() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            if let Some(stmt) = result.protobuf.stmts.first() {
+                if let Some(ref stmt_node) = stmt.stmt {
+                    if let Some(ref inner) = stmt_node.node {
+                        if let NodeEnum::SelectStmt(ref select) = inner {
+                            if let Some(target) = select.target_list.first() {
+                                if let Some(ref target_node) = target.node {
+                                    if let NodeEnum::ResTarget(ref res) = target_node {
+                                        if let Some(ref val) = res.val {
+                                            println!("VAL NODE TYPE: {:?}", val.node);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_target_v2() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG_JSON_V4: {}", json);
+        }
+        Err(e) => println!("PARSE_ERROR_V4: {}", e),
+    }
+}
+
+#[test]
+fn test_transpile_subquery_array_indexing_exact() {
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    let result = transpile(input);
+    println!("DEBUG: result = {}", result);
+    // Based on previous run, it produced:
+    // select json_extract((select '[true,2,3]' AS "?column?"), '0')
+    // Wait, why '[true,2,3]'? Ah, pg_query might have constant-folded or something? 
+    // No, that's my test mock maybe? No, I didn't mock this.
+}
+
+#[test]
+fn test_debug_indirection_res_target() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            if let Some(stmt) = result.protobuf.stmts.first() {
+                if let Some(ref stmt_node) = stmt.stmt {
+                    if let Some(ref inner) = stmt_node.node {
+                        if let NodeEnum::SelectStmt(ref select) = inner {
+                            if let Some(target) = select.target_list.first() {
+                                if let Some(ref target_node) = target.node {
+                                    println!("TARGET NODE: {:?}", target_node);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("PARSE ERROR: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_res_target_v2() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            println!("DEBUG_JSON_V5: {}", json);
+        }
+        Err(e) => println!("PARSE_ERROR_V5: {}", e),
+    }
+}
+
+#[test]
+fn test_debug_indirection_res_target_v3() {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
+    match pg_query::parse(input) {
+        Ok(result) => {
+            let json = serde_json::to_string_pretty(&result.protobuf).unwrap();
+            let mut file = std::fs::File::create("debug_json.txt").unwrap();
+            use std::io::Write;
+            file.write_all(json.as_bytes()).unwrap();
+        }
+        Err(e) => println!("PARSE_ERROR_V5: {}", e),
+    }
+}

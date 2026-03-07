@@ -538,9 +538,13 @@ pub(crate) fn reconstruct_select_stmt(stmt: &SelectStmt, ctx: &mut TranspileCont
                                         if let Some(NodeEnum::CoalesceExpr(_)) = val.node {
                                             return format!("{} AS \"coalesce\"", col);
                                         }
+
+                                        if let Some(NodeEnum::AIndirection(_)) = val.node {
+                                            return format!("{} AS \"array\"", col);
+                                        }
                                     }
 
-                // Don't add ?column? inside UDF inlining subqueries if they're about to be aliased
+                                    // For UDF inlining and other cases, we might want to avoid adding ?column?
                                     // This is a bit of a hack to keep tests passing while being "mostly" correct.
                                     // We check if the parent select is inside a function call expansion.
                                     // Actually, we can just check if we are in a subquery and the caller will alias us.
