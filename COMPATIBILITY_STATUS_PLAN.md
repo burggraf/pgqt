@@ -52,6 +52,8 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 ### 3.2 System Catalog Completeness
 - **Problem**: Introspection tools (like `psql`) fail due to missing columns in `pg_catalog` views.
 - **Action**: Audit `src/catalog/system_views.rs` and add missing standard columns to `pg_attribute`, `pg_class`, etc.
+- **Status**: Completed (Added all missing columns to `pg_class`, `pg_attribute`, `pg_index`, and other system views. Created `pg_trigger` view and updated `pg_proc` to include UDFs).
+- **Metric**: `psql \d` commands work, pgAdmin can browse schema, introspection queries succeed.
 
 ## Monitoring & Verification
 - **Nightly Suite**: Run `./postgres-compatibility-suite/run_suite.sh` after every major phase.

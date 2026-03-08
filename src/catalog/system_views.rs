@@ -54,7 +54,12 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             0.0 as reltuples,
             0 as relallvisible,
             0 as reltoastrelid,
-            false as relhasindex,
+            0 as reltoastidxid,
+            0 as reldeltarelid,
+            0 as reldeltaidx,
+            0 as relcudescrelid,
+            0 as relcudescidx,
+            CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE tbl_name = sm.name AND type = 'index') THEN true ELSE false END as relhasindex,
             false as relisshared,
             'p' as relpersistence,
             CASE sm.type
@@ -64,11 +69,15 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
                 WHEN 'trigger' THEN 'r'
                 ELSE 'r'
             END as relkind,
-            0 as relnatts,  -- Simplified to avoid pragma in view
+            (SELECT COUNT(*) FROM __pg_attribute__ WHERE attrelid = sm.rowid) as relnatts,
             0 as relchecks,
             false as relhasrules,
             false as relhastriggers,
             false as relhassubclass,
+            0 as relcmprs,
+            false as relhasclusterkey,
+            false as relrowmovement,
+            'n' as parttype,
             COALESCE(re.rls_enabled, false) as relrowsecurity,
             COALESCE(re.rls_forced, false) as relforcerowsecurity,
             true as relispopulated,
@@ -95,7 +104,7 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
          SELECT
             oid, typname, typnamespace, typowner, typlen, typbyval,
             typtype, typcategory, typispreferred, typisdefined, typdelim,
-            typrelid, typelem, typarray, typinput, typoutput, typreceive,
+            typrelid, 0 as typsubscript, typelem, typarray, typinput, typoutput, typreceive,
             typsend, typmodin, typmodout, typanalyze, typalign, typstorage,
             typnotnull, typbasetype, typtypmod, typndims, typcollation,
             typdefaultbin, typdefault, typacl
@@ -111,8 +120,8 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             attnum, attndims, attcacheoff, atttypmod, attbyval,
             attstorage, attalign, attnotnull, atthasdef, atthasmissing,
             attidentity, attgenerated, attisdropped, attislocal,
-            attinhcount, attcollation, attacl, attoptions, attfdwoptions,
-            attmissingval
+            0 as attcmprmode, attinhcount, attcollation, '' as attcompression, attacl, attoptions, attfdwoptions,
+            NULL as attinitdefval, attmissingval
          FROM __pg_attribute__",
         [],
     )?;
@@ -249,7 +258,48 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
          UNION ALL
          SELECT 10004, 'current_time', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
                 false, true, false, 's', 0, 0, 1266, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'current_time', NULL, NULL, NULL, NULL",
+                NULL, 'current_time', NULL, NULL, NULL, NULL
+         UNION ALL
+         SELECT
+            f.oid, f.funcname as proname, n.oid as pronamespace, f.owner_oid as proowner,
+            13 as prolang, 1.0 as procost, 0.0 as prorows, 0 as provariadic,
+            'f' as prokind, f.security_definer as prosecdef, false as proleakproof,
+            f.strict as proisstrict, (f.return_type_kind = 'SETOF') as proretset,
+            CASE f.volatility WHEN 'IMMUTABLE' THEN 'i' WHEN 'STABLE' THEN 's' ELSE 'v' END as provolatile,
+            (SELECT COUNT(*) FROM json_each(f.arg_types)) as pronargs, 0 as pronargdefaults,
+            COALESCE((SELECT oid FROM __pg_type__ WHERE typname = f.return_type), 25) as prorettype,
+            f.arg_types as proargtypes, NULL as proallargtypes, f.arg_modes as proargmodes,
+            f.arg_names as proargnames, NULL as proargdefaults, NULL as protrftypes,
+            f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl
+         FROM __pg_functions__ f
+         JOIN pg_namespace n ON f.schema_name = n.nspname",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS pg_trigger AS
+         SELECT
+            sm.rowid as oid,
+            (SELECT rowid FROM sqlite_master WHERE name = sm.tbl_name AND type IN ('table', 'view')) as tgrelid,
+            0 as tgparentid,
+            sm.name as tgname,
+            0 as tgfoid,
+            0 as tgtype,
+            'O' as tgenabled,
+            false as tgisinternal,
+            0 as tgconstrrelid,
+            0 as tgconstrindid,
+            0 as tgconstraint,
+            false as tgdeferrable,
+            false as tginitdeferred,
+            0 as tgnargs,
+            '' as tgattr,
+            '' as tgargs,
+            NULL as tgqual,
+            NULL as tgoldtable,
+            NULL as tgnewtable
+         FROM sqlite_master sm
+         WHERE sm.type = 'trigger'",
         [],
     )?;
 
