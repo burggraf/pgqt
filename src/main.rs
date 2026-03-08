@@ -132,7 +132,7 @@ impl PgWireServerHandlers for HandlerFactory {
     }
 
     fn extended_query_handler(&self) -> Arc<impl pgwire::api::query::ExtendedQueryHandler> {
-        Arc::new(pgwire::api::NoopHandler)
+        self.handler.clone()
     }
 
     fn copy_handler(&self) -> Arc<impl pgwire::api::copy::CopyHandler> {
