@@ -127,21 +127,6 @@ pub fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
     let is_grant = stmt.is_grant;
     let objtype = stmt.objtype;
 
-    
-    if objtype != pg_query::protobuf::ObjectType::ObjectTable as i32 &&
-       objtype != pg_query::protobuf::ObjectType::ObjectView as i32 {
-        return "SELECT 1".to_string(); 
-    }
-
-    let objects: Vec<String> = stmt.objects.iter().filter_map(|o| {
-        if let Some(ref node) = o.node {
-            if let NodeEnum::RangeVar(ref rv) = node {
-                return Some(rv.relname.to_lowercase());
-            }
-        }
-        None
-    }).collect();
-
     let privileges: Vec<String> = stmt.privileges.iter().filter_map(|p| {
         if let Some(ref node) = p.node {
             if let NodeEnum::AccessPriv(ref ap) = node {
@@ -163,11 +148,41 @@ pub fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
         None
     }).collect();
 
-    if is_grant {
-        if objects.is_empty() || privileges.is_empty() || grantees.is_empty() {
-            return "SELECT 1".to_string();
-        }
+    if grantees.is_empty() || privileges.is_empty() {
+        return "SELECT 1".to_string();
+    }
 
+    match pg_query::protobuf::ObjectType::try_from(objtype) {
+        Ok(pg_query::protobuf::ObjectType::ObjectTable) | Ok(pg_query::protobuf::ObjectType::ObjectView) => {
+            handle_table_grant(stmt, is_grant, &privileges, &grantees)
+        }
+        Ok(pg_query::protobuf::ObjectType::ObjectSchema) => {
+            handle_schema_grant(stmt, is_grant, &privileges, &grantees)
+        }
+        Ok(pg_query::protobuf::ObjectType::ObjectFunction) => {
+            handle_function_grant(stmt, is_grant, &privileges, &grantees)
+        }
+        _ => {
+            format!("-- Unsupported GRANT object type {:?}", objtype)
+        }
+    }
+}
+
+fn handle_table_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], grantees: &[String]) -> String {
+    let objects: Vec<String> = stmt.objects.iter().filter_map(|o| {
+        if let Some(ref node) = o.node {
+            if let NodeEnum::RangeVar(ref rv) = node {
+                return Some(rv.relname.to_lowercase());
+            }
+        }
+        None
+    }).collect();
+
+    if objects.is_empty() {
+        return "SELECT 1".to_string();
+    }
+
+    if is_grant {
         let obj = &objects[0];
         let priv_ = &privileges[0];
         let grantee = &grantees[0];
@@ -181,6 +196,86 @@ pub fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
     } else {
         format!(
             "DELETE FROM __pg_acl__ WHERE object_id IN (SELECT oid FROM pg_class WHERE relname IN ({})) \
+             AND grantee_id IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) \
+             AND privilege IN ({})",
+            objects.iter().map(|o| format!("'{}'", o)).collect::<Vec<_>>().join(", "),
+            grantees.iter().map(|g| format!("'{}'", g)).collect::<Vec<_>>().join(", "),
+            privileges.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+fn handle_schema_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], grantees: &[String]) -> String {
+    let objects: Vec<String> = stmt.objects.iter().filter_map(|o| {
+        if let Some(ref node) = o.node {
+            if let NodeEnum::String(ref s) = node {
+                return Some(s.sval.to_lowercase());
+            }
+        }
+        None
+    }).collect();
+
+    if objects.is_empty() {
+        return "SELECT 1".to_string();
+    }
+
+    if is_grant {
+        let obj = &objects[0];
+        let priv_ = &privileges[0];
+        let grantee = &grantees[0];
+        format!(
+            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+             SELECT n.oid, 'schema', COALESCE(r.oid, 0), '{}', 10 \
+             FROM pg_namespace n LEFT JOIN pg_roles r ON r.rolname = '{}' \
+             WHERE n.nspname = '{}'",
+            priv_, grantee, obj
+        )
+    } else {
+        format!(
+            "DELETE FROM __pg_acl__ WHERE object_id IN (SELECT oid FROM pg_namespace WHERE nspname IN ({})) \
+             AND grantee_id IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) \
+             AND privilege IN ({})",
+            objects.iter().map(|o| format!("'{}'", o)).collect::<Vec<_>>().join(", "),
+            grantees.iter().map(|g| format!("'{}'", g)).collect::<Vec<_>>().join(", "),
+            privileges.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+fn handle_function_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], grantees: &[String]) -> String {
+    let objects: Vec<String> = stmt.objects.iter().filter_map(|o| {
+        if let Some(ref node) = o.node {
+            if let NodeEnum::ObjectWithArgs(ref owa) = node {
+                return owa.objname.last().and_then(|n| {
+                    if let Some(NodeEnum::String(ref s)) = n.node {
+                        Some(s.sval.to_lowercase())
+                    } else {
+                        None
+                    }
+                });
+            }
+        }
+        None
+    }).collect();
+
+    if objects.is_empty() {
+        return "SELECT 1".to_string();
+    }
+
+    if is_grant {
+        let obj = &objects[0];
+        let priv_ = &privileges[0];
+        let grantee = &grantees[0];
+        format!(
+            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+             SELECT p.oid, 'function', COALESCE(r.oid, 0), '{}', 10 \
+             FROM pg_proc p LEFT JOIN pg_roles r ON r.rolname = '{}' \
+             WHERE p.proname = '{}'",
+            priv_, grantee, obj
+        )
+    } else {
+        format!(
+            "DELETE FROM __pg_acl__ WHERE object_id IN (SELECT oid FROM pg_proc WHERE proname IN ({})) \
              AND grantee_id IN (SELECT oid FROM pg_roles WHERE rolname IN ({})) \
              AND privilege IN ({})",
             objects.iter().map(|o| format!("'{}'", o)).collect::<Vec<_>>().join(", "),
