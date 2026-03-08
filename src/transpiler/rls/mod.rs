@@ -23,4 +23,5 @@ pub use utils::{
     reconstruct_grant_stmt,
     reconstruct_grant_role_stmt,
     reconstruct_alter_default_privileges_stmt,
+    reconstruct_alter_owner_stmt,
 };

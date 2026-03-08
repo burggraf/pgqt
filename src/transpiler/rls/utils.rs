@@ -6,7 +6,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt, AlterDefaultPrivilegesStmt,
-    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
+    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, AlterOwnerStmt
 };
 use super::super::context::TranspileContext;
 
@@ -293,6 +293,57 @@ pub fn reconstruct_alter_default_privileges_stmt(stmt: &AlterDefaultPrivilegesSt
     }
     
     "-- Unsupported ALTER DEFAULT PRIVILEGES action".to_string()
+}
+
+/// Reconstruct an ALTER OWNER statement
+pub fn reconstruct_alter_owner_stmt(stmt: &AlterOwnerStmt) -> String {
+    let new_owner = if let Some(ref rs) = stmt.newowner.as_ref() {
+        rs.rolename.to_lowercase()
+    } else {
+        "postgres".to_string()
+    };
+
+    let objtype = stmt.object_type;
+    let mut sql = String::new();
+
+    match objtype {
+        // Table/Relation
+        0 | 41 => {
+            if let Some(ref node) = stmt.object.as_ref().and_then(|n| n.node.as_ref()) {
+                if let NodeEnum::RangeVar(ref rv) = node {
+                    let table_name = rv.relname.to_lowercase();
+                    sql = format!(
+                        "UPDATE pg_class SET relowner = (SELECT oid FROM pg_roles WHERE rolname = '{}') WHERE relname = '{}'",
+                        new_owner, table_name
+                    );
+                }
+            }
+        }
+        // Function
+        14 => {
+            if let Some(ref node) = stmt.object.as_ref().and_then(|n| n.node.as_ref()) {
+                if let NodeEnum::ObjectWithArgs(ref owa) = node {
+                    let func_name = owa.objname.iter().filter_map(|n| {
+                        if let Some(NodeEnum::String(ref s)) = n.node {
+                            Some(s.sval.to_lowercase())
+                        } else {
+                            None
+                        }
+                    }).collect::<Vec<_>>().join(".");
+                    
+                    sql = format!(
+                        "UPDATE pg_proc SET proowner = (SELECT oid FROM pg_roles WHERE rolname = '{}') WHERE proname = '{}'",
+                        new_owner, func_name
+                    );
+                }
+            }
+        }
+        _ => {
+            sql = format!("-- Unsupported ALTER OWNER for object type {}", objtype);
+        }
+    }
+
+    sql
 }
 
 /// Extract table name from SELECT statement

@@ -316,9 +316,9 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     errors: Vec::new(),
                 }
             }
-            NodeEnum::AlterDefaultPrivilegesStmt(_) => {
+            NodeEnum::AlterDefaultPrivilegesStmt(ref stmt) => {
                 TranspileResult {
-                    sql: format!("-- ALTER DEFAULT PRIVILEGES IGNORED"),
+                    sql: rls::reconstruct_alter_default_privileges_stmt(stmt),
                     create_table_metadata: None, 
                     copy_metadata: None,
                     referenced_tables: Vec::new(),
@@ -326,16 +326,14 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     errors: Vec::new(),
                 }
             }
-            NodeEnum::AlterOwnerStmt(_) => {
-                TranspileResult {
-                    sql: format!("-- ALTER OWNER IGNORED"),
-                    create_table_metadata: None, 
-                    copy_metadata: None,
-                    referenced_tables: Vec::new(),
-                    operation_type: OperationType::DDL,
-                    errors: Vec::new(),
-                }
-            }
+            NodeEnum::AlterOwnerStmt(ref stmt) => TranspileResult {
+                sql: rls::reconstruct_alter_owner_stmt(stmt),
+                create_table_metadata: None, 
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+            },
             NodeEnum::CreatePolicyStmt(_) => {
                 TranspileResult {
                     sql: format!("-- CREATE POLICY IGNORED"),
