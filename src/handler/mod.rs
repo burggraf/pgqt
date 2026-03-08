@@ -7,6 +7,16 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use rusqlite::Connection;
 use dashmap::DashMap;
+use pgwire::api::portal::{Portal, Format};
+use pgwire::api::stmt::{StoredStatement, QueryParser};
+use pgwire::api::query::{SimpleQueryHandler, ExtendedQueryHandler};
+use pgwire::api::results::{DescribePortalResponse, DescribeStatementResponse, FieldInfo, Response, DescribeResponse};
+use pgwire::api::{ClientInfo, ClientPortalStore};
+use pgwire::error::PgWireResult;
+use pgwire::messages::PgWireBackendMessage;
+use pgwire::messages::data::RowDescription;
+use futures::{Sink, SinkExt};
+use async_trait::async_trait;
 
 use crate::catalog::{init_catalog, init_system_views};
 use crate::schema::{SchemaManager, SearchPath};
@@ -623,5 +633,188 @@ impl QueryExecution for SqliteHandler {
     
     fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider> {
         Arc::new(self.clone())
+    }
+}
+
+pub struct SqliteQueryParser;
+
+#[async_trait]
+impl QueryParser for SqliteQueryParser {
+    type Statement = String;
+
+    async fn parse_sql<C>(&self, _client: &C, sql: &str, _types: &[Option<pgwire::api::Type>]) -> PgWireResult<Self::Statement>
+    where
+        C: ClientInfo + Unpin + Send + Sync,
+    {
+        Ok(sql.to_string())
+    }
+
+    fn get_parameter_types(&self, _stmt: &Self::Statement) -> PgWireResult<Vec<pgwire::api::Type>> {
+        Ok(vec![])
+    }
+
+    fn get_result_schema(&self, _stmt: &Self::Statement, _format: Option<&Format>) -> PgWireResult<Vec<FieldInfo>> {
+        Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl ExtendedQueryHandler for SqliteHandler {
+    type Statement = String;
+    type QueryParser = SqliteQueryParser;
+
+    fn query_parser(&self) -> Arc<Self::QueryParser> {
+        Arc::new(SqliteQueryParser)
+    }
+
+    async fn do_query<C>(
+        &self,
+        client: &mut C,
+        portal: &Portal<Self::Statement>,
+        _max_rows: usize,
+    ) -> PgWireResult<Response>
+    where
+        C: ClientInfo + ClientPortalStore + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        let query = &portal.statement.statement;
+        let params = &portal.parameters;
+        
+        println!("DEBUG: Extended query: {}", query);
+        
+        // Convert params to Option<String> for execute_query_params
+        let mut param_strings = Vec::new();
+        for (i, param) in params.iter().enumerate() {
+            if let Some(bytes) = param {
+                if portal.parameter_format.is_binary(i) {
+                    // Get type from statement if available
+                    let pg_type = portal.statement.parameter_types.get(i)
+                        .and_then(|t| t.as_ref())
+                        .unwrap_or(&pgwire::api::Type::UNKNOWN);
+                    
+                    println!("DEBUG: Parameter {} is binary, type: {:?}", i, pg_type);
+                    
+                    match *pg_type {
+                        pgwire::api::Type::INT4 | pgwire::api::Type::OID | pgwire::api::Type::REGCLASS | pgwire::api::Type::INT2 => {
+                            if bytes.len() == 4 {
+                                let b: [u8; 4] = bytes.as_ref().try_into().unwrap_or([0; 4]);
+                                let val = i32::from_be_bytes(b);
+                                param_strings.push(Some(val.to_string()));
+                                continue;
+                            } else if bytes.len() == 2 {
+                                let b: [u8; 2] = bytes.as_ref().try_into().unwrap_or([0; 2]);
+                                let val = i16::from_be_bytes(b);
+                                param_strings.push(Some(val.to_string()));
+                                continue;
+                            }
+                        }
+                        pgwire::api::Type::INT8 => {
+                            if bytes.len() == 8 {
+                                let b: [u8; 8] = bytes.as_ref().try_into().unwrap_or([0; 8]);
+                                let val = i64::from_be_bytes(b);
+                                param_strings.push(Some(val.to_string()));
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                param_strings.push(Some(String::from_utf8_lossy(bytes).to_string()));
+            } else {
+                param_strings.push(None);
+            }
+        }
+
+        match self.execute_query_params(query, &param_strings) {
+            Ok(mut responses) => {
+                if let Some(resp) = responses.pop() {
+                    // Force RowDescription for SELECTs if not already sent by client Describe
+                    if let Response::Query(ref query_resp) = resp {
+                        let fields = query_resp.row_schema();
+                        let row_desc = RowDescription::new(fields.iter().map(|f| {
+                            pgwire::messages::data::FieldDescription::new(
+                                f.name().to_string(),
+                                f.table_id().unwrap_or(0),
+                                f.column_id().unwrap_or(0),
+                                f.datatype().oid(),
+                                0,
+                                0,
+                                f.format().value(),
+                            )
+                        }).collect());
+                        // println!("DEBUG: Sending forced RowDescription");
+                        // client.send(PgWireBackendMessage::RowDescription(row_desc)).await?;
+                    }
+                    Ok(resp)
+                } else {
+                    Ok(Response::Execution(pgwire::api::results::Tag::new("OK")))
+                }
+            }
+            Err(e) => {
+                eprintln!("Error executing extended query: {}", e);
+                let pg_err = crate::handler::errors::PgError::from_anyhow(e);
+                Ok(Response::Error(Box::new(pg_err.into_error_info())))
+            }
+        }
+    }
+
+    async fn do_describe_statement<C>(
+        &self,
+        _client: &mut C,
+        statement: &StoredStatement<Self::Statement>,
+    ) -> PgWireResult<DescribeStatementResponse>
+    where
+        C: ClientInfo + ClientPortalStore + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        let query = &statement.statement;
+        println!("DEBUG: Describe statement: {}", query);
+        let result = crate::transpiler::transpile_with_metadata(query);
+        let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
+        ctx.set_metadata_provider(self.as_metadata_provider());
+        let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);
+        
+        let conn = self.conn().lock().unwrap();
+        if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
+            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn)
+                .unwrap_or_default();
+            
+            // For parameters, we don't know the types yet easily, so return UNKNOWN or derived from statement.parameter_types
+            let param_types = statement.parameter_types.iter().map(|t| t.clone().unwrap_or(pgwire::api::Type::UNKNOWN)).collect();
+            
+            println!("DEBUG: Returning {} fields for Describe statement", fields.len());
+            return Ok(DescribeStatementResponse::new(param_types, fields));
+        }
+        
+        Ok(DescribeStatementResponse::no_data())
+    }
+
+    async fn do_describe_portal<C>(
+        &self,
+        _client: &mut C,
+        portal: &Portal<Self::Statement>,
+    ) -> PgWireResult<DescribePortalResponse>
+    where
+        C: ClientInfo + ClientPortalStore + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        let query = &portal.statement.statement;
+        println!("DEBUG: Describe portal: {}", query);
+        let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
+        ctx.set_metadata_provider(self.as_metadata_provider());
+        let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);
+        
+        let conn = self.conn().lock().unwrap();
+        if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
+            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn)
+                .unwrap_or_default();
+            println!("DEBUG: Returning {} fields for Describe portal", fields.len());
+            return Ok(DescribePortalResponse::new(fields));
+        }
+        
+        Ok(DescribePortalResponse::new(vec![]))
     }
 }

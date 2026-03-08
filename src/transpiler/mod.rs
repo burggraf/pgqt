@@ -280,6 +280,16 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     errors: Vec::new(),
                 }
             }
+            NodeEnum::VacuumStmt(ref _vacuum_stmt) => {
+                TranspileResult {
+                    sql: "VACUUM".to_string(),
+                    create_table_metadata: None,
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::OTHER,
+                    errors: Vec::new(),
+                }
+            }
             _ => TranspileResult {
                 sql: node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
                 create_table_metadata: None, 

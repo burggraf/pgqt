@@ -16,12 +16,14 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::sink::{Sink, SinkExt};
 use futures::stream;
 use pgwire::api::copy::CopyHandler as PgWireCopyHandler;
 use pgwire::api::results::{CopyResponse, Response};
 use pgwire::api::ClientInfo;
 use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::copy::{CopyData, CopyDone, CopyFail};
+use pgwire::messages::PgWireBackendMessage;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
@@ -416,10 +418,19 @@ impl CopyHandler {
 
         // Parse text format: tab-delimited rows, newline-separated
         let content = String::from_utf8_lossy(data);
-        let lines: Vec<&str> = content.lines().collect();
+        // Use split_inclusive to handle empty trailing fields and preserve row boundaries
+        let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
         for line in lines {
-            if line.is_empty() {
+            let mut line = line;
+            if line.ends_with('\n') {
+                line = &line[..line.len() - 1];
+            }
+            if line.ends_with('\r') {
+                line = &line[..line.len() - 1];
+            }
+            
+            if line.is_empty() || line == "\\." {
                 continue;
             }
 
@@ -675,7 +686,9 @@ impl CopyHandler {
 impl PgWireCopyHandler for CopyHandler {
     async fn on_copy_data<C>(&self, _client: &mut C, copy_data: CopyData) -> PgWireResult<()>
     where
-        C: ClientInfo + Unpin + Send + Sync,
+        C: ClientInfo + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
         let mut buffer = self.buffer.lock().map_err(|e| {
             PgWireError::UserError(Box::new(
@@ -689,40 +702,50 @@ impl PgWireCopyHandler for CopyHandler {
         Ok(())
     }
 
-    async fn on_copy_done<C>(&self, _client: &mut C, _done: CopyDone) -> PgWireResult<()>
+    async fn on_copy_done<C>(&self, client: &mut C, _done: CopyDone) -> PgWireResult<()>
     where
-        C: ClientInfo + Unpin + Send + Sync,
+        C: ClientInfo + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
         // Process the buffered data
-        match self.process_buffer() {
-            Ok(row_count) => {
-                let mut count = self.row_count.lock().map_err(|e| {
+        let row_count = match self.process_buffer() {
+            Ok(count) => {
+                let mut count_guard = self.row_count.lock().map_err(|e| {
                     PgWireError::UserError(Box::new(
                         PgError::internal(format!("Lock error: {}", e)).into_error_info()
                     ))
                 })?;
-                *count = row_count;
+                *count_guard = count;
 
                 // Clear buffer
-                let mut buffer = self.buffer.lock().map_err(|e| {
+                let mut buffer_guard = self.buffer.lock().map_err(|e| {
                     PgWireError::UserError(Box::new(
                         PgError::internal(format!("Lock error: {}", e)).into_error_info()
                     ))
                 })?;
-                buffer.clear();
-
-                Ok(())
+                buffer_guard.clear();
+                
+                count
             }
-            Err(e) => Err(PgWireError::UserError(Box::new(
+            Err(e) => return Err(PgWireError::UserError(Box::new(
                 PgError::new(PgErrorCode::InvalidParameterValue, 
                     format!("COPY data parsing error: {}", e)).into_error_info()
             ))),
-        }
+        };
+
+        // Send CommandComplete response for the COPY command
+        let tag = pgwire::api::results::Tag::new("COPY").with_rows(row_count);
+        pgwire::api::query::send_execution_response(client, tag).await?;
+
+        Ok(())
     }
 
     async fn on_copy_fail<C>(&self, _client: &mut C, fail: CopyFail) -> PgWireError
     where
-        C: ClientInfo + Unpin + Send + Sync,
+        C: ClientInfo + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: std::fmt::Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
         // Reset state
         let _ = self.reset_state();
@@ -735,7 +758,7 @@ impl PgWireCopyHandler for CopyHandler {
 }
 
 /// Build an INSERT SQL statement for COPY data
-fn build_insert_sql(
+    fn build_insert_sql(
     table_name: &str,
     columns: &[String],
     value_count: usize,
@@ -749,6 +772,9 @@ fn build_insert_sql(
             placeholders.join(", ")
         ))
     } else {
+        if columns.len() != value_count {
+            return Err(anyhow!("table {} has {} columns but {} values were supplied", table_name, columns.len(), value_count));
+        }
         // Use explicit column list
         let placeholders: Vec<String> = (0..columns.len()).map(|i| format!("?{}", i + 1)).collect();
         Ok(format!(

@@ -8,7 +8,7 @@ use crate::handler::{SessionContext, TransactionStatus};
 
 /// Check if the SQL statement is a transaction control statement
 pub fn is_transaction_control(sql: &str) -> bool {
-    let upper_sql = sql.trim().to_uppercase();
+    let upper_sql = sql.trim().trim_end_matches(';').trim().to_uppercase();
 
     upper_sql == "BEGIN"
         || upper_sql == "COMMIT"
@@ -17,14 +17,15 @@ pub fn is_transaction_control(sql: &str) -> bool {
         || upper_sql.starts_with("START TRANSACTION")
         || upper_sql.starts_with("COMMIT ")
         || upper_sql.starts_with("ROLLBACK ")
-        || upper_sql.starts_with("END")
+        || upper_sql == "END"
+        || upper_sql.starts_with("END ")
         || upper_sql.starts_with("SAVEPOINT ")
         || upper_sql.starts_with("RELEASE ")
 }
 
 /// Handle transaction control statements
 pub fn handle_transaction_control(sql: &str, session: &mut SessionContext) -> Option<Result<Vec<Response>>> {
-    let upper_sql = sql.trim().to_uppercase();
+    let upper_sql = sql.trim().trim_end_matches(';').trim().to_uppercase();
 
     if upper_sql == "BEGIN" || upper_sql.starts_with("BEGIN ") || upper_sql.starts_with("START TRANSACTION") {
         if session.transaction_status != TransactionStatus::Idle {
@@ -33,7 +34,7 @@ pub fn handle_transaction_control(sql: &str, session: &mut SessionContext) -> Op
         }
         session.transaction_status = TransactionStatus::InTransaction;
         return Some(Ok(vec![Response::Execution(Tag::new("BEGIN"))]));
-    } else if upper_sql == "COMMIT" || upper_sql.starts_with("COMMIT ") || upper_sql.starts_with("END") {
+    } else if upper_sql == "COMMIT" || upper_sql.starts_with("COMMIT ") || upper_sql == "END" || upper_sql.starts_with("END ") {
         if session.transaction_status == TransactionStatus::Idle {
             // Not in a transaction, PG issues warning
             return Some(Ok(vec![Response::Execution(Tag::new("COMMIT"))]));

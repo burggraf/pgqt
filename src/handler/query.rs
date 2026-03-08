@@ -25,6 +25,133 @@ use rusqlite::Statement;
 pub trait QueryExecution: HandlerUtils + Clone {
     fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider>;
     
+    /// Execute a SQL query with optional parameters and return the results
+    fn execute_query_params(&self, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+        let result = crate::transpiler::transpile_with_metadata(sql);
+        if !result.errors.is_empty() {
+            return Err(anyhow::anyhow!(result.errors.join("\n")));
+        }
+        let transpiled = result.sql;
+        println!("DEBUG: Original: {}", sql);
+        println!("DEBUG: Transpiled: {}", transpiled);
+        let upper_sql = transpiled.trim().to_uppercase();
+
+        // Transaction Control and other special commands usually don't have parameters in extended query
+        // but we should check if we need to handle them here.
+        // For now, assume they are handled by execute_query or similar.
+
+        let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
+        ctx.set_metadata_provider(self.as_metadata_provider());
+        let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
+
+        if !transpile_result.errors.is_empty() {
+            return Err(anyhow!("{}", transpile_result.errors.join("; ")));
+        }
+
+        // Apply RLS
+        let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
+
+        let conn = self.conn().lock().unwrap();
+        let trimmed_lower = sqlite_sql.trim().to_lowercase();
+        let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
+
+        if is_select {
+            self.execute_select_with_params(&conn, &sqlite_sql, params, &transpile_result.referenced_tables)
+        } else {
+            self.execute_statement_with_params(&conn, &sqlite_sql, params)
+        }
+    }
+
+    /// Execute a SELECT statement with parameters
+    fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String]) -> Result<Vec<Response>> {
+        let mut stmt = conn.prepare(sql)?;
+        let col_count = stmt.column_count();
+
+        // Build field info
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn)?);
+
+        let mut data_rows = Vec::new();
+        
+        // Convert params to rusqlite params
+        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
+            match p {
+                Some(s) => rusqlite::types::Value::Text(s.clone()),
+                None => rusqlite::types::Value::Null,
+            }
+        }).collect();
+
+        // We need to convert Vec<Value> to something rusqlite accepts
+        // rusqlite::params_from_iter works
+        let mut rows = stmt.query(rusqlite::params_from_iter(rusqlite_params))?;
+
+        while let Some(row) = rows.next()? {
+            let mut encoder = DataRowEncoder::new(fields.clone());
+
+            for i in 0..col_count {
+                let field_type = fields[i].datatype();
+                let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
+                    .map(|v| v.map(|x| {
+                        if *field_type == pgwire::api::Type::BOOL {
+                            if x == 1 { "t".to_string() } else { "f".to_string() }
+                        } else {
+                            x.to_string()
+                        }
+                    }))
+                    .or_else(|| row.get::<_, Option<f64>>(i).ok()
+                        .map(|v| v.map(|x| x.to_string())))
+                    .or_else(|| row.get::<_, Option<String>>(i).ok())
+                    .flatten();
+                match value {
+                    Some(v) => encoder.encode_field(&Some(v))?,
+                    None => encoder.encode_field(&None::<String>)?,
+                }
+            }
+
+            data_rows.push(Ok(encoder.take_row()));
+        }
+
+        let row_stream = futures::stream::iter(data_rows);
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            fields,
+            row_stream,
+        ))])
+    }
+
+    /// Execute a non-SELECT statement with parameters
+    fn execute_statement_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+        println!("Executing statement with params: {}", sql);
+
+        // Skip comments and empty statements
+        let trimmed = sql.trim();
+        if trimmed.starts_with("--") || trimmed.starts_with("/*") || trimmed.is_empty() {
+            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+        }
+
+        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
+            match p {
+                Some(s) => rusqlite::types::Value::Text(s.clone()),
+                None => rusqlite::types::Value::Null,
+            }
+        }).collect();
+
+        let mut stmt = conn.prepare(sql)?;
+        let changes = stmt.execute(rusqlite::params_from_iter(rusqlite_params))?;
+
+        let upper_sql = sql.trim().to_uppercase();
+        let tag = if upper_sql.starts_with("INSERT") {
+            Tag::new("INSERT 0").with_rows(changes)
+        } else if upper_sql.starts_with("UPDATE") {
+            Tag::new("UPDATE").with_rows(changes)
+        } else if upper_sql.starts_with("DELETE") {
+            Tag::new("DELETE").with_rows(changes)
+        } else {
+            Tag::new("OK")
+        };
+
+        Ok(vec![Response::Execution(tag)])
+    }
+
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
         // Check for commands BEFORE transpilation (transpiler may convert them)
@@ -467,6 +594,10 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let mut total_changes = 0;
 
         for stmt in statements {
+            // Skip comments and empty statements which can cause SQLITE_MISUSE in some versions/cases
+            if stmt.starts_with("--") || stmt.starts_with("/*") {
+                continue;
+            }
             total_changes += conn.execute(stmt, [])?;
         }
 

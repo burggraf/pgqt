@@ -430,6 +430,20 @@ pub(crate) fn reconstruct_alter_table_stmt(stmt: &AlterTableStmt, ctx: &mut Tran
                             table_name
                         );
                     }
+                    AlterTableType::AtAddConstraint => {
+                        // Check if it's adding a PRIMARY KEY
+                        if let Some(ref def) = alter_cmd.def {
+                            if let Some(NodeEnum::Constraint(ref con)) = def.node {
+                                if con.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
+                                    // Map ALTER TABLE ... ADD PRIMARY KEY (cols) to no-op for now
+                                    // SQLite doesn't support adding PK after table creation.
+                                    // We should ideally have handled this in CREATE TABLE or use a complex migration.
+                                    // For pgbench compatibility, making it a no-op is often sufficient if we don't care about the PK constraint during benchmarking.
+                                    return format!("-- ALTER TABLE {} ADD PRIMARY KEY (skipped)", table_name);
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
