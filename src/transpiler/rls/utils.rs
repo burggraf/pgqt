@@ -5,7 +5,7 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt,
+    CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt, AlterDefaultPrivilegesStmt,
     SelectStmt, InsertStmt, UpdateStmt, DeleteStmt
 };
 use super::super::context::TranspileContext;
@@ -231,6 +231,68 @@ pub fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
             grantee_roles.iter().map(|r| format!("'{}'", r)).collect::<Vec<_>>().join(", ")
         )
     }
+}
+
+/// Reconstruct an ALTER DEFAULT PRIVILEGES statement as an INSERT/UPDATE into __pg_default_acl__
+pub fn reconstruct_alter_default_privileges_stmt(stmt: &AlterDefaultPrivilegesStmt) -> String {
+    let mut role = "CURRENT_USER".to_string();
+    let mut schema = "NULL".to_string();
+    
+    for opt in &stmt.options {
+        if let Some(ref node) = opt.node {
+            match node {
+                NodeEnum::RoleSpec(r) => role = format!("'{}'", r.rolename.to_lowercase()),
+                NodeEnum::String(s) => schema = format!("'{}'", s.sval.to_lowercase()),
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(ref grant) = stmt.action {
+        let objtype = grant.objtype; // 0=Table, 1=Sequence, 2=Db, 3=Function...
+        let is_grant = grant.is_grant;
+        
+        let privileges: Vec<String> = grant.privileges.iter().filter_map(|p| {
+            if let Some(ref node) = p.node {
+                if let NodeEnum::AccessPriv(ap) = node {
+                    return Some(ap.priv_name.to_lowercase());
+                }
+            }
+            None
+        }).collect();
+        
+        let grantees: Vec<String> = grant.grantees.iter().filter_map(|g| {
+            if let Some(ref node) = g.node {
+                if let NodeEnum::RoleSpec(rs) = node {
+                    return Some(rs.rolename.to_lowercase());
+                }
+            }
+            None
+        }).collect();
+
+        let mut sql = String::new();
+        for priv_ in &privileges {
+            for grantee in &grantees {
+                if is_grant {
+                    sql.push_str(&format!(
+                        "INSERT INTO __pg_default_acl__ (defaclrole, defaclnamespace, defaclobjtype, defaclprivilege, defaclgrantee) \
+                         VALUES ({}, {}, {}, '{}', '{}') \
+                         ON CONFLICT(defaclrole, defaclnamespace, defaclobjtype, defaclprivilege, defaclgrantee) DO NOTHING;\n",
+                        role, schema, objtype, priv_, grantee
+                    ));
+                } else {
+                    sql.push_str(&format!(
+                        "DELETE FROM __pg_default_acl__ WHERE defaclrole = {} AND defaclnamespace = {} \
+                         AND defaclobjtype = {} AND defaclprivilege = '{}' AND defaclgrantee = '{}';\n",
+                        role, schema, objtype, priv_, grantee
+                    ));
+                }
+            }
+        }
+        return sql;
+    }
+    
+    "-- Unsupported ALTER DEFAULT PRIVILEGES action".to_string()
 }
 
 /// Extract table name from SELECT statement

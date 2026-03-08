@@ -22,4 +22,5 @@ pub use utils::{
     reconstruct_drop_role_stmt,
     reconstruct_grant_stmt,
     reconstruct_grant_role_stmt,
+    reconstruct_alter_default_privileges_stmt,
 };
