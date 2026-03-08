@@ -26,6 +26,74 @@ pub trait HandlerUtils {
     fn schema_manager(&self) -> &SchemaManager;
     fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
 
+    /// Check if the current user has permission to execute a function
+    fn check_function_privilege(&self, func_name: &str) -> Result<bool> {
+        let session = self.sessions().get(&0).unwrap_or_else(|| {
+            self.sessions().insert(0, SessionContext {
+                authenticated_user: "postgres".to_string(),
+                current_user: "postgres".to_string(),
+                search_path: SearchPath::default(),
+                transaction_status: crate::handler::TransactionStatus::Idle,
+                savepoints: Vec::new(),
+            });
+            self.sessions().get(&0).unwrap()
+        });
+        let current_user = session.current_user.clone();
+
+        let conn = self.conn().lock().unwrap();
+
+        // Check if user is superuser
+        let is_superuser: bool = conn.query_row(
+            "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
+            &[&current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if is_superuser {
+            return Ok(true);
+        }
+
+        // Check if user is owner of the function
+        let is_owner: bool = conn.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM __pg_proc__ p
+                JOIN __pg_authid__ r ON r.oid = p.proowner
+                WHERE p.proname = ?1 AND r.rolname = ?2
+            )",
+            &[func_name, &current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if is_owner {
+            return Ok(true);
+        }
+
+        // Check if user has EXECUTE privilege in __pg_acl__
+        let has_privilege: bool = conn.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM __pg_acl__ a
+                JOIN __pg_proc__ p ON p.oid = a.object_id
+                WHERE p.proname = ?1 AND a.privilege = 'EXECUTE'
+                AND (
+                    a.grantee_id IN (
+                        WITH RECURSIVE effective_roles AS (
+                            SELECT oid FROM __pg_authid__ WHERE rolname = ?2
+                            UNION
+                            SELECT m.roleid FROM __pg_auth_members__ m
+                            JOIN effective_roles er ON er.oid = m.member
+                        )
+                        SELECT oid FROM effective_roles
+                    )
+                    OR a.grantee_id = 0 -- PUBLIC
+                )
+            )",
+            &[func_name, &current_user],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        Ok(has_privilege)
+    }
+
     /// Check if the current user has permission to execute the query
     fn check_permissions(&self, referenced_tables: &[String], operation_type: crate::transpiler::OperationType, sql: &str) -> Result<bool> {
         // Get current user from session
