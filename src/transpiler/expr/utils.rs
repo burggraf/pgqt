@@ -53,6 +53,16 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
     let original_type = extract_original_type(&type_cast.type_name);
     let sqlite_type = rewrite_type_for_sqlite(&original_type, &ctx.registry);
 
+    if original_type.to_uppercase() == "REGCLASS" {
+        return format!("(SELECT oid FROM pg_class WHERE relname = {0} OR oid = CAST({0} AS INTEGER) LIMIT 1)", arg_sql);
+    }
+    if original_type.to_uppercase() == "REGTYPE" {
+        return format!("(SELECT oid FROM pg_type WHERE typname = {0} OR oid = CAST({0} AS INTEGER) LIMIT 1)", arg_sql);
+    }
+    if original_type.to_uppercase() == "REGPROC" || original_type.to_uppercase() == "REGPROCEDURE" {
+        return format!("(SELECT oid FROM pg_proc WHERE proname = {0} OR oid = CAST({0} AS INTEGER) LIMIT 1)", arg_sql);
+    }
+
     // Validate boolean literals
     if original_type.to_uppercase() == "BOOLEAN" || original_type.to_uppercase() == "BOOL" {
         // Extract the literal value even if it's wrapped in another cast

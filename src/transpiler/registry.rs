@@ -110,7 +110,10 @@ impl Registry {
         types.register("character", "text");
         types.register("bpchar", "text");
         types.register("text", "text");
-        types.register("regclass", "text");
+        types.register("regclass", "integer");
+        types.register("regtype", "integer");
+        types.register("regproc", "integer");
+        types.register("regprocedure", "integer");
         types.register("varbit", "text");
         types.register("bit varying", "text");
         types.register("int4range", "text");

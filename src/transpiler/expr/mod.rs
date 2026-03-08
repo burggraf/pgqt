@@ -152,6 +152,7 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::RangeFunction(ref range_func) => {
                 ranges::reconstruct_range_function(range_func, ctx, reconstruct_node)
             }
+            NodeEnum::ParamRef(ref param_ref) => format!("?{}", param_ref.number),
             NodeEnum::SetToDefault(_) => {
                 if let Some(ref table_name) = ctx.current_table {
                     if let Some(col_aliases) = ctx.values_column_aliases.get(ctx.current_column_index) {
