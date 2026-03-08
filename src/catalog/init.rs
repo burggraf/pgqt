@@ -77,6 +77,19 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_acl__ table")?;
 
+    // Create __pg_default_acl__ table for ALTER DEFAULT PRIVILEGES
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_default_acl__ (
+            defaclrole INTEGER NOT NULL,
+            defaclnamespace INTEGER,
+            defaclobjtype TEXT NOT NULL,
+            defaclacl TEXT NOT NULL,
+            PRIMARY KEY (defaclrole, defaclnamespace, defaclobjtype)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_default_acl__ table")?;
+
     
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_relation_meta__ (
