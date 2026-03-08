@@ -15,6 +15,51 @@ use crate::transpiler::window::reconstruct_window_def;
 
 pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileContext) -> String {
     // Build full function name from all parts (handle schema-qualified functions)
+    let func_name_lower: String = func_call
+        .funcname
+        .iter()
+        .filter_map(|n| {
+            if let Some(ref inner) = n.node {
+                if let NodeEnum::String(s) = inner {
+                    return Some(s.sval.to_lowercase());
+                }
+            }
+            None
+        })
+        .last()
+        .unwrap_or_default();
+    
+    // Special handling: pg_get_function_result(p.oid) -> p.proresult
+    if func_name_lower == "pg_get_function_result" && func_call.args.len() == 1 {
+        if let Some(arg) = func_call.args.first() {
+            if let Some(NodeEnum::ColumnRef(col_ref)) = arg.node.as_ref() {
+                let col_parts: Vec<String> = col_ref.fields.iter()
+                    .filter_map(|f| {
+                        if let Some(NodeEnum::String(s)) = f.node.as_ref() {
+                            Some(s.sval.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if col_parts.len() == 2 {
+                    // It's "alias.oid", rewrite to "alias.proresult"
+                    return format!("{}.proresult", col_parts[0]);
+                }
+            }
+        }
+    }
+    
+    // Special handling: pg_get_function_arguments(p.oid) -> '' (empty string for now)
+    if func_name_lower == "pg_get_function_arguments" && func_call.args.len() == 1 {
+        return "''".to_string();
+    }
+    
+    // Special handling: pg_get_function_identity_arguments(p.oid) -> ''
+    if func_name_lower == "pg_get_function_identity_arguments" && func_call.args.len() == 1 {
+        return "''".to_string();
+    }
+    
     let func_parts: Vec<String> = func_call
         .funcname
         .iter()
@@ -231,10 +276,27 @@ pub fn parse_create_function(sql: &str) -> anyhow::Result<crate::catalog::Functi
     anyhow::bail!("Not a CREATE FUNCTION statement")
 }
 
+/// Extract schema name from qualified function name (e.g., "public"."funcname" -> "public")
+fn extract_schema_name(funcname: &[Node]) -> Option<String> {
+    if funcname.len() >= 2 {
+        // Schema-qualified name: take first component as schema
+        funcname.first().and_then(|n| n.node.as_ref()).and_then(|node| {
+            if let NodeEnum::String(s) = node {
+                Some(s.sval.clone())
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    }
+}
+
 /// Parse CreateFunctionStmt protobuf
 pub(crate) fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::Result<crate::catalog::FunctionMetadata> {
     // Extract function name
     let funcname = extract_funcname(&stmt.funcname)?;
+    let schema_name = extract_schema_name(&stmt.funcname).unwrap_or_else(|| "public".to_string());
     
     // Extract parameters
     let mut arg_types = Vec::new();
@@ -307,7 +369,7 @@ pub(crate) fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::R
     Ok(crate::catalog::FunctionMetadata {
         oid: 0,
         name: funcname,
-        schema: "public".to_string(),
+        schema: schema_name,
         arg_types,
         arg_names,
         arg_modes,
@@ -356,8 +418,10 @@ pub(crate) fn convert_named_to_positional_params(body: &str, arg_names: &[String
 }
 
 /// Extract function name from ObjectWithArgs
+/// Handles schema-qualified names like "public"."funcname" by taking the last component
 pub(crate) fn extract_funcname(funcname: &[Node]) -> anyhow::Result<String> {
-    if let Some(NodeEnum::String(s)) = funcname.first().and_then(|n| n.node.as_ref()) {
+    // Take the last element for schema-qualified names (e.g., "public"."funcname" -> "funcname")
+    if let Some(NodeEnum::String(s)) = funcname.last().and_then(|n| n.node.as_ref()) {
         Ok(s.sval.clone())
     } else {
         anyhow::bail!("Could not extract function name")

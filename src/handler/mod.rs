@@ -112,6 +112,31 @@ impl SqliteHandler {
             Ok(true)
         })?;
 
+        
+        // pg_get_function_result - returns return type based on OID
+        conn.create_scalar_function("pg_get_function_result", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let oid: i64 = ctx.get(0)?;
+            // Built-in function OIDs
+            let result = match oid {
+                10001 => "timestamp with time zone", // now
+                10002 => "timestamp with time zone", // current_timestamp
+                10003 => "date",                      // current_date
+                10004 => "time with time zone",       // current_time
+                _ => "integer",                       // default for user functions
+            };
+            Ok(result.to_string())
+        })?;
+
+        // pg_get_function_identity_arguments - returns argument signature
+        conn.create_scalar_function("pg_get_function_identity_arguments", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            Ok("".to_string())
+        })?;
+
+        // pg_get_function_arguments - returns formatted argument list
+        conn.create_scalar_function("pg_get_function_arguments", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _oid: i64 = ctx.get(0)?;
+            Ok("".to_string())
+        })?;
         // repeat(text, int) - repeats text N times
         conn.create_scalar_function("repeat", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let s: String = ctx.get(0)?;

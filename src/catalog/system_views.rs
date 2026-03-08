@@ -242,35 +242,47 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             10001 as oid, 'now' as proname, 11 as pronamespace, 10 as proowner,
             13 as prolang, 1.0 as procost, 0.0 as prorows, 0 as provariadic,
             'f' as prokind, false as prosecdef, false as proleakproof,
-            true as proisstrict, false as proretset, 's' as provolatile,
+            true as proisstrict, false as proretset, false as proisagg, false as proiswindow,
+            's' as provolatile,
             0 as pronargs, 0 as pronargdefaults, 1184 as prorettype,
             NULL as proargtypes, NULL as proallargtypes, NULL as proargmodes,
             NULL as proargnames, NULL as proargdefaults, NULL as protrftypes,
-            'now' as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl
+            'now' as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl,
+            'timestamp with time zone' as proresult
          UNION ALL
          SELECT 10002, 'current_timestamp', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
-                false, true, false, 's', 0, 0, 1184, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'now', NULL, NULL, NULL, NULL
+                false, true, false, false, false,
+                's', 0, 0, 1184, NULL, NULL, NULL, NULL, NULL,
+                NULL, 'now', NULL, NULL, NULL, NULL, 'timestamp with time zone'
          UNION ALL
          SELECT 10003, 'current_date', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
-                false, true, false, 's', 0, 0, 1082, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'current_date', NULL, NULL, NULL, NULL
+                false, true, false, false, false,
+                's', 0, 0, 1082, NULL, NULL, NULL, NULL, NULL,
+                NULL, 'current_date', NULL, NULL, NULL, NULL, 'date'
          UNION ALL
          SELECT 10004, 'current_time', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
-                false, true, false, 's', 0, 0, 1266, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'current_time', NULL, NULL, NULL, NULL
+                false, true, false, false, false,
+                's', 0, 0, 1266, NULL, NULL, NULL, NULL, NULL,
+                NULL, 'current_time', NULL, NULL, NULL, NULL, 'time with time zone'
          UNION ALL
          SELECT
             f.oid, f.funcname as proname, n.oid as pronamespace, f.owner_oid as proowner,
             13 as prolang, 1.0 as procost, 0.0 as prorows, 0 as provariadic,
             'f' as prokind, f.security_definer as prosecdef, false as proleakproof,
             f.strict as proisstrict, (f.return_type_kind = 'SETOF') as proretset,
+            false as proisagg, false as proiswindow,
             CASE f.volatility WHEN 'IMMUTABLE' THEN 'i' WHEN 'STABLE' THEN 's' ELSE 'v' END as provolatile,
             (SELECT COUNT(*) FROM json_each(f.arg_types)) as pronargs, 0 as pronargdefaults,
             COALESCE((SELECT oid FROM __pg_type__ WHERE typname = f.return_type), 25) as prorettype,
             f.arg_types as proargtypes, NULL as proallargtypes, f.arg_modes as proargmodes,
             f.arg_names as proargnames, NULL as proargdefaults, NULL as protrftypes,
-            f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl
+            f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl,
+            CASE 
+                WHEN f.return_type_kind = 'SETOF' THEN 'SETOF ' || f.return_type
+                WHEN f.return_type_kind = 'TABLE' THEN 'TABLE'
+                WHEN f.return_type_kind = 'VOID' THEN 'void'
+                ELSE f.return_type
+            END as proresult
          FROM __pg_functions__ f
          JOIN pg_namespace n ON f.schema_name = n.nspname",
         [],

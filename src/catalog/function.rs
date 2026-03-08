@@ -191,3 +191,126 @@ pub fn drop_function(
 
     Ok(changes > 0)
 }
+
+/// Get function metadata by OID
+pub fn get_function_by_oid(conn: &Connection, oid: i64) -> Result<Option<FunctionMetadata>> {
+    let mut stmt = conn.prepare(
+        "SELECT oid, funcname, schema_name, arg_types, arg_names, arg_modes, 
+                return_type, return_type_kind, return_table_cols, function_body, 
+                language, volatility, strict, security_definer, parallel, owner_oid, created_at
+         FROM __pg_functions__ WHERE oid = ?"
+    )?;
+    
+    let row_result = stmt.query_row([oid], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, String>(10)?,
+            row.get::<_, String>(11)?,
+            row.get::<_, bool>(12)?,
+            row.get::<_, bool>(13)?,
+            row.get::<_, String>(14)?,
+            row.get::<_, i64>(15)?,
+            row.get::<_, Option<String>>(16)?,
+        ))
+    });
+    
+    match row_result {
+        Ok((oid, name, schema, arg_types_json, arg_names_json, arg_modes_json, return_type, return_type_kind_str,
+            return_table_cols_json, function_body, language, volatility, strict, security_definer,
+            parallel, owner_oid, created_at)) => {
+            let arg_types: Vec<String> = serde_json::from_str(&arg_types_json)?;
+            let arg_names: Vec<String> = serde_json::from_str(&arg_names_json)?;
+            let arg_modes: Vec<ParamMode> = serde_json::from_str(&arg_modes_json)?;
+            let return_type_kind: ReturnTypeKind = 
+                match return_type_kind_str.as_str() {
+                    "Scalar" => ReturnTypeKind::Scalar,
+                    "SetOf" => ReturnTypeKind::SetOf,
+                    "Table" => ReturnTypeKind::Table,
+                    "Void" => ReturnTypeKind::Void,
+                    _ => ReturnTypeKind::Scalar,
+                };
+            let return_table_cols: Option<Vec<(String, String)>> = 
+                return_table_cols_json
+                .and_then(|s| serde_json::from_str(&s).ok());
+
+            Ok(Some(FunctionMetadata {
+                oid,
+                name,
+                schema,
+                arg_types,
+                arg_names,
+                arg_modes,
+                return_type,
+                return_type_kind,
+                return_table_cols,
+                function_body,
+                language,
+                volatility,
+                strict,
+                security_definer,
+                parallel,
+                owner_oid,
+                created_at,
+            }))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Format function return type for display
+pub fn format_function_result(metadata: &FunctionMetadata) -> String {
+    match metadata.return_type_kind {
+        ReturnTypeKind::SetOf => format!("SETOF {}", metadata.return_type),
+        ReturnTypeKind::Table => "TABLE".to_string(),
+        ReturnTypeKind::Void => "void".to_string(),
+        ReturnTypeKind::Scalar => metadata.return_type.clone(),
+    }
+}
+
+/// Format function arguments for display
+pub fn format_function_arguments(metadata: &FunctionMetadata) -> String {
+    let mut parts = Vec::new();
+    for i in 0..metadata.arg_types.len() {
+        let mode = metadata.arg_modes.get(i).map(|m| {
+            match m {
+                ParamMode::In => "IN",
+                ParamMode::Out => "OUT",
+                ParamMode::InOut => "INOUT",
+                ParamMode::Variadic => "VARIADIC",
+            }
+        }).unwrap_or("IN");
+        let arg_name = metadata.arg_names.get(i).map(|s| s.as_str()).unwrap_or("");
+        let arg_type = &metadata.arg_types[i];
+        
+        if mode == "OUT" || mode == "INOUT" {
+            if arg_name.is_empty() {
+                parts.push(format!("{} {}", mode.to_lowercase(), arg_type));
+            } else {
+                parts.push(format!("{} {} {}", mode.to_lowercase(), arg_name, arg_type));
+            }
+        } else if mode == "VARIADIC" {
+            if arg_name.is_empty() {
+                parts.push(format!("VARIADIC {}", arg_type));
+            } else {
+                parts.push(format!("VARIADIC {} {}", arg_name, arg_type));
+            }
+        } else {
+            if arg_name.is_empty() {
+                parts.push(arg_type.clone());
+            } else {
+                parts.push(format!("{} {}", arg_name, arg_type));
+            }
+        }
+    }
+    parts.join(", ")
+}
