@@ -173,10 +173,15 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
     )?;
 
     
+    // pg_description view
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_description AS
-         SELECT 0 as objoid, 0 as classoid, 0 as objsubid, '' as description
-         WHERE 0=1",
+         SELECT 
+             objoid,
+             classoid,
+             objsubid,
+             description
+         FROM __pg_description__",
         [],
     )?;
 
@@ -202,6 +207,19 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_auth_members AS
          SELECT roleid, member, grantor, admin_option FROM __pg_auth_members__",
+        [],
+    )?;
+
+    // pg_default_acl view
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS pg_default_acl AS
+         SELECT 
+             ROW_NUMBER() OVER (ORDER BY defaclrole, defaclnamespace, defaclobjtype) as oid,
+             defaclrole,
+             defaclnamespace,
+             defaclobjtype,
+             defaclacl
+         FROM __pg_default_acl__",
         [],
     )?;
 
