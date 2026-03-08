@@ -27,7 +27,7 @@ pub trait HandlerUtils {
     fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
 
     /// Check if the current user has permission to execute the query
-    fn check_permissions(&self, referenced_tables: &[String], operation_type: crate::transpiler::OperationType) -> Result<bool> {
+    fn check_permissions(&self, referenced_tables: &[String], operation_type: crate::transpiler::OperationType, sql: &str) -> Result<bool> {
         // Get current user from session
         let session = self.sessions().get(&0).unwrap_or_else(|| {
             self.sessions().insert(0, SessionContext {
@@ -87,6 +87,33 @@ pub trait HandlerUtils {
 
         if effective_roles.is_empty() {
             return Ok(false);
+        }
+
+        // --- Step 1: Check for schema operations (RBAC completion plan Task 9) ---
+        if operation_type == crate::transpiler::OperationType::DDL {
+            let upper_sql = sql.trim().to_uppercase();
+            if upper_sql.starts_with("CREATE SCHEMA") || upper_sql.starts_with("CREATE TABLE") {
+                // Check if user has CREATE privilege on the schema
+                // For now, we only check for CREATE SCHEMA or CREATE TABLE (implied)
+                // A more complete implementation would check for specific schema
+                let has_schema_create: bool = conn.query_row(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM __pg_acl__ a
+                        JOIN pg_namespace n ON n.oid = a.object_id
+                        WHERE a.privilege = 'CREATE'
+                        AND (
+                            a.grantee_id IN (SELECT oid FROM __pg_authid__ WHERE rolname = ?1)
+                            OR a.grantee_id = 0
+                        )
+                    )",
+                    &[&current_user],
+                    |row| row.get(0),
+                ).unwrap_or(false);
+
+                if !has_schema_create {
+                    return Ok(false);
+                }
+            }
         }
 
         // Map operation to privilege

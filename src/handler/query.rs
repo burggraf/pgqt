@@ -48,6 +48,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return Err(anyhow!("{}", transpile_result.errors.join("; ")));
         }
 
+        // Check permissions before executing
+        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, sql)? {
+            return Err(anyhow!("permission denied"));
+        }
+
         // Apply RLS
         let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
 
@@ -308,7 +313,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         // Check permissions before executing
-        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type)? {
+        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, sql)? {
             return Err(anyhow!("permission denied for table(s)"));
         }
 
