@@ -173,9 +173,14 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return self.handle_drop_function(sql);
         }
         
-        // SET search_path (transpiler converts this to "select 1")
+        // Handle SET search_path (transpiler converts this to "select 1")
         if original_upper.starts_with("SET SEARCH_PATH") {
             return self.handle_set_search_path(sql);
+        }
+
+        // Handle SET ROLE and RESET ROLE
+        if original_upper.starts_with("SET ROLE") || original_upper.starts_with("RESET ROLE") {
+            return self.handle_set_role(sql);
         }
 
         let result = crate::transpiler::transpile_with_metadata(sql);
@@ -300,25 +305,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
         // Handle COPY statements
         if let Some(copy_stmt) = transpile_result.copy_metadata {
             return self.handle_copy_statement(copy_stmt);
-        }
-
-        // Handle SET ROLE specially
-        if transpile_result.sql.starts_with("-- SET ROLE") {
-            let role_name = transpile_result.sql.trim_start_matches("-- SET ROLE ").trim();
-            if role_name != "NONE" {
-                // Update session context
-                let mut session = self.sessions().get_mut(&0).unwrap_or_else(|| {
-                    self.sessions().insert(0, SessionContext {
-                        authenticated_user: "postgres".to_string(),
-                        current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-                    });
-                    self.sessions().get_mut(&0).unwrap()
-                });
-                session.current_user = role_name.to_string();
-            }
-            // Return success without executing
-            return Ok(vec![Response::Execution(Tag::new("SET"))]);
         }
 
         // Check permissions before executing
