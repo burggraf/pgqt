@@ -7,7 +7,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt, 
-    IndexStmt, CopyStmt, ViewStmt
+    IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt
 };
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
 use crate::transpiler::reconstruct_node;
@@ -879,4 +879,32 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
     }
     
     parts.join(" ")
+}
+
+pub(crate) fn reconstruct_define_stmt(stmt: &DefineStmt, _ctx: &mut TranspileContext) -> String {
+    // pg_query doesn't provide a perfect deparse for every stmt in all versions
+    // and we want to comment it out anyway.
+    let names: Vec<String> = stmt.defnames.iter().filter_map(|n| {
+        if let Some(NodeEnum::String(ref s)) = n.node {
+            Some(s.sval.clone())
+        } else {
+            None
+        }
+    }).collect();
+    
+    let full_name = names.join(".");
+    format!("-- CREATE TYPE {} (ignored)", full_name)
+}
+
+pub(crate) fn reconstruct_create_enum_stmt(stmt: &CreateEnumStmt, _ctx: &mut TranspileContext) -> String {
+    let names: Vec<String> = stmt.type_name.iter().filter_map(|n| {
+        if let Some(NodeEnum::String(ref s)) = n.node {
+            Some(s.sval.clone())
+        } else {
+            None
+        }
+    }).collect();
+    
+    let full_name = names.join(".");
+    format!("-- CREATE TYPE {} AS ENUM (ignored)", full_name)
 }

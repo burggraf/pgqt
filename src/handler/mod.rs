@@ -149,6 +149,14 @@ impl SqliteHandler {
             Ok("PostgreSQL 15.0 (pgqt)".to_string())
         })?;
 
+        // set_config(name, value, is_local) - returns new value
+        conn.create_scalar_function("set_config", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let _name: String = ctx.get(0)?;
+            let value: String = ctx.get(1)?;
+            let _is_local: bool = ctx.get(2)?;
+            Ok(value)
+        })?;
+
         // current_schema - returns current schema name
         conn.create_scalar_function("current_schema", 0, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
             Ok("public".to_string())

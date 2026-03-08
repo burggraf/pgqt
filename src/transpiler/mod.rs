@@ -114,6 +114,22 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::SELECT,
                 errors: Vec::new(),
             },
+            NodeEnum::DefineStmt(ref define_stmt) => TranspileResult {
+                sql: ddl::reconstruct_define_stmt(define_stmt, ctx),
+                create_table_metadata: None, 
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+            },
+            NodeEnum::CreateEnumStmt(ref create_enum_stmt) => TranspileResult {
+                sql: ddl::reconstruct_create_enum_stmt(create_enum_stmt, ctx),
+                create_table_metadata: None, 
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+            },
             NodeEnum::CreateStmt(ref create_stmt) => {
                 let mut res = ddl::reconstruct_create_stmt_with_metadata(create_stmt, ctx);
                 res.operation_type = OperationType::DDL;
@@ -284,6 +300,66 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 TranspileResult {
                     sql: "VACUUM".to_string(),
                     create_table_metadata: None,
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::OTHER,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::CommentStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- COMMENT IGNORED"),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::AlterDefaultPrivilegesStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- ALTER DEFAULT PRIVILEGES IGNORED"),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::AlterOwnerStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- ALTER OWNER IGNORED"),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::CreatePolicyStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- CREATE POLICY IGNORED"),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::CreateTrigStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- CREATE TRIGGER IGNORED"),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                }
+            }
+            NodeEnum::DoStmt(_) => {
+                TranspileResult {
+                    sql: format!("-- DO IGNORED"),
+                    create_table_metadata: None, 
                     copy_metadata: None,
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
