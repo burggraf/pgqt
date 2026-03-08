@@ -90,6 +90,19 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create __pg_default_acl__ table")?;
 
+    // Create __pg_description__ table for COMMENT ON statements
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_description__ (
+            objoid INTEGER NOT NULL,
+            classoid INTEGER NOT NULL,
+            objsubid INTEGER DEFAULT 0,
+            description TEXT NOT NULL,
+            PRIMARY KEY (objoid, classoid, objsubid)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_description__ table")?;
+
     
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_relation_meta__ (

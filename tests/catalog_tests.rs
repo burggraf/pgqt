@@ -23,6 +23,19 @@ fn test_init_catalog_creates_table() {
 }
 
 #[test]
+fn test_init_catalog_creates_pg_description() {
+    let conn = setup_test_db();
+    
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name = '__pg_description__'",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn test_store_and_retrieve_column() {
     let conn = setup_test_db();
     
