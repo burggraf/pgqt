@@ -35,6 +35,7 @@ pub mod range;
 pub mod rls;
 pub mod rls_inject;
 pub mod schema;
+pub mod rbac;
 pub mod stats;
 pub mod transpiler;
 pub mod vector;
