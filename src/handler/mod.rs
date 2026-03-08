@@ -9,13 +9,13 @@ use rusqlite::Connection;
 use dashmap::DashMap;
 use pgwire::api::portal::{Portal, Format};
 use pgwire::api::stmt::{StoredStatement, QueryParser};
-use pgwire::api::query::{SimpleQueryHandler, ExtendedQueryHandler};
+use pgwire::api::query::ExtendedQueryHandler;
 use pgwire::api::results::{DescribePortalResponse, DescribeStatementResponse, FieldInfo, Response, DescribeResponse};
 use pgwire::api::{ClientInfo, ClientPortalStore};
 use pgwire::error::PgWireResult;
 use pgwire::messages::PgWireBackendMessage;
 use pgwire::messages::data::RowDescription;
-use futures::{Sink, SinkExt};
+use futures::Sink;
 use async_trait::async_trait;
 
 use crate::catalog::{init_catalog, init_system_views};
@@ -669,7 +669,7 @@ impl ExtendedQueryHandler for SqliteHandler {
 
     async fn do_query<C>(
         &self,
-        client: &mut C,
+        _client: &mut C,
         portal: &Portal<Self::Statement>,
         _max_rows: usize,
     ) -> PgWireResult<Response>
@@ -732,7 +732,7 @@ impl ExtendedQueryHandler for SqliteHandler {
                     // Force RowDescription for SELECTs if not already sent by client Describe
                     if let Response::Query(ref query_resp) = resp {
                         let fields = query_resp.row_schema();
-                        let row_desc = RowDescription::new(fields.iter().map(|f| {
+                        let _row_desc = RowDescription::new(fields.iter().map(|f| {
                             pgwire::messages::data::FieldDescription::new(
                                 f.name().to_string(),
                                 f.table_id().unwrap_or(0),
@@ -771,7 +771,7 @@ impl ExtendedQueryHandler for SqliteHandler {
     {
         let query = &statement.statement;
         println!("DEBUG: Describe statement: {}", query);
-        let result = crate::transpiler::transpile_with_metadata(query);
+        let _result = crate::transpiler::transpile_with_metadata(query);
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         ctx.set_metadata_provider(self.as_metadata_provider());
         let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);

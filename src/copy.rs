@@ -16,7 +16,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::sink::{Sink, SinkExt};
+use futures::sink::Sink;
 use futures::stream;
 use pgwire::api::copy::CopyHandler as PgWireCopyHandler;
 use pgwire::api::results::{CopyResponse, Response};

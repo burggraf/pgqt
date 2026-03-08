@@ -34,7 +34,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let transpiled = result.sql;
         println!("DEBUG: Original: {}", sql);
         println!("DEBUG: Transpiled: {}", transpiled);
-        let upper_sql = transpiled.trim().to_uppercase();
+        let _upper_sql = transpiled.trim().to_uppercase();
 
         // Transaction Control and other special commands usually don't have parameters in extended query
         // but we should check if we need to handle them here.
