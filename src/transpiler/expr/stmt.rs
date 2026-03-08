@@ -68,11 +68,13 @@ pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileCon
 
 /// Reconstruct a SubLink (subquery)
 pub(crate) fn reconstruct_sub_link(sub_link: &SubLink, ctx: &mut TranspileContext) -> String {
+    ctx.enter_subquery();
     let subquery = sub_link
         .subselect
         .as_ref()
         .map(|n| reconstruct_node(n, ctx))
         .unwrap_or_default();
+    ctx.exit_subquery();
 
     match sub_link.sub_link_type() {
         pg_query::protobuf::SubLinkType::ExistsSublink => format!("exists ({})", subquery),

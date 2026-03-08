@@ -71,6 +71,47 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::BoolExpr(ref bool_expr) => reconstruct_bool_expr(bool_expr, ctx),
             NodeEnum::JoinExpr(ref join_expr) => stmt::reconstruct_join_expr(join_expr, ctx),
             NodeEnum::SelectStmt(ref select_stmt) => reconstruct_select_stmt(select_stmt, ctx),
+            NodeEnum::AIndirection(ref ind) => {
+                let mut arg_sql = ind.arg.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
+                
+                // If the argument is a SubLink (subquery), ensure it's parenthesized correctly
+                if let Some(ref arg_node) = ind.arg {
+                    if let Some(NodeEnum::SubLink(_)) = arg_node.node {
+                        if !arg_sql.starts_with('(') {
+                            arg_sql = format!("({})", arg_sql);
+                        }
+                    }
+                }
+
+                let mut json_path = String::new();
+                for node in &ind.indirection {
+                    if let Some(ref inner) = node.node {
+                        match inner {
+                            NodeEnum::AIndices(ref indices) => {
+                                if let Some(ref uidx) = indices.uidx {
+                                    let idx_sql = reconstruct_node(uidx, ctx);
+                                    let trimmed = idx_sql.trim_matches('\'');
+                                    if let Ok(idx) = trimmed.parse::<i64>() {
+                                        json_path.push_str(&format!("[{}]", idx - 1));
+                                    } else {
+                                        json_path.push_str(&format!("[{} - 1]", trimmed));
+                                    }
+                                }
+                            }
+                            NodeEnum::String(ref s) => {
+                                json_path.push_str(&format!(".{}", s.sval));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                
+                if json_path.is_empty() {
+                    arg_sql
+                } else {
+                    format!("json_extract({}, '${}')", arg_sql, json_path)
+                }
+            }
             NodeEnum::SubLink(ref sub_link) => stmt::reconstruct_sub_link(sub_link, ctx),
             NodeEnum::NullTest(ref null_test) => stmt::reconstruct_null_test(null_test, ctx),
             NodeEnum::BooleanTest(ref boolean_test) => {
@@ -126,48 +167,6 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
                 // Handle named window definitions (e.g., WINDOW w AS (PARTITION BY ...))
                 let window_sql = crate::transpiler::window::reconstruct_window_def(window_def, ctx);
                 format!("{} as ({})", window_def.name.clone(), window_sql)
-            }
-            NodeEnum::AIndirection(ref ind) => {
-                let mut arg = ind.arg.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
-                
-                // If the argument is a SubLink (subquery), ensure it's parenthesized correctly
-                if let Some(ref arg_node) = ind.arg {
-                    if let Some(NodeEnum::SubLink(_)) = arg_node.node {
-                        if !arg.starts_with('(') {
-                            arg = format!("({})", arg);
-                        }
-                    }
-                }
-
-                let mut json_path = "$".to_string();
-                
-                for node in &ind.indirection {
-                    if let Some(ref inner) = node.node {
-                        match inner {
-                            NodeEnum::AIndices(ref indices) => {
-                                if let Some(ref uidx) = indices.uidx {
-                                    let idx_sql = reconstruct_node(uidx, ctx);
-                                    if let Ok(idx) = idx_sql.parse::<i64>() {
-                                        json_path.push_str(&format!("[{}]", idx - 1));
-                                    } else {
-                                        // Dynamic index: $[idx-1]
-                                        json_path.push_str(&format!("[{} - 1]", idx_sql));
-                                    }
-                                }
-                            }
-                            NodeEnum::String(ref s) => {
-                                json_path.push_str(&format!(".{}", s.sval));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                
-                if json_path == "$" {
-                    arg
-                } else {
-                    format!("json_extract({}, '{}')", arg, json_path)
-                }
             }
             _ => node.deparse().unwrap_or_else(|_| "".to_string()).to_lowercase(),
         }

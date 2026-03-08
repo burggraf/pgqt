@@ -49,9 +49,6 @@ fn json_value_from_sql(val: &str) -> serde_json::Value {
         serde_json::Value::String(inner.to_string())
     } else if val == "NULL" {
         serde_json::Value::Null
-    } else if val == "1" || val == "0" {
-        // Boolean values (converted to 1/0 by reconstruct_aconst)
-        serde_json::Value::Bool(val == "1")
     } else if let Ok(num) = val.parse::<i64>() {
         serde_json::Value::Number(num.into())
     } else if let Ok(num) = val.parse::<f64>() {

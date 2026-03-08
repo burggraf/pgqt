@@ -40,7 +40,8 @@ This plan outlines the prioritized steps to improve PostgreSQL compatibility bas
 - **Problem**: `SELECT (SELECT ARRAY[1,2,3])[1]` fails with syntax errors.
 - **Action**: Improve the transpiler's handling of `A_Indirection` on subqueries.
 - **Status**: Completed (Added support for `A_Indirection` nodes in `reconstruct_node`, mapping them to SQLite's `json_extract`. Also ensured correct subquery parenthesizing and default 'array' aliasing).
-- **Metric**: Passing `subselect.sql`.
+- **Limitation**: Direct array indexing on array literals (e.g., `ARRAY[1,2,3][1]`) is not supported because `pg_query` parser cannot parse this syntax. Only subquery array indexing (e.g., `(SELECT ARRAY[...])[1]`) is transpiled.
+- **Metric**: Passing `subselect.sql` (for subquery cases).
 
 ## Phase 3: Long-Tail Compatibility (Edge Cases)
 
