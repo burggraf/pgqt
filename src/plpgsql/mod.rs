@@ -47,16 +47,30 @@ pub use transpiler::transpile_to_lua;
 use anyhow::Result;
 use rusqlite::{Connection, types::Value};
 use std::collections::HashMap;
+use dashmap::DashMap;
+use std::sync::Arc;
+use crate::catalog::FunctionMetadata;
 
 /// Execute a PL/pgSQL function by name (looks up in catalog)
 #[allow(dead_code)]
 pub fn execute_plpgsql_function(
-    _conn: &Connection,
-    _function_name: &str,
-    _args: &[Value],
+    conn: &Connection,
+    function_name: &str,
+    args: &[Value],
+    functions_cache: &Arc<DashMap<String, FunctionMetadata>>,
 ) -> Result<Value> {
-    // TODO: Look up function from catalog, transpile if needed, execute
-    anyhow::bail!("execute_plpgsql_function not yet implemented")
+    let metadata = functions_cache.get(function_name)
+        .ok_or_else(|| anyhow::anyhow!("Function {} not found", function_name))?;
+
+    let runtime = PlPgSqlRuntime::new()?;
+    
+    // We need to reconstruct the CREATE FUNCTION statement from metadata
+    // Or just parse the function body if we had a way to handle parameters
+    // execute_plpgsql_function in src/functions.rs already does this correctly.
+    // This function in mod.rs seems to be a placeholder or for direct calls.
+    
+    let result = runtime.execute_function(conn, &metadata.function_body, args)?;
+    Ok(result)
 }
 
 /// Execute a PL/pgSQL trigger function

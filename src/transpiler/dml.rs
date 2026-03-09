@@ -828,6 +828,8 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
 
     
     ctx.values_column_aliases = columns;
+    // Set flag to avoid unwrapping SELECT in function calls inside INSERT VALUES
+    ctx.in_insert_values = true;
 
     
     if let Some(ref select_stmt) = stmt.select_stmt {
@@ -837,6 +839,7 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
     
     ctx.current_table = None;
     ctx.values_column_aliases.clear();
+    ctx.in_insert_values = false;
 
     parts.join(" ")
 }

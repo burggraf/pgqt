@@ -70,7 +70,9 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::AExpr(ref a_expr) => operators::reconstruct_a_expr(a_expr, ctx),
             NodeEnum::BoolExpr(ref bool_expr) => reconstruct_bool_expr(bool_expr, ctx),
             NodeEnum::JoinExpr(ref join_expr) => stmt::reconstruct_join_expr(join_expr, ctx),
-            NodeEnum::SelectStmt(ref select_stmt) => reconstruct_select_stmt(select_stmt, ctx),
+            NodeEnum::SelectStmt(ref select_stmt) => {
+                reconstruct_select_stmt(select_stmt, ctx)
+            }
             NodeEnum::AIndirection(ref ind) => {
                 let mut arg_sql = ind.arg.as_ref().map(|n| reconstruct_node(n, ctx)).unwrap_or_default();
                 

@@ -70,19 +70,84 @@ impl SqliteHandler {
         init_catalog(&conn)?;
         init_system_views(&conn)?;
 
-        // Register PostgreSQL-compatible functions
-        Self::register_builtin_functions(&conn)?;
-
         let conn_arc = Arc::new(Mutex::new(conn));
         let copy_handler = crate::copy::CopyHandler::new(conn_arc.clone());
 
-        Ok(Self {
+        let handler = Self {
             conn: conn_arc,
             sessions: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
             functions: Arc::new(DashMap::new()),
-        })
+        };
+
+        // Register PostgreSQL-compatible functions
+        Self::register_builtin_functions(&handler.conn.lock().unwrap())?;
+
+        // Register PL/pgSQL call wrappers
+        handler.register_plpgsql_wrappers(&handler.conn.lock().unwrap())?;
+
+        Ok(handler)
+    }
+
+    /// Register PL/pgSQL call wrappers
+    pub fn register_plpgsql_wrappers(&self, conn: &Connection) -> Result<()> {
+        use rusqlite::functions::FunctionFlags;
+
+        // pgqt_plpgsql_call_scalar - Execute PL/pgSQL function and return scalar
+        let functions_cache = self.functions().clone();
+        conn.create_scalar_function("pgqt_plpgsql_call_scalar", -1, FunctionFlags::SQLITE_UTF8, move |ctx| {
+            let func_name: String = ctx.get(0)?;
+            let mut args = Vec::new();
+            for i in 1..ctx.len() {
+                args.push(ctx.get::<rusqlite::types::Value>(i)?);
+            }
+
+            // Look up function metadata from the cache
+            let metadata = functions_cache.get(&func_name)
+                .ok_or_else(|| rusqlite::Error::UserFunctionError(format!("Function {} not found", func_name).into()))?;
+
+            // Create a new Lua runtime for this call
+            let runtime = crate::plpgsql::PlPgSqlRuntime::new()
+                .map_err(|e| rusqlite::Error::UserFunctionError(e.into()))?;
+
+            let temp_conn = Connection::open_in_memory()?; 
+            
+            // Reconstruct the CREATE FUNCTION statement to parse the PL/pgSQL
+            let mut arg_defs = Vec::new();
+            for (i, typ) in metadata.arg_types.iter().enumerate() {
+                let name = if i < metadata.arg_names.len() && !metadata.arg_names[i].is_empty() {
+                    metadata.arg_names[i].clone()
+                } else {
+                    format!("arg{}", i + 1)
+                };
+                arg_defs.push(format!("{} {}", name, typ));
+            }
+            let args_signature = arg_defs.join(", ");
+
+            let create_sql = if metadata.function_body.to_uppercase().contains("BEGIN") {
+                format!("CREATE FUNCTION {}({}) RETURNS {} AS $${}$$ LANGUAGE plpgsql;", 
+                    func_name, args_signature, metadata.return_type, metadata.function_body)
+            } else {
+                format!("CREATE FUNCTION {}({}) RETURNS {} AS $$BEGIN {} END;$$ LANGUAGE plpgsql;", 
+                    func_name, args_signature, metadata.return_type, metadata.function_body)
+            };
+            
+            let parsed_func = crate::plpgsql::parse_plpgsql_function(&create_sql)
+                .map_err(|e| {
+                    eprintln!("Failed to parse PL/pgSQL: {}. SQL: {}", e, create_sql);
+                    rusqlite::Error::UserFunctionError(e.into())
+                })?;
+            let lua_code = crate::plpgsql::transpile_to_lua(&parsed_func)
+                .map_err(|e| rusqlite::Error::UserFunctionError(e.into()))?;
+
+            let result = runtime.execute_function(&temp_conn, &lua_code, &args)
+                .map_err(|e| rusqlite::Error::UserFunctionError(e.into()))?;
+
+            Ok(result)
+        })?;
+
+        Ok(())
     }
 
     /// Register built-in PostgreSQL-compatible functions with SQLite

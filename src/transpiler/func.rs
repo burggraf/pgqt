@@ -110,8 +110,44 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
                 // Update referenced tables in outer context
                 ctx.referenced_tables = inner_ctx.referenced_tables;
                 
-                let sql_body = transpiled_body.sql.trim_end_matches(';');
+                let mut sql_body = transpiled_body.sql.trim_end_matches(';').to_string();
                 
+                // UNWRAP SIMPLE SELECTS: If the body is a simple SELECT (no FROM, no complex clauses),
+                // we strip "SELECT " to avoid double-wrapping which causes syntax errors in SQLite
+                // like (SELECT (SELECT 3 + 7)) when used in expressions.
+                // However, we MUST NOT unwrap if this is part of an INSERT statement's VALUES context,
+                // as that leads to "INSERT INTO ... 1 AS id" which is invalid.
+                if sql_body.to_uppercase().starts_with("SELECT ") && !ctx.in_insert_values {
+                    let mut is_simple = true;
+                    let upper_body = sql_body.to_uppercase();
+                    let restricted = [" FROM ", " WHERE ", " GROUP BY ", " HAVING ", " WINDOW ", " ORDER BY ", " LIMIT ", " OFFSET ", " UNION ", " INTERSECT ", " EXCEPT ", " VALUES "];
+                    for word in restricted {
+                        if upper_body.contains(word) {
+                            is_simple = false;
+                            break;
+                        }
+                    }
+                    
+                    if is_simple {
+                        // Check if it has aliases (AS) or multiple columns (comma) which makes it not a simple scalar expression.
+                        // We must be careful not to match commas inside functions like randomblob(4).
+                        let mut depth = 0;
+                        let mut has_comma = false;
+                        for c in sql_body.chars() {
+                            if c == '(' { depth += 1; }
+                            else if c == ')' { depth -= 1; }
+                            else if c == ',' && depth == 0 {
+                                has_comma = true;
+                                break;
+                            }
+                        }
+
+                        if !upper_body.contains(" AS ") && !has_comma {
+                            sql_body = sql_body[7..].trim().to_string();
+                        }
+                    }
+                }
+
                 // Special handling for different return types
                 return match metadata.return_type_kind {
                     ReturnTypeKind::Void => {
@@ -337,6 +373,7 @@ pub(crate) fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::R
     let mut strict = false;
     let mut security_definer = false;
     let mut parallel = "UNSAFE".to_string();
+    let mut language = "sql".to_string();
     
     for opt_node in &stmt.options {
         if let Some(NodeEnum::DefElem(opt)) = opt_node.node.as_ref() {
@@ -361,6 +398,11 @@ pub(crate) fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::R
                         parallel = s.sval.clone().to_uppercase();
                     }
                 }
+                "language" => {
+                    if let Some(NodeEnum::String(s)) = opt.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                        language = s.sval.clone().to_lowercase();
+                    }
+                }
                 _ => {}
             }
         }
@@ -376,8 +418,8 @@ pub(crate) fn parse_create_function_stmt(stmt: &CreateFunctionStmt) -> anyhow::R
         return_type,
         return_type_kind,
         return_table_cols,
-        function_body: function_body_with_positions,
-        language: "sql".to_string(),
+        function_body: if language == "plpgsql" { function_body } else { function_body_with_positions },
+        language,
         volatility,
         strict,
         security_definer,
