@@ -150,9 +150,21 @@ pub fn reconstruct_grant_stmt(stmt: &GrantStmt) -> String {
         None
     }).collect();
 
-    if grantees.is_empty() || privileges.is_empty() {
+    if grantees.is_empty() {
         return "SELECT 1".to_string();
     }
+
+    // Handle GRANT ALL - when privileges is empty for table/view grants, expand to all standard privileges
+    let privileges: Vec<String> = if privileges.is_empty() {
+        match pg_query::protobuf::ObjectType::try_from(objtype) {
+            Ok(pg_query::protobuf::ObjectType::ObjectTable) | Ok(pg_query::protobuf::ObjectType::ObjectView) => {
+                vec!["SELECT".to_string(), "INSERT".to_string(), "UPDATE".to_string(), "DELETE".to_string()]
+            }
+            _ => return "SELECT 1".to_string(), // Other object types need explicit privileges
+        }
+    } else {
+        privileges
+    };
 
     match pg_query::protobuf::ObjectType::try_from(objtype) {
         Ok(pg_query::protobuf::ObjectType::ObjectTable) | Ok(pg_query::protobuf::ObjectType::ObjectView) => {
@@ -185,16 +197,22 @@ fn handle_table_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], g
     }
 
     if is_grant {
-        let obj = &objects[0];
-        let priv_ = &privileges[0];
-        let grantee = &grantees[0];
-        format!(
-            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
-             SELECT c.oid, 'relation', COALESCE(r.oid, 0), '{}', 10 \
-             FROM pg_class c LEFT JOIN pg_roles r ON r.rolname = '{}' \
-             WHERE c.relname = '{}'",
-            priv_, grantee, obj
-        )
+        // Generate INSERT for all combinations of privileges, grantees, and objects
+        let mut inserts = Vec::new();
+        for obj in &objects {
+            for priv_ in privileges {
+                for grantee in grantees {
+                    inserts.push(format!(
+                        "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+                         SELECT c.oid, 'relation', COALESCE(r.oid, 0), '{}', 10 \
+                         FROM pg_class c LEFT JOIN pg_roles r ON r.rolname = '{}' \
+                         WHERE c.relname = '{}'",
+                        priv_, grantee, obj
+                    ));
+                }
+            }
+        }
+        inserts.join("; ")
     } else {
         format!(
             "DELETE FROM __pg_acl__ WHERE object_id IN (SELECT oid FROM pg_class WHERE relname IN ({})) \
@@ -291,8 +309,12 @@ fn handle_function_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String]
 pub fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
     let is_grant = stmt.is_grant;
 
+    // Granted roles can be in AccessPriv or RoleSpec nodes
     let granted_roles: Vec<String> = stmt.granted_roles.iter().filter_map(|r| {
         if let Some(ref node) = r.node {
+            if let NodeEnum::AccessPriv(ref ap) = node {
+                return Some(ap.priv_name.to_lowercase());
+            }
             if let NodeEnum::RoleSpec(ref role) = node {
                 return Some(role.rolename.to_lowercase());
             }
@@ -300,8 +322,12 @@ pub fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
         None
     }).collect();
 
+    // Grantee roles can be in AccessPriv or RoleSpec nodes
     let grantee_roles: Vec<String> = stmt.grantee_roles.iter().filter_map(|r| {
         if let Some(ref node) = r.node {
+            if let NodeEnum::AccessPriv(ref ap) = node {
+                return Some(ap.priv_name.to_lowercase());
+            }
             if let NodeEnum::RoleSpec(ref role) = node {
                 return Some(role.rolename.to_lowercase());
             }

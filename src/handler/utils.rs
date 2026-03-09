@@ -194,19 +194,28 @@ pub trait HandlerUtils {
             _ => return Ok(true), // DDL and other operations are allowed for now
         };
 
-        // Check permissions for each table
+        // Check permissions for each table        
         for table_name in referenced_tables {
+            // Check for specific privilege OR 'ALL' privilege (which covers everything)
             let has_privilege: bool = conn.query_row(
                 "SELECT EXISTS (
                     SELECT 1 FROM __pg_acl__ a
                     JOIN pg_class c ON c.oid = a.object_id AND c.relname = ?1
-                    WHERE a.privilege = ?2
+                    WHERE (a.privilege = ?2 OR a.privilege = 'ALL')
                     AND (
-                        a.grantee_id IN (SELECT oid FROM __pg_authid__)
+                        a.grantee_id IN (
+                            WITH RECURSIVE effective_roles AS (
+                                SELECT oid FROM __pg_authid__ WHERE rolname = ?3
+                                UNION
+                                SELECT m.roleid FROM __pg_auth_members__ m
+                                JOIN effective_roles er ON er.oid = m.member
+                            )
+                            SELECT oid FROM effective_roles
+                        )
                         OR a.grantee_id = 0
                     )
                 )",
-                &[table_name, required_privilege],
+                &[table_name, required_privilege, &current_user],
                 |row| row.get(0),
             ).unwrap_or(false);
 
@@ -487,41 +496,43 @@ pub trait HandlerUtils {
         } else {
             // Verify role membership
             let conn = self.conn().lock().unwrap();
-            
+
             // Check if role exists
             let role_exists: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM __pg_authid__ WHERE rolname = ?1)",
                 &[&role_name],
                 |row| row.get(0),
             ).unwrap_or(false);
-            
+
             if !role_exists {
                 return Err(anyhow!("role \"{}\" does not exist", role_name));
             }
-            
+
             // Check if authenticated user is a member of the role
             let is_member: bool = conn.query_row(
-                "WITH RECURSIVE effective_roles AS (
+                "WITH RECURSIVE member_roles AS (
+                    -- Start from the authenticated user
                     SELECT oid FROM __pg_authid__ WHERE rolname = ?1
                     UNION
-                    SELECT m.member FROM __pg_auth_members__ m
-                    JOIN effective_roles er ON er.oid = m.roleid
+                    -- Find all roles granted to this user (where user is the member)
+                    SELECT m.roleid FROM __pg_auth_members__ m
+                    JOIN member_roles mr ON mr.oid = m.member
                  )
-                 SELECT EXISTS(SELECT 1 FROM effective_roles er JOIN __pg_authid__ a ON a.oid = er.oid WHERE a.rolname = ?2)",
-                &[&role_name, &session.authenticated_user],
+                 SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN __pg_authid__ a ON a.oid = mr.oid WHERE a.rolname = ?2)",
+                &[&session.authenticated_user, &role_name],
                 |row| row.get(0),
             ).unwrap_or(false);
-            
+
             let is_superuser: bool = conn.query_row(
                 "SELECT rolsuper FROM __pg_authid__ WHERE rolname = ?1",
                 &[&session.authenticated_user],
                 |row| row.get(0),
             ).unwrap_or(false);
-            
+
             if !is_member && !is_superuser {
                 return Err(anyhow!("permission denied to set role \"{}\"", role_name));
             }
-            
+
             session.current_user = role_name;
         }
 
