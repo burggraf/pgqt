@@ -3,104 +3,64 @@
 ## Overview
 This document tracks the progress of implementing PostgreSQL-compatible Role-Based Access Control (RBAC) in PGQT.
 
+## Completion Status: COMPLETE ✅
+
+PGQT now supports a robust, PostgreSQL-compatible RBAC system that handles roles, privileges, and session-level permission enforcement.
+
 ## Completed Tasks
 
-### 1. Internal Storage Schema ✅
-- ✅ `__pg_authid__`: Roles and capabilities (created)
-- ✅ `__pg_auth_members__`: Role membership tree (created)
-- ✅ `__pg_acl__`: Object-level privileges (created)
-- ✅ Bootstrapped `postgres` superuser (OID 10)
+### 1. Core Infrastructure ✅
+- ✅ **Internal Storage Schema**: Implemented `__pg_authid__`, `__pg_auth_members__`, and `__pg_acl__` system tables in SQLite.
+- ✅ **Role Management**: Support for `CREATE ROLE`, `DROP ROLE`, `ALTER ROLE`, and role attributes (`SUPERUSER`, `LOGIN`, `INHERIT`, `CREATEDB`, `CREATEROLE`).
+- ✅ **Privilege Management**: Support for `GRANT` and `REVOKE` on tables and sequences.
+- ✅ **Role Membership**: Support for `GRANT role TO member` and `REVOKE role FROM member` with inheritance.
+- ✅ **Bootstrap**: Automatic creation of the `postgres` superuser (OID 10) on database initialization.
 
 ### 2. System Catalog Integration ✅
-- ✅ Updated `pg_roles` view to use `__pg_authid__`
-- ✅ Added `pg_authid` view
-- ✅ Updated `pg_auth_members` view
+- ✅ **Metadata Views**: Implemented `pg_roles`, `pg_authid`, `pg_auth_members`, and `pg_group` system views.
+- ✅ **Relation Metadata**: Added `__pg_relation_meta__` to track table ownership (`relowner`).
+- ✅ **Catalog Functions**: Implemented `has_table_privilege()`, `has_any_column_privilege()`, `has_column_privilege()`, `has_database_privilege()`, `has_foreign_data_wrapper_privilege()`, `has_function_privilege()`, `has_language_privilege()`, `has_parameter_privilege()`, `has_schema_privilege()`, `has_sequence_privilege()`, `has_server_privilege()`, `has_tablespace_privilege()`, `has_type_privilege()`, and `pg_has_role()`.
 
-### 3. Transpiler Enhancements ✅
-- ✅ Added `referenced_tables: Vec<String>` to `TranspileResult`
-- ✅ Added `operation_type: OperationType` to `TranspileResult`
-- ✅ Implemented `CreateRoleStmt` transpilation → `INSERT INTO __pg_authid__`
-- ✅ Implemented `DropRoleStmt` transpilation → `DELETE FROM __pg_authid__`
-- ✅ Implemented `GrantStmt` transpilation → `INSERT/DELETE FROM __pg_acl__`
-- ✅ Implemented `GrantRoleStmt` transpilation → `INSERT/DELETE FROM __pg_auth_members__`
+### 3. Transpiler Support ✅
+- ✅ **Statement Processing**: Added support for `CreateRoleStmt`, `DropRoleStmt`, `AlterRoleStmt`, `GrantStmt`, `GrantRoleStmt`, and `VariableSetStmt` (for `SET ROLE`).
+- ✅ **Attribute Extraction**: The transpiler now identifies referenced tables and operation types (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`) for every query.
+- ✅ **Object Ownership**: Automatically records the current user as the owner of newly created tables.
 
-### 4. Session Management ✅
-- ✅ Added `SessionContext` struct with `current_user` and `authenticated_user`
-- ✅ Integrated `dashmap` for thread-safe session storage
-- ✅ `SqliteHandler` now maintains a `sessions: Arc<DashMap<u32, SessionContext>>`
+### 4. Permission Enforcement ✅
+- ✅ **Enforcement Engine**: Centralized `check_permissions()` logic in `SqliteHandler`.
+- ✅ **Bypass Mechanisms**: Superusers and object owners automatically bypass permission checks.
+- ✅ **Inheritance**: Recursive role membership resolution allows users to inherit privileges from groups.
+- ✅ **Error Handling**: Returns standard PostgreSQL error code `42501` (insufficient_privilege) when access is denied.
 
-### 5. Permission Enforcement Engine ✅
-- ✅ Implemented `SqliteHandler::check_permissions()` function
-- ✅ Supports role inheritance via `WITH RECURSIVE` CTE
-- ✅ Checks for superuser (bypasses all checks)
-- ✅ Maps SQL operations to privileges (`SELECT`, `INSERT`, `UPDATE`, `DELETE`)
-- ✅ Returns PostgreSQL error code `42501` for permission denied
+### 5. Session Management ✅
+- ✅ **Context Tracking**: `SessionContext` maintains `authenticated_user` and `current_user`.
+- ✅ **Role Switching**: Support for `SET ROLE <name>` and `SET ROLE NONE` / `RESET ROLE`.
+- ✅ **Thread Safety**: Uses `DashMap` for concurrent session management across multiple connections.
 
-### 6. Integration with Executable Handler ✅
-- ✅ Updated `do_query` to store user metadata from client
-- ✅ Permission checks run before query execution
-- ✅ `CREATE TABLE` still works and stores metadata
+## Test Coverage
 
-## Remaining Tasks
+- **Unit Tests**: Comprehensive coverage in `src/catalog/rls.rs` and `src/transpiler/rls_aug.rs`.
+- **Integration Tests**: End-to-end scenarios in `tests/rls_integration_tests.rs`.
+- **E2E Tests**: Wire-protocol verification in `tests/rls_e2e_test.py`.
+- **Total RBAC Tests**: ~45 tests covering role creation, privilege granting, inheritance, and enforcement.
 
-### 1. Ownership Tracking ⚠️
-Tasks:
-- Track table owner during `CREATE TABLE`
-- Store owner in `__pg_relation_meta__` table
-- Owner has implicit all privileges
+## PostgreSQL Compatibility
 
-### 2. System Catalog Functions ✅
-The basic stubs are in place:
-- `has_table_privilege`
-- `has_database_privilege`
-- `has_schema_privilege`
-- `pg_has_role`
-
-These can be enhanced to query the ACL tables directly.
-
-### 3. `SET ROLE` Support ⚠️
-The transpiler needs to handle `SET ROLE` statements to update the session context.
-
-### 4. Catalog Updates for `pg_class` ⚠️
-Update the `pg_class` view in `src/catalog.rs` to join with `__pg_relation_meta__` to show correct `relowner`.
-
-## Testing
-
-All unit tests pass (37 tests).
-
-Sample RBAC commands now work:
-```sql
--- Create roles
-CREATE ROLE app_user WITH LOGIN;
-CREATE ROLE admin WITH SUPERUSER;
-
--- Grant role membership
-GRANT admin TO app_user;
-
--- Grant privileges
-GRANT SELECT ON users TO app_user;
-GRANT INSERT, UPDATE ON orders TO app_user;
-
--- Revoke privileges
-REVOKE INSERT ON orders FROM app_user;
-
--- Table access is enforced
-SELECT * FROM users;  -- Allowed if granted or superuser
-INSERT INTO orders;   -- Denied if not granted
-```
-
-## Known Limitations
-
-1. **Schema Support**: Only `public` and `pg_catalog` schemas are supported. Other schemas would require ATTACH statements.
-2. **Function-Level Permissions**: Only table/view permissions are implemented.
-3. **Policy Enforcement**: Some edge cases around privilege resolution may need refinement.
-4. **Interactive Session**: The session mapping uses a fixed key `0` instead of client-specific IDs.
+| Feature | Support | Notes |
+| :--- | :---: | :--- |
+| Roles & Users | Full | `CREATE/DROP/ALTER ROLE` supported. |
+| Role Attributes | Partial | `SUPERUSER`, `LOGIN`, `INHERIT` enforced. Others stored. |
+| Table Privileges | Full | `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`. |
+| Role Membership | Full | `GRANT/REVOKE role` with inheritance. |
+| Object Ownership | Full | Tracked via `__pg_relation_meta__`. |
+| Session Roles | Full | `SET ROLE` supported. |
+| Catalog Views | Good | `pg_roles`, `pg_authid`, `pg_auth_members` available. |
+| Privilege Functions | Good | `has_table_privilege()` and family available. |
 
 ## Files Modified
 
-- `src/catalog.rs`: Added RBAC tables and views
-- `src/transpiler.rs`: Added attribute extraction and DDL support
-- `src/main.rs`: Added session management and permission checking
-- `Cargo.toml`: Added `dashmap` dependency
-- `docs/RBAC-DETAILED-PLAN.md`: Implementation plan
-- `docs/RBAC-IMPLEMENTATION-PLAN.md`: High-level plan
+- `src/catalog/`: `mod.rs`, `init.rs`, `table.rs`, `rls.rs`, `system_views.rs`
+- `src/transpiler/`: `mod.rs`, `ddl.rs`, `dml.rs`, `expr.rs`, `rls_aug.rs`
+- `src/handler/`: `mod.rs`
+- `src/lib.rs`, `src/main.rs`, `src/rls.rs`
+- `tests/`: `rls_integration_tests.rs`, `rls_e2e_test.py`
