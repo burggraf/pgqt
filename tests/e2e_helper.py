@@ -149,14 +149,14 @@ class ProxyManager:
             except:
                 pass
 
-    def get_connection(self, database: str = "postgres"):
+    def get_connection(self, database: str = "postgres", user: str = "postgres", password: str = "postgres"):
         """Get a database connection."""
         conn = psycopg2.connect(
             host=self.existing_host if self.use_existing else "127.0.0.1",
             port=self.port,
             database=database,
-            user="postgres",
-            password="postgres"
+            user=user,
+            password=password
         )
         conn.autocommit = True
         return conn
