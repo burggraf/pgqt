@@ -8,9 +8,7 @@ use pgqt::handler::query::QueryExecution;
 
 /// Helper to create a test handler with a temporary database
 fn create_test_handler() -> SqliteHandler {
-    let db_path = format!("/tmp/test_error_codes_{}.db", std::process::id());
-    let _ = std::fs::remove_file(&db_path);
-    SqliteHandler::new(&db_path).expect("Failed to create handler")
+    SqliteHandler::new(":memory:").expect("Failed to create handler")
 }
 
 #[test]

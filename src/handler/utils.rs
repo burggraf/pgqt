@@ -56,8 +56,8 @@ pub trait HandlerUtils {
         // Check if user is owner of the function
         let is_owner: bool = conn.query_row(
             "SELECT EXISTS (
-                SELECT 1 FROM __pg_proc__ p
-                JOIN __pg_authid__ r ON r.oid = p.proowner
+                SELECT 1 FROM pg_proc p
+                JOIN pg_roles r ON r.oid = p.proowner
                 WHERE p.proname = ?1 AND r.rolname = ?2
             )",
             &[func_name, &current_user],
@@ -72,12 +72,12 @@ pub trait HandlerUtils {
         let has_privilege: bool = conn.query_row(
             "SELECT EXISTS (
                 SELECT 1 FROM __pg_acl__ a
-                JOIN __pg_proc__ p ON p.oid = a.object_id
+                JOIN pg_proc p ON p.oid = a.object_id
                 WHERE p.proname = ?1 AND a.privilege = 'EXECUTE'
                 AND (
                     a.grantee_id IN (
                         WITH RECURSIVE effective_roles AS (
-                            SELECT oid FROM __pg_authid__ WHERE rolname = ?2
+                            SELECT oid FROM pg_roles WHERE rolname = ?2
                             UNION
                             SELECT m.roleid FROM __pg_auth_members__ m
                             JOIN effective_roles er ON er.oid = m.member
