@@ -111,7 +111,7 @@ struct Cli {
     error_output: Option<OutputDest>,
 
     /// Enable debug output
-    #[arg(short, long, env = "PG_LITE_DEBUG")]
+    #[arg(short = 'D', long, env = "PG_LITE_DEBUG")]
     debug: bool,
 }
 impl Cli {
