@@ -162,7 +162,7 @@ impl SimpleQueryHandler for SqliteHandler {
             });
         }
 
-        println!("Received query: {}", query);
+        debug!("Received query: {}", query);
         match self.execute_query(query) {
             Ok(responses) => Ok(responses),
             Err(e) => {

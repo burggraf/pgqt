@@ -126,7 +126,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a non-SELECT statement with parameters
     fn execute_statement_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
-        println!("Executing statement with params: {}", sql);
+        debug!("Executing statement with params: {}", sql);
 
         // Skip comments and empty statements
         let trimmed = sql.trim();
@@ -579,7 +579,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a non-SELECT statement (INSERT, UPDATE, DELETE, DDL)
     fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
-        println!("Executing statement: {}", sql);
+        debug!("Executing statement: {}", sql);
 
         // Split multiple statements and execute them sequentially
         let statements: Vec<&str> = sql.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
