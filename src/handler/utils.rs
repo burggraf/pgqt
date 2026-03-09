@@ -27,6 +27,7 @@ pub trait HandlerUtils {
     fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
 
     /// Check if the current user has permission to execute a function
+    #[allow(dead_code)]
     fn check_function_privilege(&self, func_name: &str) -> Result<bool> {
         let session = self.sessions().get(&0).unwrap_or_else(|| {
             self.sessions().insert(0, SessionContext {

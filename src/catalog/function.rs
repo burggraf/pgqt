@@ -193,6 +193,7 @@ pub fn drop_function(
 }
 
 /// Get function metadata by OID
+#[allow(dead_code)]
 pub fn get_function_by_oid(conn: &Connection, oid: i64) -> Result<Option<FunctionMetadata>> {
     let mut stmt = conn.prepare(
         "SELECT oid, funcname, schema_name, arg_types, arg_names, arg_modes, 
@@ -268,6 +269,7 @@ pub fn get_function_by_oid(conn: &Connection, oid: i64) -> Result<Option<Functio
 }
 
 /// Format function return type for display
+#[allow(dead_code)]
 pub fn format_function_result(metadata: &FunctionMetadata) -> String {
     match metadata.return_type_kind {
         ReturnTypeKind::SetOf => format!("SETOF {}", metadata.return_type),
@@ -278,6 +280,7 @@ pub fn format_function_result(metadata: &FunctionMetadata) -> String {
 }
 
 /// Format function arguments for display
+#[allow(dead_code)]
 pub fn format_function_arguments(metadata: &FunctionMetadata) -> String {
     let mut parts = Vec::new();
     for i in 0..metadata.arg_types.len() {
