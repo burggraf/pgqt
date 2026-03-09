@@ -22,6 +22,38 @@ impl PasswordAuthHandler {
         Self { conn }
     }
     
+    /// Check if user requires a password
+    /// Returns: (user_exists, needs_password, can_login)
+    fn check_user_password_status(&self, user: &str) -> Result<(bool, bool, bool), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        
+        let result: Option<(Option<String>, bool)> = conn.query_row(
+            "SELECT rolpassword, rolcanlogin FROM __pg_authid__ WHERE rolname = ?1",
+            [user],
+            |row| {
+                let pwd: Option<String> = row.get(0)?;
+                let can_login: bool = row.get(1)?;
+                Ok((pwd, can_login))
+            }
+        ).optional()?;
+        
+        match result {
+            Some((stored_hash, can_login)) => {
+                let needs_password = stored_hash.as_ref().map(|h| !h.is_empty()).unwrap_or(false);
+                Ok((true, needs_password, can_login))
+            }
+            None => {
+                // Auto-create user with no password
+                conn.execute(
+                    "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
+                     VALUES (?1, 1, 1, 1, 1, 1)",
+                    [user]
+                )?;
+                Ok((false, false, true)) // New user, no password needed, can login
+            }
+        }
+    }
+    
     /// Verify username/password against __pg_authid__
     fn verify_credentials(&self, user: &str, password: &str) -> Result<bool, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
@@ -55,7 +87,6 @@ impl PasswordAuthHandler {
             }
             None => {
                 // User doesn't exist - auto-create with no password for backward compatibility
-                // This maintains existing behavior for new users
                 conn.execute(
                     "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
                      VALUES (?1, 1, 1, 1, 1, 1)",
@@ -85,13 +116,47 @@ impl StartupHandler for PasswordAuthHandler {
                 pgwire::api::auth::protocol_negotiation(client, startup).await?;
                 // Save startup parameters
                 pgwire::api::auth::save_startup_parameters_to_metadata(client, startup);
-                client.set_state(PgWireConnectionState::AuthenticationInProgress);
-                // Request cleartext password
-                client
-                    .send(PgWireBackendMessage::Authentication(
-                        Authentication::CleartextPassword,
-                    ))
-                    .await?;
+                
+                // Get username from client metadata
+                let user = client.metadata()
+                    .get("user")
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "postgres".to_string());
+                
+                // Check if user needs a password
+                match self.check_user_password_status(&user) {
+                    Ok((exists, needs_password, can_login)) => {
+                        if !can_login {
+                            // User cannot login
+                            let error_info = ErrorInfo::new(
+                                "FATAL".to_owned(),
+                                "28000".to_owned(),
+                                format!("role \"{}\" is not permitted to log in", user),
+                            );
+                            let error = ErrorResponse::from(error_info);
+                            client.feed(PgWireBackendMessage::ErrorResponse(error)).await?;
+                            client.close().await?;
+                            return Ok(());
+                        }
+                        
+                        if !needs_password {
+                            // No password required - skip authentication
+                            finish_authentication(client).await?;
+                            return Ok(());
+                        }
+                        
+                        // Password required - request it
+                        client.set_state(PgWireConnectionState::AuthenticationInProgress);
+                        client
+                            .send(PgWireBackendMessage::Authentication(
+                                Authentication::CleartextPassword,
+                            ))
+                            .await?;
+                    }
+                    Err(e) => {
+                        return Err(PgWireError::ApiError(Box::new(e)));
+                    }
+                }
             }
             PgWireFrontendMessage::PasswordMessageFamily(pwd) => {
                 let pwd = pwd.into_password()?;
