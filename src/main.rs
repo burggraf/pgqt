@@ -198,7 +198,7 @@ async fn main() -> Result<()> {
 
     loop {
         let (incoming_socket, client_addr) = listener.accept().await?;
-        log_output(&format!("New connection from {}", client_addr));
+        debug!("New connection from {}", client_addr);
 
         let factory = factory.clone();
 
