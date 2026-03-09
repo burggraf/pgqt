@@ -11,6 +11,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 use futures::stream;
 
+use crate::debug;
 use crate::catalog::{store_table_metadata, store_relation_metadata};
 use crate::schema::SearchPath;
 use crate::handler::SessionContext;
@@ -32,8 +33,8 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return Err(anyhow::anyhow!(result.errors.join("\n")));
         }
         let transpiled = result.sql;
-        println!("DEBUG: Original: {}", sql);
-        println!("DEBUG: Transpiled: {}", transpiled);
+        debug!("Original: {}", sql);
+        debug!("Transpiled: {}", transpiled);
         let _upper_sql = transpiled.trim().to_uppercase();
 
         // Transaction Control and other special commands usually don't have parameters in extended query
@@ -193,8 +194,8 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return Err(anyhow::anyhow!(result.errors.join("\n")));
         }
         let transpiled = result.sql;
-        println!("DEBUG: Original: {}", sql);
-        println!("DEBUG: Transpiled: {}", transpiled);
+        debug!("Original: {}", sql);
+        debug!("Transpiled: {}", transpiled);
         let upper_sql = transpiled.trim().to_uppercase();
 
         // Transaction Control commands

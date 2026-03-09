@@ -22,6 +22,7 @@
 //! | [`transpiler`] | Core SQL transpilation (PostgreSQL → SQLite)           |
 //! | [`vector`]     | pgvector-compatible vector similarity search           |
 
+pub mod debug;
 pub mod array;
 pub mod catalog;
 pub mod copy;

@@ -18,6 +18,7 @@ use pgwire::messages::data::RowDescription;
 use futures::Sink;
 use async_trait::async_trait;
 
+use crate::debug;
 use crate::catalog::{init_catalog, init_system_views};
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
@@ -714,7 +715,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         let query = &portal.statement.statement;
         let params = &portal.parameters;
         
-        println!("DEBUG: Extended query: {}", query);
+        debug!("Extended query: {}", query);
         
         // Convert params to Option<String> for execute_query_params
         let mut param_strings = Vec::new();
@@ -726,7 +727,7 @@ impl ExtendedQueryHandler for SqliteHandler {
                         .and_then(|t| t.as_ref())
                         .unwrap_or(&pgwire::api::Type::UNKNOWN);
                     
-                    println!("DEBUG: Parameter {} is binary, type: {:?}", i, pg_type);
+                    debug!("Parameter {} is binary, type: {:?}", i, pg_type);
                     
                     match *pg_type {
                         pgwire::api::Type::INT4 | pgwire::api::Type::OID | pgwire::api::Type::REGCLASS | pgwire::api::Type::INT2 => {
@@ -803,7 +804,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
         let query = &statement.statement;
-        println!("DEBUG: Describe statement: {}", query);
+        debug!("Describe statement: {}", query);
         let _result = crate::transpiler::transpile_with_metadata(query);
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         ctx.set_metadata_provider(self.as_metadata_provider());
@@ -817,7 +818,7 @@ impl ExtendedQueryHandler for SqliteHandler {
             // For parameters, we don't know the types yet easily, so return UNKNOWN or derived from statement.parameter_types
             let param_types = statement.parameter_types.iter().map(|t| t.clone().unwrap_or(pgwire::api::Type::UNKNOWN)).collect();
             
-            println!("DEBUG: Returning {} fields for Describe statement", fields.len());
+            debug!("Returning {} fields for Describe statement", fields.len());
             return Ok(DescribeStatementResponse::new(param_types, fields));
         }
         
@@ -835,7 +836,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
         let query = &portal.statement.statement;
-        println!("DEBUG: Describe portal: {}", query);
+        debug!("Describe portal: {}", query);
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         ctx.set_metadata_provider(self.as_metadata_provider());
         let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);
@@ -844,7 +845,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
             let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn)
                 .unwrap_or_default();
-            println!("DEBUG: Returning {} fields for Describe portal", fields.len());
+            debug!("Returning {} fields for Describe portal", fields.len());
             return Ok(DescribePortalResponse::new(fields));
         }
         

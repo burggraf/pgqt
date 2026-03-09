@@ -49,7 +49,9 @@ mod plpgsql;
 mod functions;
 mod stats;
 mod handler;
+mod debug;
 
+use debug::set_debug;
 use schema::SearchPath;
 use handler::{SqliteHandler, SessionContext};
 use handler::query::QueryExecution;
@@ -107,6 +109,10 @@ struct Cli {
     /// Default: <database>.error.log (e.g., test.db.error.log)
     #[arg(short = 'e', long, env = "PG_LITE_ERROR_OUTPUT")]
     error_output: Option<OutputDest>,
+
+    /// Enable debug output
+    #[arg(short, long, env = "PG_LITE_DEBUG")]
+    debug: bool,
 }
 impl Cli {
     /// Get the error output destination, defaulting to <database>.error.log
@@ -171,6 +177,10 @@ impl SimpleQueryHandler for SqliteHandler {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if cli.debug {
+        set_debug(true);
+    }
 
     // Set up output redirection
     let error_dest = cli.error_output_dest();
