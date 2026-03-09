@@ -63,6 +63,7 @@ def db_connection(proxy_server):
         host="127.0.0.1",
         port=TEST_PORT,
         user="postgres",
+        password="postgres",
         database="test"
     )
     conn.autocommit = True

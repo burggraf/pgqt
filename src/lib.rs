@@ -40,3 +40,4 @@ pub mod rbac;
 pub mod stats;
 pub mod transpiler;
 pub mod vector;
+pub mod auth;

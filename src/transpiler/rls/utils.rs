@@ -6,7 +6,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt, AlterDefaultPrivilegesStmt,
-    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, AlterOwnerStmt
+    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, AlterOwnerStmt, AlterRoleStmt
 };
 use super::super::context::TranspileContext;
 
@@ -84,7 +84,9 @@ pub fn reconstruct_create_role_stmt(stmt: &CreateRoleStmt, _ctx: &mut TranspileC
                         if let Some(ref arg) = def.arg {
                             if let Some(ref val) = arg.node {
                                 if let NodeEnum::String(ref s) = val {
-                                    password = format!("'{}'", s.sval.replace('\'', "''"));
+                                    // Hash password using PostgreSQL-compatible MD5
+                                    let hashed = crate::auth::hash_password(&s.sval, &role_name);
+                                    password = format!("'{}'", hashed);
                                 }
                             }
                         }
@@ -499,4 +501,105 @@ pub mod frame_options {
     pub const EXCLUDE_GROUP: i32 = 0x10000;
     pub const EXCLUDE_TIES: i32 = 0x20000;
     pub const EXCLUSION: i32 = EXCLUDE_CURRENT_ROW | EXCLUDE_GROUP | EXCLUDE_TIES;
+}
+
+/// Reconstruct an ALTER ROLE statement as an UPDATE to __pg_authid__
+pub fn reconstruct_alter_role_stmt(stmt: &AlterRoleStmt, _ctx: &mut TranspileContext) -> String {
+    let role_name = stmt.role.as_ref()
+        .map(|r| r.rolename.clone())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let mut updates: Vec<String> = Vec::new();
+
+    for opt in &stmt.options {
+        if let Some(ref node) = opt.node {
+            if let NodeEnum::DefElem(ref def) = node {
+                match def.defname.as_str() {
+                    "superuser" => {
+                        let val = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
+                                }
+                                _ => true,
+                            }
+                            None => true,
+                        };
+                        updates.push(format!("rolsuper = {}", if val { 1 } else { 0 }));
+                    }
+                    "inherit" => {
+                        let val = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
+                                }
+                                _ => true,
+                            }
+                            None => true,
+                        };
+                        updates.push(format!("rolinherit = {}", if val { 1 } else { 0 }));
+                    }
+                    "createrole" => {
+                        let val = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
+                                }
+                                _ => true,
+                            }
+                            None => true,
+                        };
+                        updates.push(format!("rolcreaterole = {}", if val { 1 } else { 0 }));
+                    }
+                    "createdb" => {
+                        let val = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
+                                }
+                                _ => true,
+                            }
+                            None => true,
+                        };
+                        updates.push(format!("rolcreatedb = {}", if val { 1 } else { 0 }));
+                    }
+                    "canlogin" => {
+                        let val = def.arg.is_none() || match &def.arg {
+                            Some(arg) => match &arg.node {
+                                Some(NodeEnum::AConst(aconst)) => {
+                                    matches!(&aconst.val, Some(pg_query::protobuf::a_const::Val::Ival(i)) if i.ival != 0)
+                                }
+                                _ => true,
+                            }
+                            None => true,
+                        };
+                        updates.push(format!("rolcanlogin = {}", if val { 1 } else { 0 }));
+                    }
+                    "password" => {
+                        if let Some(ref arg) = def.arg {
+                            if let Some(ref val) = arg.node {
+                                if let NodeEnum::String(ref s) = val {
+                                    // Hash password using PostgreSQL-compatible MD5
+                                    let hashed = crate::auth::hash_password(&s.sval, &role_name);
+                                    updates.push(format!("rolpassword = '{}'", hashed));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if updates.is_empty() {
+        format!("-- No changes for ALTER ROLE {}", role_name)
+    } else {
+        format!(
+            "UPDATE __pg_authid__ SET {} WHERE rolname = '{}'",
+            updates.join(", "),
+            role_name
+        )
+    }
 }

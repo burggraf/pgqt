@@ -16,7 +16,8 @@ fn test_create_role_with_password() {
     assert!(result.sql.contains("INSERT INTO __pg_authid__"));
     assert!(result.sql.contains("'bob'"));
     // Password should be included
-    assert!(result.sql.contains("'secret'"));
+    // Password should be hashed (md5 prefix), not plain text
+    assert!(result.sql.contains("md5"));
 }
 
 #[test]

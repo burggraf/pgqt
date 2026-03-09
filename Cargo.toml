@@ -23,6 +23,7 @@ libc = "0.2"
 chrono = "0.4"
 hex = "0.4"
 lazy_static = "1.4"
+md5 = "0.7"
 
 [profile.release]
 strip = true

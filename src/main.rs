@@ -50,6 +50,7 @@ mod functions;
 mod stats;
 mod handler;
 mod debug;
+mod auth;
 
 use debug::set_debug;
 use schema::SearchPath;
@@ -113,6 +114,10 @@ struct Cli {
     /// Enable debug output
     #[arg(short = 'D', long, env = "PG_LITE_DEBUG")]
     debug: bool,
+
+    /// Disable password authentication (trust mode)
+    #[arg(long, env = "PGQT_TRUST_MODE", help = "Disable password authentication, allow any connection")]
+    trust_mode: bool,
 }
 impl Cli {
     /// Get the error output destination, defaulting to <database>.error.log
@@ -126,11 +131,18 @@ impl Cli {
 
 struct HandlerFactory {
     handler: Arc<SqliteHandler>,
+    trust_mode: bool,
 }
 
 impl PgWireServerHandlers for HandlerFactory {
     fn startup_handler(&self) -> Arc<impl pgwire::api::auth::StartupHandler> {
-        Arc::new(pgwire::api::NoopHandler)
+        if self.trust_mode {
+            // Trust mode: accept all connections without authentication
+            Arc::new(auth::FlexibleAuthHandler::new_trust())
+        } else {
+            // Password authentication mode
+            Arc::new(auth::FlexibleAuthHandler::new_password(self.handler.conn.clone()))
+        }
     }
 
     fn simple_query_handler(&self) -> Arc<impl pgwire::api::query::SimpleQueryHandler> {
@@ -194,7 +206,10 @@ async fn main() -> Result<()> {
     log_error(&format!("Error log started for database: {}", cli.database));
 
     let handler = Arc::new(SqliteHandler::new(&cli.database)?);
-    let factory = Arc::new(HandlerFactory { handler: handler.clone() });
+    let factory = Arc::new(HandlerFactory { 
+        handler: handler.clone(),
+        trust_mode: cli.trust_mode,
+    });
 
     loop {
         let (incoming_socket, client_addr) = listener.accept().await?;

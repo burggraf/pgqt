@@ -43,7 +43,7 @@ class ProxyManager:
         # Explicitly pass --port and --database to ensure it listens where we expect
         # We don't use --host here to let it default to localhost:5434
         self.process = subprocess.Popen(
-            ["cargo", "run", "--release", "--quiet", "--", "--port", str(self.port), "--database", self.db_path],
+            ["cargo", "run", "--release", "--quiet", "--", "--port", str(self.port), "--database", self.db_path, "--trust-mode"],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

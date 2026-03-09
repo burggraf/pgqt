@@ -30,11 +30,12 @@ def find_free_port(start_port: int = 5432, max_port: int = 5500) -> int:
 class ProxyManager:
     """Manages the PGQT proxy lifecycle for E2E tests."""
 
-    def __init__(self, db_path: Optional[str] = None, port: Optional[int] = None):
+    def __init__(self, db_path: Optional[str] = None, port: Optional[int] = None, trust_mode: bool = False):
         # Check if we should use an existing proxy (from run_all_e2e.py)
         self.use_existing = False
         self.existing_port = None
         self.existing_host = "127.0.0.1"
+        self.trust_mode = trust_mode
 
         if "PROXY_HOST" in os.environ and "PROXY_PORT" in os.environ:
             # Running under run_all_e2e.py - use existing proxy
@@ -75,11 +76,18 @@ class ProxyManager:
         # Start proxy using debug binary (release build may have linking issues)
         # First check if debug binary exists, fall back to cargo run if not
         debug_binary = "./target/debug/pgqt"
+        
+        # Build command args
+        args = [
+            "--port", str(self.port),
+            "--database", self.db_path,
+        ]
+        if self.trust_mode:
+            args.append("--trust-mode")
+        
         if os.path.exists(debug_binary):
             self.process = subprocess.Popen(
-                [debug_binary,
-                 "--port", str(self.port),
-                 "--database", self.db_path],
+                [debug_binary] + args,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -89,9 +97,7 @@ class ProxyManager:
         else:
             # Fall back to cargo run in debug mode
             self.process = subprocess.Popen(
-                ["cargo", "run", "--quiet", "--",
-                 "--port", str(self.port),
-                 "--database", self.db_path],
+                ["cargo", "run", "--quiet", "--"] + args,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
