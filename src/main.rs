@@ -163,17 +163,27 @@ impl SimpleQueryHandler for SqliteHandler {
     where
         C: ClientInfo + Unpin + Send + Sync,
     {
+        // Get the current user from client metadata
+        let metadata = client.metadata();
+        let user = metadata.get("user").map(|s| s.to_string()).unwrap_or_else(|| "postgres".to_string());
+        
+        // Set the current user in thread-local storage for current_user() function
+        crate::handler::set_current_user(&user);
+        
         // Initialize session from client metadata if not already set
         if self.sessions.is_empty() {
-            let metadata = client.metadata();
-            let user = metadata.get("user").map(|s| s.to_string()).unwrap_or_else(|| "postgres".to_string());
             self.sessions.insert(0, SessionContext {
                 authenticated_user: user.clone(),
                 current_user: user,
                 search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
+        } else {
+            // Update the existing session with current user
+            if let Some(mut session) = self.sessions.get_mut(&0) {
+                session.current_user = user.clone();
+                session.authenticated_user = user;
+            }
         }
-
         debug!("Received query: {}", query);
         match self.execute_query(query) {
             Ok(responses) => Ok(responses),

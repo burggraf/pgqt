@@ -28,6 +28,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
     
     /// Execute a SQL query with optional parameters and return the results
     fn execute_query_params(&self, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+        // Set the current user from the session for current_user() function
+        if let Some(session) = self.sessions().get(&0) {
+            crate::handler::set_current_user(&session.current_user);
+        }
+
         let result = crate::transpiler::transpile_with_metadata(sql);
         if !result.errors.is_empty() {
             return Err(anyhow::anyhow!(result.errors.join("\n")));
@@ -160,6 +165,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a SQL query and return the results
     fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
+        // Set the current user from the session for current_user() function
+        if let Some(session) = self.sessions().get(&0) {
+            crate::handler::set_current_user(&session.current_user);
+        }
+
         // Check for commands BEFORE transpilation (transpiler may convert them)
         let original_upper = sql.trim().to_uppercase();
         

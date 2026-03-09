@@ -25,7 +25,8 @@ pub(crate) fn reconstruct_sql_value_function(sql_val: &SqlValueFunction) -> Stri
             "datetime('now', 'localtime')".to_string()
         }
         SqlValueFunctionOp::SvfopCurrentUser | SqlValueFunctionOp::SvfopUser => {
-            "'current_user'".to_string()
+            // Use the pgqt_current_user() function which returns the session user
+            "pgqt_current_user()".to_string()
         }
         SqlValueFunctionOp::SvfopCurrentRole => {
             "'current_role'".to_string()

@@ -4,6 +4,7 @@
 //! handler for translating PostgreSQL queries to SQLite.
 
 use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 use anyhow::Result;
 use rusqlite::Connection;
 use dashmap::DashMap;
@@ -22,6 +23,21 @@ use crate::debug;
 use crate::catalog::{init_catalog, init_system_views};
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
+
+/// Thread-local storage for the current user during query execution
+thread_local! {
+    static CURRENT_USER: RefCell<String> = RefCell::new("postgres".to_string());
+}
+
+/// Set the current user for the current thread
+pub fn set_current_user(user: &str) {
+    CURRENT_USER.with(|u| *u.borrow_mut() = user.to_string());
+}
+
+/// Get the current user for the current thread
+pub fn get_current_user() -> String {
+    CURRENT_USER.with(|u| u.borrow().clone())
+}
 
 // Submodules
 pub mod errors;
@@ -153,6 +169,11 @@ impl SqliteHandler {
     /// Register built-in PostgreSQL-compatible functions with SQLite
     pub fn register_builtin_functions(conn: &Connection) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
+        // Register current_user function that returns the session user
+        conn.create_scalar_function("pgqt_current_user", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            Ok(get_current_user())
+        })?;
+
 
         // pg_get_userbyid - returns username for OID
         conn.create_scalar_function("pg_get_userbyid", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
