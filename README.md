@@ -202,9 +202,26 @@ GRANT SELECT ON users TO readonly;
 GRANT SELECT, INSERT, UPDATE ON orders TO app_user;
 GRANT ALL PRIVILEGES ON products TO admin;
 
+-- Grant schema-level privileges
+GRANT USAGE, CREATE ON SCHEMA inventory TO app_user;
+GRANT USAGE ON SCHEMA public TO readonly;
+
+-- Grant function-level privileges
+GRANT EXECUTE ON FUNCTION add_numbers(int, int) TO app_user;
+
 -- Grant role membership (role inheritance)
 GRANT app_user TO readonly;
 GRANT admin TO app_user;
+```
+
+#### Default Privileges
+
+```sql
+-- Automatically grant SELECT on all future tables in a schema
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO readonly;
+
+-- Automatically grant EXECUTE on all future functions
+ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO app_user;
 ```
 
 #### Revoking Privileges
@@ -233,20 +250,23 @@ SET ROLE NONE;
 
 #### Permission Enforcement
 
-The proxy enforces permissions on all DML operations:
+The proxy enforces permissions on all DML and DDL operations:
 
-- **SELECT**: Requires `SELECT` privilege on table
-- **INSERT**: Requires `INSERT` privilege on table
-- **UPDATE**: Requires `UPDATE` privilege on table
-- **DELETE**: Requires `DELETE` privilege on table
-- **DDL**: Requires superuser or table ownership
+- **SELECT**: Requires `SELECT` privilege on table and `USAGE` on schema
+- **INSERT**: Requires `INSERT` privilege on table and `USAGE` on schema
+- **UPDATE**: Requires `UPDATE` privilege on table and `USAGE` on schema
+- **DELETE**: Requires `DELETE` privilege on table and `USAGE` on schema
+- **TRUNCATE**: Requires table ownership or `TRUNCATE` privilege
+- **EXECUTE**: Requires `EXECUTE` privilege on function
+- **DDL**: Requires superuser, schema `CREATE` privilege, or object ownership
 
 **Permission Resolution:**
 
 1. Superusers bypass all permission checks
-2. Table owners have implicit all privileges
+2. Object owners (and schema owners for tables/functions) have implicit all privileges
 3. Privileges are inherited through role membership
 4. PUBLIC grants apply to all roles
+5. Default privileges are applied during object creation
 
 #### System Catalog Views
 
@@ -261,6 +281,12 @@ SELECT * FROM pg_auth_members;
 
 -- Check table permissions
 SELECT * FROM has_table_privilege('app_user', 'users', 'SELECT');
+
+-- Check schema permissions
+SELECT * FROM has_schema_privilege('app_user', 'public', 'USAGE');
+
+-- Check function permissions
+SELECT * FROM has_function_privilege('app_user', 'add_numbers(int,int)', 'EXECUTE');
 
 -- View table ownership
 SELECT relname, rolname as owner
