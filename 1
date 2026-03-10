@@ -1,0 +1,58 @@
+warning: unused doc comment
+  --> src/handler/mod.rs:27:1
+   |
+27 | /// Thread-local storage for the current user during query execution
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `exists`
+   --> src/auth.rs:128:25
+    |
+128 |                     Ok((exists, needs_password, can_login)) => {
+    |                         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_exists`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `pgqt` (lib) generated 2 warnings
+warning: function `wait_for_port` is never used
+  --> tests/multi_port_tests.rs:32:4
+   |
+32 | fn wait_for_port(host: &str, port: u16, timeout_secs: u64) -> bool {
+   |    ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `error_output_dest` is never used
+   --> src/main.rs:146:8
+    |
+144 | impl Cli {
+    | -------- method in this implementation
+145 |     /// Get the error output destination, defaulting to <database>.error.log
+146 |     fn error_output_dest(&self) -> OutputDest {
+    |        ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `log_output` is never used
+   --> src/main.rs:397:4
+    |
+397 | fn log_output(msg: &str) {
+    |    ^^^^^^^^^^
+
+warning: function `log_error` is never used
+   --> src/main.rs:402:4
+    |
+402 | fn log_error(msg: &str) {
+    |    ^^^^^^^^^
+
+warning: `pgqt` (test "multi_port_tests") generated 1 warning
+warning: `pgqt` (bin "pgqt") generated 5 warnings (2 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/multi_port_tests.rs (target/debug/deps/multi_port_tests-0251cb9fb47ab2e2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+

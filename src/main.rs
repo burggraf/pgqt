@@ -14,6 +14,9 @@
 //! # Custom database and port
 //! ./pgqt --database myapp.db --port 5433
 //!
+//! # Multi-port configuration via JSON file
+//! ./pgqt --config pgqt.json
+//!
 //! # Environment variables
 //! PGQT_DB=myapp.db PGQT_PORT=5433 ./pgqt
 //! ```
@@ -21,7 +24,7 @@
 use std::sync::Arc;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use async_trait::async_trait;
 use clap::Parser;
 use pgwire::api::query::SimpleQueryHandler;
@@ -51,11 +54,13 @@ mod stats;
 mod handler;
 mod debug;
 mod auth;
+mod config;
 
 use debug::set_debug;
 use schema::SearchPath;
 use handler::{SqliteHandler, SessionContext};
 use handler::query::QueryExecution;
+use config::{AppConfig, PortConfig, find_default_config};
 
 #[derive(Debug, Clone, PartialEq)]
 enum OutputDest {
@@ -67,6 +72,17 @@ enum OutputDest {
     File(PathBuf),
     /// Suppress output
     Null,
+}
+
+impl std::fmt::Display for OutputDest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputDest::Stdout => write!(f, "stdout"),
+            OutputDest::Stderr => write!(f, "stderr"),
+            OutputDest::Null => write!(f, "null"),
+            OutputDest::File(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 impl std::str::FromStr for OutputDest {
@@ -86,17 +102,22 @@ impl std::str::FromStr for OutputDest {
 #[derive(Parser, Debug)]
 #[command(name = "pgqt")]
 #[command(about = "A PostgreSQL wire protocol proxy for SQLite")]
-
 struct Cli {
-    /// Host address to listen on
+    /// Path to JSON configuration file
+    /// If not specified, looks for pgqt.json in the executable directory
+    /// If not found, uses other CLI arguments for single-port mode
+    #[arg(short = 'c', long, env = "PGQT_CONFIG")]
+    config: Option<PathBuf>,
+
+    /// Host address to listen on (used when no config file)
     #[arg(short = 'H', long, env = "PG_LITE_HOST", default_value = "127.0.0.1")]
     host: String,
 
-    /// Port to listen on
+    /// Port to listen on (used when no config file)
     #[arg(short, long, env = "PG_LITE_PORT", default_value = "5432")]
     port: u16,
 
-    /// Path to the SQLite database file
+    /// Path to the SQLite database file (used when no config file)
     #[arg(short, long, env = "PG_LITE_DB", default_value = "test.db")]
     database: String,
 
@@ -119,6 +140,7 @@ struct Cli {
     #[arg(long, env = "PGQT_TRUST_MODE", help = "Disable password authentication, allow any connection")]
     trust_mode: bool,
 }
+
 impl Cli {
     /// Get the error output destination, defaulting to <database>.error.log
     fn error_output_dest(&self) -> OutputDest {
@@ -127,7 +149,6 @@ impl Cli {
         })
     }
 }
-
 
 struct HandlerFactory {
     handler: Arc<SqliteHandler>,
@@ -157,6 +178,7 @@ impl PgWireServerHandlers for HandlerFactory {
         Arc::new(self.handler.copy_handler.clone())
     }
 }
+
 #[async_trait]
 impl SimpleQueryHandler for SqliteHandler {
     async fn do_query<C>(&self, client: &mut C, query: &str) -> PgWireResult<Vec<Response>>
@@ -166,10 +188,10 @@ impl SimpleQueryHandler for SqliteHandler {
         // Get the current user from client metadata
         let metadata = client.metadata();
         let user = metadata.get("user").map(|s| s.to_string()).unwrap_or_else(|| "postgres".to_string());
-        
+
         // Set the current user in thread-local storage for current_user() function
         crate::handler::set_current_user(&user);
-        
+
         // Initialize session from client metadata if not already set
         if self.sessions.is_empty() {
             self.sessions.insert(0, SessionContext {
@@ -200,27 +222,90 @@ impl SimpleQueryHandler for SqliteHandler {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if cli.debug {
+    // Determine configuration source
+    let app_config = if let Some(config_path) = cli.config {
+        // User specified config file
+        AppConfig::from_file(&config_path)?
+    } else if let Some(default_config) = find_default_config() {
+        // Found pgqt.json in executable directory
+        println!("Using default config file: {}", default_config.display());
+        AppConfig::from_file(&default_config)?
+    } else {
+        // Use CLI arguments for single-port mode
+        AppConfig::from_cli(
+            cli.host,
+            cli.port,
+            cli.database,
+            cli.output.to_string(),
+            cli.error_output.map(|o| o.to_string()),
+            cli.debug,
+            cli.trust_mode,
+        )
+    };
+
+    // Spawn listeners for each configured port
+    let mut handles = Vec::new();
+
+    for port_config in app_config.ports {
+        let port = port_config.port;
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_listener(port_config).await {
+                eprintln!("Error on port {}: {}", port, e);
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all listeners (runs indefinitely unless error)
+    for handle in handles {
+        handle.await?;
+    }
+
+    Ok(())
+}
+
+/// Parse output destination string to OutputDest enum
+fn parse_output_dest(s: &str) -> Result<OutputDest> {
+    match s.to_uppercase().as_str() {
+        "STDOUT" => Ok(OutputDest::Stdout),
+        "STDERR" => Ok(OutputDest::Stderr),
+        "NULL" | "/DEV/NULL" => Ok(OutputDest::Null),
+        _ => Ok(OutputDest::File(PathBuf::from(s))),
+    }
+}
+
+/// Run a single listener for a port configuration
+async fn run_listener(config: PortConfig) -> Result<()> {
+    let addr = format!("{}:{}", config.host, config.port);
+    let listener = TcpListener::bind(&addr).await
+        .with_context(|| format!("Failed to bind to {}", addr))?;
+
+    // Set up debug mode if enabled for this port
+    if config.debug {
         set_debug(true);
     }
 
-    // Set up output redirection
-    let error_dest = cli.error_output_dest();
-    setup_output_redirection(&cli.output, &error_dest)?;
+    // Set up output redirection for this port
+    let output_dest = parse_output_dest(&config.output)?;
+    let error_dest = config.error_output
+        .as_ref()
+        .map(|o| parse_output_dest(o))
+        .transpose()?
+        .unwrap_or_else(|| OutputDest::File(PathBuf::from(format!("{}.error.log", config.database))));
 
-    let addr = format!("{}:{}", cli.host, cli.port);
+    setup_output_redirection(&output_dest, &error_dest)?;
 
-    let listener = TcpListener::bind(&addr).await?;
-    log_output(&format!("Server listening on {}", addr));
-    log_output(&format!("Using database: {}", cli.database));
-    log_error(&format!("Error log started for database: {}", cli.database));
+    println!("Server listening on {}", addr);
+    println!("Using database: {}", config.database);
 
-    let handler = Arc::new(SqliteHandler::new(&cli.database)?);
-    let factory = Arc::new(HandlerFactory { 
+    // Create handler for this port's database
+    let handler = Arc::new(SqliteHandler::new(&config.database)?);
+    let factory = Arc::new(HandlerFactory {
         handler: handler.clone(),
-        trust_mode: cli.trust_mode,
+        trust_mode: config.trust_mode,
     });
 
+    // Accept loop
     loop {
         let (incoming_socket, client_addr) = listener.accept().await?;
         debug!("New connection from {}", client_addr);

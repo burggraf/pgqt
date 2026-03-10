@@ -462,11 +462,14 @@ For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
 pgqt [OPTIONS]
 
 Options:
+  -c, --config <CONFIG>          Path to JSON configuration file
   -H, --host <HOST>              Host address to listen on [default: 127.0.0.1]
   -p, --port <PORT>              Port to listen on [default: 5432]
   -d, --database <DATABASE>      Path to the SQLite database file [default: test.db]
   -o, --output <OUTPUT>          Where to send server output [default: STDOUT]
   -e, --error-output <ERROR>     Where to send error output [default: <db>.error.log]
+  -D, --debug                    Enable debug output
+      --trust-mode               Disable password authentication (trust mode)
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -498,10 +501,82 @@ pgqt -d myapp.db -o NULL -e STDERR
 pgqt -d myapp.db -o STDERR -e STDOUT
 ```
 
+### Multi-Port Configuration
+
+PGQT supports running multiple independent listeners on different ports, each with its own database and configuration. This is useful for multi-tenant setups or running multiple isolated databases.
+
+#### Using a Configuration File
+
+Create a JSON configuration file (e.g., `pgqt.json`):
+
+```json
+{
+  "ports": [
+    {
+      "port": 5432,
+      "host": "127.0.0.1",
+      "database": "/var/lib/pgqt/tenant1.db",
+      "output": "stdout",
+      "error_output": "/var/log/pgqt/tenant1.error.log",
+      "debug": false,
+      "trust_mode": false
+    },
+    {
+      "port": 5433,
+      "host": "127.0.0.1",
+      "database": "/var/lib/pgqt/tenant2.db",
+      "output": "/var/log/pgqt/tenant2.log",
+      "error_output": "/var/log/pgqt/tenant2.error.log",
+      "debug": false,
+      "trust_mode": false
+    },
+    {
+      "port": 5434,
+      "host": "0.0.0.0",
+      "database": "/var/lib/pgqt/shared.db",
+      "output": "null",
+      "error_output": null,
+      "debug": true,
+      "trust_mode": true
+    }
+  ]
+}
+```
+
+Then start PGQT with the configuration file:
+
+```bash
+# Specify config file explicitly
+pgqt --config pgqt.json
+
+# Or place pgqt.json in the same directory as the executable
+# It will be auto-detected
+./pgqt
+```
+
+#### Configuration File Precedence
+
+1. If `--config` is specified, that file is used
+2. Otherwise, if `pgqt.json` exists in the executable directory, it is used
+3. Otherwise, CLI arguments are used for single-port mode
+
+#### Port Configuration Options
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `port` | Yes | - | Port number to listen on |
+| `host` | No | `127.0.0.1` | Host address to bind to |
+| `database` | Yes | - | Path to SQLite database file |
+| `output` | No | `stdout` | Output destination: `stdout`, `stderr`, `null`, or file path |
+| `error_output` | No | `<db>.error.log` | Error output destination |
+| `debug` | No | `false` | Enable debug mode |
+| `trust_mode` | No | `false` | Disable password authentication |
+
 ### Environment Variables
 
 | Variable               | Default          | Description               |
 | ---------------------- | ---------------- | ------------------------- |
+| `PGQT_CONFIG`       | -                | Path to JSON config file  |
 | `PGQT_HOST`         | `127.0.0.1`      | Host address to listen on |
 | `PGQT_PORT`         | `5432`           | TCP port to listen on     |
 | `PGQT_DB`           | `test.db`        | SQLite database file path |
@@ -630,6 +705,7 @@ cargo test
 src/
 ├── main.rs                    # TCP server entry point
 ├── lib.rs                     # Library exports
+├── config.rs                  # Multi-port configuration management
 ├── handler/                   # PostgreSQL wire protocol handler
 │   └── mod.rs                 # SqliteHandler, session management, custom functions
 ├── transpiler/                # SQL transpilation (PostgreSQL → SQLite)

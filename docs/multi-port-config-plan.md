@@ -123,7 +123,7 @@ fn default_output() -> String {
 pub fn find_default_config() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()
-        .and_then(|exe_path| exe_path.parent().map(|p| p.join("pgmq.json")))
+        .and_then(|exe_path| exe_path.parent().map(|p| p.join("pgqt.json")))
         .filter(|p| p.exists())
 }
 ```
@@ -168,7 +168,7 @@ use config::{AppConfig, PortConfig, find_default_config};
 #[command(about = "A PostgreSQL wire protocol proxy for SQLite")]
 struct Cli {
     /// Path to JSON configuration file
-    /// If not specified, looks for pgmq.json in the executable directory
+    /// If not specified, looks for pgqt.json in the executable directory
     /// If not found, uses other CLI arguments for single-port mode
     #[arg(short = 'c', long, env = "PGQT_CONFIG")]
     config: Option<PathBuf>,
@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
         // User specified config file
         AppConfig::from_file(&config_path)?
     } else if let Some(default_config) = find_default_config() {
-        // Found pgmq.json in executable directory
+        // Found pgqt.json in executable directory
         println!("Using default config file: {}", default_config.display());
         AppConfig::from_file(&default_config)?
     } else {
@@ -284,7 +284,7 @@ fn parse_output_dest(s: &str) -> Result<OutputDest> {
 
 ## 3. Example Configuration File
 
-Create `pgmq.json.example`:
+Create `pgqt.json.example`:
 
 ```json
 {
@@ -347,7 +347,7 @@ Create `pgmq.json.example`:
 
 ### Phase 5: Documentation (15 min)
 1. Update README.md with multi-port usage
-2. Add `pgmq.json.example` to repo
+2. Add `pgqt.json.example` to repo
 3. Document config file precedence
 
 ---
@@ -420,7 +420,7 @@ The implementation maintains 100% backward compatibility:
 |----------|----------|
 | No config file, CLI args provided | Works exactly as before (single port) |
 | Config file via `--config` | Uses config file, ignores other CLI args |
-| `pgmq.json` exists in exe dir | Auto-loads, ignores CLI args |
+| `pgqt.json` exists in exe dir | Auto-loads, ignores CLI args |
 | Both config file and CLI args | Config file takes precedence, CLI args ignored (with warning) |
 
 ---

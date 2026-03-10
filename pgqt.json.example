@@ -1,0 +1,31 @@
+{
+  "ports": [
+    {
+      "port": 5432,
+      "host": "127.0.0.1",
+      "database": "/var/lib/pgqt/tenant1.db",
+      "output": "stdout",
+      "error_output": "/var/log/pgqt/tenant1.error.log",
+      "debug": false,
+      "trust_mode": false
+    },
+    {
+      "port": 5433,
+      "host": "127.0.0.1",
+      "database": "/var/lib/pgqt/tenant2.db",
+      "output": "/var/log/pgqt/tenant2.log",
+      "error_output": "/var/log/pgqt/tenant2.error.log",
+      "debug": false,
+      "trust_mode": false
+    },
+    {
+      "port": 5434,
+      "host": "0.0.0.0",
+      "database": "/var/lib/pgqt/shared.db",
+      "output": "null",
+      "error_output": null,
+      "debug": true,
+      "trust_mode": true
+    }
+  ]
+}
