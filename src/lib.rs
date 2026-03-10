@@ -41,3 +41,4 @@ pub mod stats;
 pub mod transpiler;
 pub mod vector;
 pub mod auth;
+pub mod validation;

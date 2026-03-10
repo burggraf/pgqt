@@ -905,6 +905,19 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
         .collect();
     parts.push(targets.join(", "));
 
+    // FROM clause - for UPDATE FROM subqueries
+    if !stmt.from_clause.is_empty() {
+        let from_tables: Vec<String> = stmt
+            .from_clause
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        if !from_tables.is_empty() {
+            parts.push("from".to_string());
+            parts.push(from_tables.join(", "));
+        }
+    }
+
     // WHERE clause - strip table alias from column references
     if let Some(ref where_clause) = stmt.where_clause {
         let mut where_sql = reconstruct_node(where_clause, ctx);

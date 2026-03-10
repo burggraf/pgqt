@@ -845,8 +845,25 @@ pub(crate) fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: 
 pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
     
-    // SQLite doesn't support CREATE OR REPLACE VIEW, so we just use CREATE VIEW
-    parts.push("create view".to_string());
+    // Get the view name for potential DROP
+    let view_name = stmt.view.as_ref().map(|r| {
+        if r.schemaname.is_empty() || r.schemaname == "public" {
+            r.relname.to_lowercase()
+        } else {
+            format!("{}.{}", r.schemaname.to_lowercase(), r.relname.to_lowercase())
+        }
+    }).unwrap_or_default();
+    
+    // SQLite doesn't support CREATE OR REPLACE VIEW directly
+    // If replace is true, we need to drop the view first
+    if stmt.replace {
+        // Return a multi-statement that drops then creates
+        let drop_stmt = format!("drop view if exists {};", view_name);
+        parts.push(drop_stmt);
+        parts.push("create view".to_string());
+    } else {
+        parts.push("create view".to_string());
+    }
     
     if let Some(ref relation) = stmt.view {
         let name = relation.relname.to_lowercase();

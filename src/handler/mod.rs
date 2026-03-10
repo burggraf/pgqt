@@ -256,6 +256,28 @@ impl SqliteHandler {
             Ok(type_name.to_string())
         })?;
 
+        // to_char - format a value according to a format string
+        // Basic implementation supporting common numeric formats
+        conn.create_scalar_function("to_char", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let value: f64 = ctx.get(0)?;
+            let format: String = ctx.get(1)?;
+            
+            // Map PostgreSQL format patterns to Rust format strings
+            // FM9999.99 -> removes leading/trailing spaces
+            // 9999.99 -> standard numeric format
+            let format = format.trim_start_matches("FM");
+            
+            if format.contains('.') {
+                // Determine decimal places from format
+                let decimal_places = format.split('.').nth(1).map(|s| s.len()).unwrap_or(2);
+                let format_str = format!("%.{}f", decimal_places);
+                Ok(format_str.replace("{}", &format!("{:.1$}", value, decimal_places)))
+            } else {
+                // Integer format
+                Ok(format!("{:.0}", value))
+            }
+        })?;
+
         // version - returns PostgreSQL version string
         conn.create_scalar_function("version", 0, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
             Ok("PostgreSQL 15.0 (pgqt)".to_string())
