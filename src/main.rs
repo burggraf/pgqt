@@ -285,15 +285,9 @@ async fn run_listener(config: PortConfig) -> Result<()> {
         set_debug(true);
     }
 
-    // Set up output redirection for this port
-    let output_dest = parse_output_dest(&config.output)?;
-    let error_dest = config.error_output
-        .as_ref()
-        .map(|o| parse_output_dest(o))
-        .transpose()?
-        .unwrap_or_else(|| OutputDest::File(PathBuf::from(format!("{}.error.log", config.database))));
-
-    setup_output_redirection(&output_dest, &error_dest)?;
+    // Note: Output redirection is a global process operation (uses dup2).
+    // In multi-port mode, we skip per-port output redirection to avoid conflicts.
+    // All listeners share the same stdout/stderr.
 
     println!("Server listening on {}", addr);
     println!("Using database: {}", config.database);
