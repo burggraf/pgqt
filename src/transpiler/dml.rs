@@ -959,11 +959,30 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
     ctx.in_insert_values = true;
 
     // Validate INSERT values before reconstruction
+    // Only validate column count when columns are explicitly specified (not inferred)
+    let columns_explicitly_specified = !stmt.cols.is_empty();
+    
     if let Some(ref select_stmt) = stmt.select_stmt {
         // Extract values lists from the select statement (for VALUES clauses)
         if let Some(ref inner) = select_stmt.node {
             if let NodeEnum::SelectStmt(ref select) = inner {
                 if !select.values_lists.is_empty() {
+                    // Validate column count matches values count only when columns are explicitly specified
+                    if columns_explicitly_specified {
+                        for values_list in &select.values_lists {
+                            if let Some(ref inner) = values_list.node {
+                                if let NodeEnum::List(list) = inner {
+                                    if list.items.len() != columns.len() {
+                                        ctx.add_error(
+                                            "42601: INSERT has more target columns than expressions"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let validation_errors = validate_insert_values(
                         &table_name,
                         &columns,
@@ -1099,6 +1118,55 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
     parts.join(" ")
 }
 
+/// Check if a WHERE clause references a table name directly (for alias validation)
+fn where_clause_references_table(where_clause: &Node, table_name: &str) -> bool {
+    fn check_node(node: &Node, table_name: &str) -> bool {
+        if let Some(ref inner) = node.node {
+            match inner {
+                NodeEnum::ColumnRef(col_ref) => {
+                    // Check if the column reference has the table name as the first field
+                    if let Some(first_field) = col_ref.fields.first() {
+                        if let Some(ref field_node) = first_field.node {
+                            if let NodeEnum::String(s) = field_node {
+                                return s.sval.to_lowercase() == table_name.to_lowercase();
+                            }
+                        }
+                    }
+                    false
+                }
+                NodeEnum::AExpr(a_expr) => {
+                    // Check left and right expressions
+                    if let Some(ref lexpr) = a_expr.lexpr {
+                        if check_node(lexpr, table_name) {
+                            return true;
+                        }
+                    }
+                    if let Some(ref rexpr) = a_expr.rexpr {
+                        if check_node(rexpr, table_name) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                NodeEnum::BoolExpr(bool_expr) => {
+                    // Check all arguments of AND/OR/NOT
+                    for arg in &bool_expr.args {
+                        if check_node(arg, table_name) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+    
+    check_node(where_clause, table_name)
+}
+
 /// Reconstruct a DELETE statement
 pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
@@ -1130,6 +1198,18 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
 
     // WHERE clause - strip table alias from column references
     if let Some(ref where_clause) = stmt.where_clause {
+        // Validate: if alias is used, original table name cannot be referenced
+        if let Some(ref alias) = table_alias {
+            if let Some(ref orig_table) = original_table_name {
+                if where_clause_references_table(where_clause, orig_table) {
+                    ctx.add_error(format!(
+                        "42P01: invalid reference to FROM-clause entry for table \"{}\". Hint: Perhaps you meant to reference the table alias \"{}\".",
+                        orig_table, alias
+                    ));
+                }
+            }
+        }
+        
         let mut where_sql = reconstruct_node(where_clause, ctx);
         if !where_sql.is_empty() {
             // Remove table alias prefixes from column references
