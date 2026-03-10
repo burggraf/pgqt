@@ -801,3 +801,45 @@ fn test_mixed_aliased_and_unaliased_columns() {
     assert_eq!(result.column_aliases[1], "user_name", "Second alias should be 'user_name'");
     assert_eq!(result.column_aliases[2], "", "Third column has no alias");
 }
+
+#[test]
+fn test_float_whitespace_trim() {
+    // Test whitespace trimming for REAL casts
+    let sql = "SELECT '  0.0  '::real, '  123.456  '::double precision";
+    let result = transpile(sql);
+    // Should contain trimmed values without whitespace
+    assert!(result.contains("'0.0'"), "Whitespace not trimmed for REAL: {}", result);
+    assert!(result.contains("'123.456'"), "Whitespace not trimmed for DOUBLE PRECISION: {}", result);
+    assert!(!result.contains("'  0.0  '"), "Whitespace still present for REAL: {}", result);
+    assert!(!result.contains("'  123.456  '"), "Whitespace still present for DOUBLE PRECISION: {}", result);
+}
+
+#[test]
+fn test_integer_whitespace_trim() {
+    // Test whitespace trimming for INTEGER casts
+    let sql = "SELECT '  42  '::integer, '  -99  '::int";
+    let result = transpile(sql);
+    // Should contain trimmed values without whitespace
+    assert!(result.contains("'42'"), "Whitespace not trimmed for INTEGER: {}", result);
+    assert!(result.contains("'-99'"), "Whitespace not trimmed for INT: {}", result);
+}
+
+#[test]
+fn test_numeric_whitespace_trim() {
+    // Test whitespace trimming for NUMERIC/DECIMAL casts
+    let sql = "SELECT '  3.14159  '::numeric, '  2.718  '::decimal";
+    let result = transpile(sql);
+    // Should contain trimmed values without whitespace
+    assert!(result.contains("'3.14159'"), "Whitespace not trimmed for NUMERIC: {}", result);
+    assert!(result.contains("'2.718'"), "Whitespace not trimmed for DECIMAL: {}", result);
+}
+
+#[test]
+fn test_non_numeric_cast_no_trim() {
+    // Test that non-numeric casts do NOT trim whitespace
+    let sql = "SELECT '  hello  '::text, '  world  '::varchar";
+    let result = transpile(sql);
+    // Should preserve whitespace for non-numeric types
+    assert!(result.contains("'  hello  '") || result.contains("' hello '"), 
+            "TEXT cast should preserve or minimally trim whitespace: {}", result);
+}

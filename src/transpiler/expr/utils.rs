@@ -53,6 +53,27 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
     let original_type = extract_original_type(&type_cast.type_name);
     let sqlite_type = rewrite_type_for_sqlite(&original_type, &ctx.registry);
 
+    // Check if target type is numeric and argument is a string literal with whitespace
+    let type_lower = original_type.to_lowercase();
+    let is_numeric = type_lower.contains("real") 
+        || type_lower.contains("double") 
+        || type_lower.contains("float")
+        || type_lower.contains("int")
+        || type_lower.contains("numeric")
+        || type_lower.contains("decimal")
+        || type_lower.contains("number");
+    
+    if is_numeric && arg_sql.starts_with('\'') && arg_sql.ends_with('\'') {
+        // Extract inner value and trim whitespace
+        let inner = &arg_sql[1..arg_sql.len()-1];
+        let trimmed = inner.trim();
+        if trimmed != inner {
+            // Reconstruct with trimmed value
+            let trimmed_arg = format!("'{}'", trimmed);
+            return format!("cast({} as {})", trimmed_arg, sqlite_type.to_lowercase());
+        }
+    }
+
     if original_type.to_uppercase() == "REGCLASS" {
         return format!("(SELECT oid FROM pg_class WHERE relname = {0} OR oid = CAST({0} AS INTEGER) LIMIT 1)", arg_sql);
     }
