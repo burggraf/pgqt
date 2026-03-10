@@ -21,7 +21,9 @@ fn is_integer_expression(expr: &str) -> bool {
         return true;
     }
     // Check for cast() function with integer types
-    if lower.contains("cast(") && (lower.contains("as int") || lower.contains("as integer")) {
+    if lower.contains("cast(") && 
+       (lower.contains("as int") || lower.contains("as integer") ||
+        lower.contains("as smallint") || lower.contains("as bigint")) {
         return true;
     }
     // Check if it's a simple integer literal

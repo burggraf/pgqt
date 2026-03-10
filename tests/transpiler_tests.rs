@@ -725,3 +725,16 @@ fn test_debug_nested_parse() {
         Err(e) => println!("ERROR: {}", e),
     }
 }
+
+#[test]
+fn test_bitwise_right_shift_not_geo() {
+    // Test that bitwise right shift operator is not confused with geometric operators
+    let sql = "SELECT (256::int2 >> 4)::text";
+    let result = transpile(sql);
+    
+    // Check that geo_right is NOT in the output
+    assert!(!result.contains("geo_right"), "Output should not contain geo_right for integer shift, got: {}", result);
+    
+    // Check that the output contains the bitwise shift operator
+    assert!(result.contains(">>"), "Output should contain >> operator, got: {}", result);
+}
