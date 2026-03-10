@@ -760,3 +760,44 @@ fn test_character_length_alias() {
     // The alias will contain character_length which is expected PostgreSQL behavior
     assert!(result.contains("\"character_length\""), "Output should preserve original name in alias, got: {}", result);
 }
+
+#[test]
+fn test_column_alias_preservation() {
+    // Test that column aliases are preserved in the transpile result
+    let sql = r#"SELECT 1 AS "my_alias""#;
+    let result = transpile_with_metadata(sql);
+    assert_eq!(result.column_aliases.len(), 1, "Should have one column alias");
+    assert_eq!(result.column_aliases[0], "my_alias", "Alias should be 'my_alias'");
+    assert!(result.sql.contains("my_alias"), "SQL should contain alias: {}", result.sql);
+}
+
+#[test]
+fn test_column_alias_with_case_expression() {
+    // Test the specific case from the issue: CASE expression with alias
+    let sql = r#"SELECT CASE WHEN 1 < 2 THEN 3 END AS "Simple WHEN""#;
+    let result = transpile_with_metadata(sql);
+    assert_eq!(result.column_aliases.len(), 1, "Should have one column alias");
+    assert_eq!(result.column_aliases[0], "Simple WHEN", "Alias should be 'Simple WHEN'");
+}
+
+#[test]
+fn test_multiple_column_aliases() {
+    // Test multiple columns with different aliases
+    let sql = r#"SELECT id AS "user_id", name AS "user_name", 1+1 AS "sum" FROM users"#;
+    let result = transpile_with_metadata(sql);
+    assert_eq!(result.column_aliases.len(), 3, "Should have three column aliases");
+    assert_eq!(result.column_aliases[0], "user_id", "First alias should be 'user_id'");
+    assert_eq!(result.column_aliases[1], "user_name", "Second alias should be 'user_name'");
+    assert_eq!(result.column_aliases[2], "sum", "Third alias should be 'sum'");
+}
+
+#[test]
+fn test_mixed_aliased_and_unaliased_columns() {
+    // Test mix of aliased and unaliased columns
+    let sql = r#"SELECT id, name AS "user_name", email FROM users"#;
+    let result = transpile_with_metadata(sql);
+    assert_eq!(result.column_aliases.len(), 3, "Should have three column entries");
+    assert_eq!(result.column_aliases[0], "", "First column has no alias");
+    assert_eq!(result.column_aliases[1], "user_name", "Second alias should be 'user_name'");
+    assert_eq!(result.column_aliases[2], "", "Third column has no alias");
+}

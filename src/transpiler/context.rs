@@ -21,6 +21,8 @@ pub struct TranspileResult {
     pub referenced_tables: Vec<String>,
     pub operation_type: OperationType,
     pub errors: Vec<String>,
+    /// Column aliases extracted from SELECT target_list (for result metadata preservation)
+    pub column_aliases: Vec<String>,
 }
 
 /// Type of SQL operation

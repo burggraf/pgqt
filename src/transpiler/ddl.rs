@@ -73,6 +73,7 @@ pub(crate) fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut
         referenced_tables: ctx.referenced_tables.clone(),
         operation_type: OperationType::DDL,
         errors: Vec::new(),
+        column_aliases: Vec::new(),
     }
 }
 
@@ -805,6 +806,7 @@ pub(crate) fn reconstruct_copy_stmt(stmt: &CopyStmt, ctx: &mut TranspileContext)
         referenced_tables: ctx.referenced_tables.clone(),
         operation_type: OperationType::OTHER,
         errors: Vec::new(),
+        column_aliases: Vec::new(),
     })
 }
 
