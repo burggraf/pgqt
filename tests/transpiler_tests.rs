@@ -860,3 +860,10 @@ fn test_generate_series_with_step() {
     assert!(result.contains("WITH RECURSIVE"), "Should contain WITH RECURSIVE: {}", result);
     assert!(result.contains("2"), "Should contain step value: {}", result);
 }
+
+#[test]
+fn test_update_row_constructor() {
+    let sql = "UPDATE t SET (a, b) = (1, 2)";
+    let result = transpile(sql);
+    assert!(result.contains("set a = 1, b = 2"), "Should expand row constructor: {}", result);
+}

@@ -1053,34 +1053,88 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
 
     // SET clause - strip table alias from column references in values
     parts.push("set".to_string());
-    let targets: Vec<String> = stmt
-        .target_list
-        .iter()
-        .filter_map(|n| {
-            if let Some(ref inner) = n.node {
-                if let NodeEnum::ResTarget(target) = inner {
-                    let col_name = target.name.to_lowercase();
-                    let mut val = target
-                        .val
-                        .as_ref()
-                        .map(|v| reconstruct_node(v, ctx))
-                        .unwrap_or_default();
-                    // Remove table alias prefixes from column references in values
-                    if let Some(ref alias) = table_alias {
-                        val = remove_table_alias_from_columns(&val, alias);
-                    }
-                    // Also remove original table name if there's an alias
-                    if table_alias.is_some() {
-                        if let Some(ref orig_table) = original_table_name {
-                            val = remove_table_alias_from_columns(&val, orig_table);
+    
+    // Check if this is a row constructor: SET (a, b) = (1, 2)
+    let mut row_constructor_targets: Vec<(String, String)> = Vec::new();
+    let mut is_row_constructor = false;
+    
+    for n in &stmt.target_list {
+        if let Some(ref inner) = n.node {
+            if let NodeEnum::ResTarget(target) = inner {
+                // Check if value is a List (row constructor values)
+                if let Some(ref val_node) = target.val {
+                    if let Some(ref val_inner) = val_node.node {
+                        if let NodeEnum::List(val_list) = val_inner {
+                            // This is a row constructor - parse column names from target.name
+                            // which may be a comma-separated list
+                            let col_names: Vec<String> = target.name.split(',')
+                                .map(|s| s.trim().to_lowercase())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            
+                            // Parse values from the list
+                            let values: Vec<String> = val_list.items.iter()
+                                .map(|v| {
+                                    let mut val = reconstruct_node(v, ctx);
+                                    if let Some(ref alias) = table_alias {
+                                        val = remove_table_alias_from_columns(&val, alias);
+                                    }
+                                    if table_alias.is_some() {
+                                        if let Some(ref orig_table) = original_table_name {
+                                            val = remove_table_alias_from_columns(&val, orig_table);
+                                        }
+                                    }
+                                    val
+                                })
+                                .collect();
+                            
+                            // Pair up columns with values
+                            for (i, col_name) in col_names.iter().enumerate() {
+                                if i < values.len() {
+                                    row_constructor_targets.push((col_name.clone(), values[i].clone()));
+                                }
+                            }
+                            is_row_constructor = true;
                         }
                     }
-                    return Some(format!("{} = {}", col_name, val));
                 }
             }
-            None
-        })
-        .collect();
+        }
+    }
+    
+    let targets: Vec<String> = if is_row_constructor && !row_constructor_targets.is_empty() {
+        row_constructor_targets.iter()
+            .map(|(col, val)| format!("{} = {}", col, val))
+            .collect()
+    } else {
+        stmt.target_list
+            .iter()
+            .filter_map(|n| {
+                if let Some(ref inner) = n.node {
+                    if let NodeEnum::ResTarget(target) = inner {
+                        let col_name = target.name.to_lowercase();
+                        let mut val = target
+                            .val
+                            .as_ref()
+                            .map(|v| reconstruct_node(v, ctx))
+                            .unwrap_or_default();
+                        // Remove table alias prefixes from column references in values
+                        if let Some(ref alias) = table_alias {
+                            val = remove_table_alias_from_columns(&val, alias);
+                        }
+                        // Also remove original table name if there's an alias
+                        if table_alias.is_some() {
+                            if let Some(ref orig_table) = original_table_name {
+                                val = remove_table_alias_from_columns(&val, orig_table);
+                            }
+                        }
+                        return Some(format!("{} = {}", col_name, val));
+                    }
+                }
+                None
+            })
+            .collect()
+    };
     parts.push(targets.join(", "));
 
     // FROM clause - for UPDATE FROM subqueries
