@@ -11,6 +11,26 @@ use super::arrays;
 use super::ranges;
 use super::geo;
 
+/// Check if a SQL expression looks like an integer type or integer literal
+fn is_integer_expression(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    // Check for integer type casts
+    if lower.contains("::int") || lower.contains("::integer") ||
+       lower.contains("::smallint") || lower.contains("::bigint") ||
+       lower.contains("::int2") || lower.contains("::int4") || lower.contains("::int8") {
+        return true;
+    }
+    // Check for cast() function with integer types
+    if lower.contains("cast(") && (lower.contains("as int") || lower.contains("as integer")) {
+        return true;
+    }
+    // Check if it's a simple integer literal
+    if expr.trim().parse::<i64>().is_ok() {
+        return true;
+    }
+    false
+}
+
 /// Reconstruct an AExpr node (operators)
 pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
     // Check if operands are array expressions before reconstructing
@@ -112,12 +132,15 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
             
-            if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
+            // Check if this is an integer bitwise shift operation
+            if is_integer_expression(&lexpr_lower) || is_integer_expression(&rexpr_lower) {
+                format!("{} << {}", lexpr_sql, rexpr_sql)
+            } else if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_left(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_left(&lexpr_sql, &rexpr_sql)
             } else {
-                // Default to bitwise shift for integers
+                // Default to bitwise shift
                 format!("{} << {}", lexpr_sql, rexpr_sql)
             }
         },
@@ -125,12 +148,15 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
             
-            if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
+            // Check if this is an integer bitwise shift operation
+            if is_integer_expression(&lexpr_lower) || is_integer_expression(&rexpr_lower) {
+                format!("{} >> {}", lexpr_sql, rexpr_sql)
+            } else if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_right(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_right(&lexpr_sql, &rexpr_sql)
             } else {
-                // Default to bitwise shift for integers
+                // Default to bitwise shift
                 format!("{} >> {}", lexpr_sql, rexpr_sql)
             }
         },

@@ -3,6 +3,22 @@
 use pgqt::transpiler::{transpile, transpile_with_metadata};
 
 #[test]
+fn test_bitwise_shift_not_geo() {
+    // Test that bitwise shift operators are not confused with geometric operators
+    // The key fix is that geo_left should NOT appear for integer operations
+    let sql = "SELECT (1::int2 << 15)::text";
+    let result = transpile(sql);
+    println!("Input: {}", sql);
+    println!("Output: {}", result);
+    
+    // Check that geo_left is NOT in the output - this was the main bug
+    assert!(!result.contains("geo_left"), "Output should not contain geo_left for integer shift, got: {}", result);
+    
+    // Check that the output contains the bitwise shift operator
+    assert!(result.contains("<<"), "Output should contain << operator, got: {}", result);
+}
+
+#[test]
 fn test_transpile_simple_select() {
     let input = "SELECT * FROM users";
     let result = transpile(input);
