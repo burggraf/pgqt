@@ -10,7 +10,7 @@ use pg_query::protobuf::{
 use super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
 use crate::validation::{validate_value, ValidationError};
-use crate::catalog::ColumnMetadata;
+
 
 /// Check if the current context has column aliases (for VALUES statements)
 #[allow(dead_code)]

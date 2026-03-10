@@ -37,6 +37,7 @@ pub fn extract_base_type(type_str: &str) -> String {
 
 /// Validates that a string is a valid UUID format
 /// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (8-4-4-4-12 hex digits)
+#[allow(dead_code)]
 pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
     // Remove any quotes that might be present
     let value = value.trim_matches('\'');
@@ -61,7 +62,7 @@ pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
     }
     
     let expected_lengths = [8, 4, 4, 4, 12];
-    for (i, (part, expected_len)) in parts.iter().zip(expected_lengths.iter()).enumerate() {
+    for (_i, (part, expected_len)) in parts.iter().zip(expected_lengths.iter()).enumerate() {
         if part.len() != *expected_len {
             return Err(ValidationError {
                 code: "22P02".to_string(),
@@ -71,7 +72,7 @@ pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
         }
         
         // Check that all characters are valid hex digits
-        for (j, c) in part.chars().enumerate() {
+        for (_j, c) in part.chars().enumerate() {
             if !c.is_ascii_hexdigit() {
                 return Err(ValidationError {
                     code: "22P02".to_string(),
@@ -87,6 +88,7 @@ pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
 
 /// List of valid PostgreSQL timezones
 /// This is a subset of the full IANA timezone database
+#[allow(dead_code)]
 pub const VALID_TIMEZONES: &[&str] = &[
     "UTC", "GMT", "UCT", "Universal", "Zulu",
     "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
@@ -123,6 +125,7 @@ pub const VALID_TIMEZONES: &[&str] = &[
 ];
 
 /// Validates that a timezone string is recognized by PostgreSQL
+#[allow(dead_code)]
 pub fn validate_timezone(tz: &str) -> Result<(), ValidationError> {
     // Remove any quotes that might be present
     let tz = tz.trim_matches('\'');
@@ -138,6 +141,7 @@ pub fn validate_timezone(tz: &str) -> Result<(), ValidationError> {
 }
 
 /// Validates that a string is valid JSON
+#[allow(dead_code)]
 pub fn validate_json(value: &str) -> Result<(), ValidationError> {
     // Remove any quotes that might be present at the start/end
     let value = value.trim();

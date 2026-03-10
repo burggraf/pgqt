@@ -4,6 +4,7 @@ pub mod types;
 pub struct ValidationError {
     pub code: String,  // SQLSTATE code
     pub message: String,
+    #[allow(dead_code)]
     pub position: Option<usize>,
 }
 

@@ -143,6 +143,7 @@ struct Cli {
 }
 
 impl Cli {
+    #[allow(dead_code)]
     /// Get the error output destination, defaulting to <database>.error.log
     fn error_output_dest(&self) -> OutputDest {
         self.error_output.clone().unwrap_or_else(|| {
@@ -273,6 +274,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Parse output destination string to OutputDest enum
 fn parse_output_dest(s: &str) -> Result<OutputDest> {
     match s.to_uppercase().as_str() {
@@ -321,6 +323,7 @@ async fn run_listener(config: PortConfig) -> Result<()> {
     }
 }
 
+#[allow(dead_code)]
 /// Set up output redirection based on CLI arguments
 fn setup_output_redirection(output: &OutputDest, error_output: &OutputDest) -> Result<()> {
     use std::fs::OpenOptions;
@@ -391,11 +394,13 @@ fn setup_output_redirection(output: &OutputDest, error_output: &OutputDest) -> R
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Log a message to the configured output destination
 fn log_output(msg: &str) {
     println!("{}", msg);
 }
 
+#[allow(dead_code)]
 /// Log an error message to the configured error output destination
 fn log_error(msg: &str) {
     eprintln!("{}", msg);

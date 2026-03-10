@@ -125,7 +125,7 @@ impl StartupHandler for PasswordAuthHandler {
                 
                 // Check if user needs a password
                 match self.check_user_password_status(&user) {
-                    Ok((exists, needs_password, can_login)) => {
+                    Ok((_exists, needs_password, can_login)) => {
                         if !can_login {
                             // User cannot login
                             let error_info = ErrorInfo::new(

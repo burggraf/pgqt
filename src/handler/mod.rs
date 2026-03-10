@@ -24,7 +24,7 @@ use crate::catalog::{init_catalog, init_system_views};
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
 
-/// Thread-local storage for the current user during query execution
+// Thread-local storage for the current user during query execution
 thread_local! {
     static CURRENT_USER: RefCell<String> = RefCell::new("postgres".to_string());
 }
