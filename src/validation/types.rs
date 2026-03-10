@@ -363,6 +363,36 @@ pub fn validate_int8(value: &str) -> Result<(), ValidationError> {
     }
 }
 
+/// Validates a CHAR value, trimming trailing spaces before validation (PostgreSQL behavior)
+/// PostgreSQL automatically trims trailing spaces from CHAR inputs before validation
+pub fn validate_char_value(value: &str, max_length: usize) -> Result<(), ValidationError> {
+    let trimmed = value.trim_end_matches(' ');
+    if trimmed.len() > max_length {
+        Err(ValidationError {
+            code: "22001".to_string(),
+            message: format!("value too long for type character({})", max_length),
+            position: None,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Validates a VARCHAR value, trimming trailing spaces before validation (PostgreSQL behavior)
+/// PostgreSQL automatically trims trailing spaces from VARCHAR inputs before validation
+pub fn validate_varchar_value(value: &str, max_length: usize) -> Result<(), ValidationError> {
+    let trimmed = value.trim_end_matches(' ');
+    if trimmed.len() > max_length {
+        Err(ValidationError {
+            code: "22001".to_string(),
+            message: format!("value too long for type character varying({})", max_length),
+            position: None,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,5 +687,33 @@ mod tests {
         let result = validate_int8("'9223372036854775808'");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, "22003");
+    }
+
+    #[test]
+    fn test_char_trimming() {
+        // Should pass after trimming trailing spaces (PostgreSQL behavior)
+        assert!(validate_char_value("c     ", 1).is_ok());
+        assert!(validate_char_value("ab    ", 2).is_ok());
+        // Should still fail if too long after trimming
+        assert!(validate_char_value("abc     ", 1).is_err());
+        assert!(validate_char_value("xyz     ", 2).is_err());
+        // Edge cases
+        assert!(validate_char_value("", 1).is_ok());
+        assert!(validate_char_value(" ", 1).is_ok());
+        assert!(validate_char_value("a", 1).is_ok());
+    }
+
+    #[test]
+    fn test_varchar_trimming() {
+        // Should pass after trimming trailing spaces (PostgreSQL behavior)
+        assert!(validate_varchar_value("d     ", 1).is_ok());
+        assert!(validate_varchar_value("xy    ", 2).is_ok());
+        // Should still fail if too long after trimming
+        assert!(validate_varchar_value("xyz     ", 1).is_err());
+        assert!(validate_varchar_value("xyzw    ", 2).is_err());
+        // Edge cases
+        assert!(validate_varchar_value("", 1).is_ok());
+        assert!(validate_varchar_value(" ", 1).is_ok());
+        assert!(validate_varchar_value("a", 1).is_ok());
     }
 }

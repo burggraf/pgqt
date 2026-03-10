@@ -2,7 +2,7 @@ pub mod types;
 
 #[derive(Debug, Clone)]
 pub struct ValidationError {
-    pub code: String,  // SQLSTATE code
+    pub code: String,  
     pub message: String,
     #[allow(dead_code)]
     pub position: Option<usize>,
@@ -38,17 +38,22 @@ pub fn validate_value(value: &str, column_type: &str) -> Result<(), ValidationEr
     let base_type = extract_base_type(column_type);
     let modifier = parse_type_modifier(column_type);
     
+    // Strip quotes from the value for validation
+    let unquoted_value = value.trim_matches('\'');
+    
     match base_type.as_str() {
         "VARCHAR" | "CHARACTER VARYING" => {
             if let Some(max_len) = modifier {
-                validate_varchar(value, max_len)
+                // Use trimming validation to match PostgreSQL behavior
+                types::validate_varchar_value(unquoted_value, max_len)
             } else {
-                Ok(()) // Unbounded VARCHAR - no length check
+                Ok(()) 
             }
         }
         "CHAR" | "CHARACTER" | "BPCHAR" => {
-            let len = modifier.unwrap_or(1); // CHAR defaults to CHAR(1)
-            validate_char(value, len)
+            let len = modifier.unwrap_or(1); 
+            // Use trimming validation to match PostgreSQL behavior
+            types::validate_char_value(unquoted_value, len)
         }
         "DATE" => types::validate_date(value),
         "REAL" | "FLOAT4" => types::validate_float4(value),
@@ -56,6 +61,6 @@ pub fn validate_value(value: &str, column_type: &str) -> Result<(), ValidationEr
         "SMALLINT" | "INT2" => types::validate_int2(value),
         "INTEGER" | "INT" | "INT4" => types::validate_int4(value),
         "BIGINT" | "INT8" => types::validate_int8(value),
-        _ => Ok(()), // Unknown types pass through
+        _ => Ok(()), 
     }
 }
