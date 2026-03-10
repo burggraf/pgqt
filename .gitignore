@@ -10,3 +10,4 @@ postgres-compatibility-suite/__pycache__/
 postgres-compatibility-suite/*.db*
 prompts/*
 .worktrees/
+.pi/
