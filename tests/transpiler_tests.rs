@@ -738,3 +738,25 @@ fn test_bitwise_right_shift_not_geo() {
     // Check that the output contains the bitwise shift operator
     assert!(result.contains(">>"), "Output should contain >> operator, got: {}", result);
 }
+
+#[test]
+fn test_char_length_alias() {
+    // Test that char_length is transpiled to length
+    // Note: PostgreSQL preserves the original function name as the column alias
+    let sql = "SELECT char_length('hello')";
+    let result = transpile(sql);
+    assert!(result.contains("length("), "Output should contain length( function call, got: {}", result);
+    // The alias will contain char_length which is expected PostgreSQL behavior
+    assert!(result.contains("\"char_length\""), "Output should preserve original name in alias, got: {}", result);
+}
+
+#[test]
+fn test_character_length_alias() {
+    // Test that character_length is transpiled to length
+    // Note: PostgreSQL preserves the original function name as the column alias
+    let sql = "SELECT character_length('hello')";
+    let result = transpile(sql);
+    assert!(result.contains("length("), "Output should contain length( function call, got: {}", result);
+    // The alias will contain character_length which is expected PostgreSQL behavior
+    assert!(result.contains("\"character_length\""), "Output should preserve original name in alias, got: {}", result);
+}

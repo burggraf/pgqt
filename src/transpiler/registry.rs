@@ -187,6 +187,10 @@ impl Registry {
             functions.register(f, FunctionMapping::Simple(*f));
         }
 
+        // Aliases for length()
+        functions.register("char_length", FunctionMapping::Simple("length"));
+        functions.register("character_length", FunctionMapping::Simple("length"));
+
         functions.register("now", FunctionMapping::Rewrite("datetime('now')"));
         functions.register("current_timestamp", FunctionMapping::Rewrite("datetime('now')"));
         functions.register("current_date", FunctionMapping::Rewrite("date('now')"));
