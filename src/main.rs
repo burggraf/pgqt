@@ -243,6 +243,14 @@ async fn main() -> Result<()> {
         )
     };
 
+    // Set global debug flag if ANY port has debug enabled
+    // (debug is a global setting since the debug! macro checks a static variable)
+    let any_debug = app_config.ports.iter().any(|p| p.debug);
+    if any_debug {
+        set_debug(true);
+        println!("Debug mode enabled (at least one port has debug: true)");
+    }
+
     // Spawn listeners for each configured port
     let mut handles = Vec::new();
 
@@ -280,14 +288,9 @@ async fn run_listener(config: PortConfig) -> Result<()> {
     let listener = TcpListener::bind(&addr).await
         .with_context(|| format!("Failed to bind to {}", addr))?;
 
-    // Set up debug mode if enabled for this port
-    if config.debug {
-        set_debug(true);
-    }
-
-    // Note: Output redirection is a global process operation (uses dup2).
-    // In multi-port mode, we skip per-port output redirection to avoid conflicts.
-    // All listeners share the same stdout/stderr.
+    // Note: Debug and output redirection are global process operations.
+    // In multi-port mode, these are set once before spawning listeners.
+    // All listeners share the same debug flag and stdout/stderr.
 
     println!("Server listening on {}", addr);
     println!("Using database: {}", config.database);
