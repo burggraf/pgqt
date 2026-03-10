@@ -47,6 +47,18 @@ pub enum PgErrorCode {
     DataException,
     /// Programming error
     ProgrammingError,
+    /// String data right truncation
+    StringDataRightTruncation,
+    /// Invalid text representation
+    InvalidTextRepresentation,
+    /// Invalid datetime format
+    InvalidDatetimeFormat,
+    /// Datetime field overflow
+    DatetimeFieldOverflow,
+    /// Feature not supported
+    FeatureNotSupported,
+    /// Invalid authorization specification
+    InvalidAuthorizationSpecification,
 }
 
 impl PgErrorCode {
@@ -71,6 +83,12 @@ impl PgErrorCode {
             PgErrorCode::InvalidParameterValue => "22023",
             PgErrorCode::DataException => "22000",
             PgErrorCode::ProgrammingError => "42000",
+            PgErrorCode::StringDataRightTruncation => "22001",
+            PgErrorCode::InvalidTextRepresentation => "22P02",
+            PgErrorCode::InvalidDatetimeFormat => "22007",
+            PgErrorCode::DatetimeFieldOverflow => "22008",
+            PgErrorCode::FeatureNotSupported => "0A000",
+            PgErrorCode::InvalidAuthorizationSpecification => "28000",
         }
     }
 }
