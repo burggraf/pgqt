@@ -9,6 +9,8 @@ use pg_query::protobuf::{
 };
 use super::context::TranspileContext;
 use crate::transpiler::reconstruct_node;
+use crate::validation::{validate_value, ValidationError};
+use crate::catalog::ColumnMetadata;
 
 /// Check if the current context has column aliases (for VALUES statements)
 #[allow(dead_code)]
@@ -754,6 +756,131 @@ fn transform_default_expression(expr: &str) -> String {
         }
     }
 }
+
+/// Extract a string literal value from a Node
+/// Returns Some(value) if the node is a string constant, None otherwise
+fn extract_string_literal(node: &Node) -> Option<String> {
+    if let Some(ref inner) = node.node {
+        if let NodeEnum::AConst(ref aconst) = inner {
+            if let Some(ref val) = aconst.val {
+                match val {
+                    pg_query::protobuf::a_const::Val::Sval(ref s) => {
+                        return Some(s.sval.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Validate INSERT values against column types
+/// Returns a vector of validation errors
+fn validate_insert_values(
+    table_name: &str,
+    columns: &[String],
+    values_lists: &[Node],
+    ctx: &TranspileContext,
+) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    
+    // Get column metadata from the context
+    let column_metadata = ctx.get_table_columns(table_name);
+    
+    if column_metadata.is_none() {
+        return errors; // Can't validate without metadata
+    }
+    
+    let column_metadata = column_metadata.unwrap();
+    
+    // Build a map of column name to type
+    let mut column_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for col in &column_metadata {
+        column_types.insert(col.name.to_lowercase(), col.original_type.clone());
+    }
+    
+    // Validate each VALUES list
+    for values_list in values_lists {
+        if let Some(ref inner) = values_list.node {
+            if let NodeEnum::List(list) = inner {
+                // Iterate through values and columns in parallel
+                for (idx, value_node) in list.items.iter().enumerate() {
+                    if idx >= columns.len() {
+                        break; // More values than columns
+                    }
+                    
+                    let column_name = &columns[idx];
+                    
+                    // Get the column type
+                    if let Some(col_type) = column_types.get(column_name) {
+                        // Try to extract a string literal value
+                        if let Some(string_val) = extract_string_literal(value_node) {
+                            // Validate the value against the column type
+                            match validate_value(&string_val, col_type) {
+                                Ok(()) => {}
+                                Err(e) => errors.push(e),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    errors
+}
+
+/// Validate UPDATE SET clause values against column types
+/// Returns a vector of validation errors
+fn validate_update_values(
+    table_name: &str,
+    targets: &[pg_query::protobuf::Node],
+    ctx: &TranspileContext,
+) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    
+    // Get column metadata from the context
+    let column_metadata = ctx.get_table_columns(table_name);
+    
+    if column_metadata.is_none() {
+        return errors; // Can't validate without metadata
+    }
+    
+    let column_metadata = column_metadata.unwrap();
+    
+    // Build a map of column name to type
+    let mut column_types: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for col in &column_metadata {
+        column_types.insert(col.name.to_lowercase(), col.original_type.clone());
+    }
+    
+    // Validate each target in the SET clause
+    for target_node in targets {
+        if let Some(ref inner) = target_node.node {
+            if let NodeEnum::ResTarget(target) = inner {
+                let column_name = target.name.to_lowercase();
+                
+                // Get the column type
+                if let Some(col_type) = column_types.get(&column_name) {
+                    // Try to extract a string literal value from the target value
+                    if let Some(ref val_node) = target.val {
+                        if let Some(string_val) = extract_string_literal(val_node) {
+                            // Validate the value against the column type
+                            match validate_value(&string_val, col_type) {
+                                Ok(()) => {}
+                                Err(e) => errors.push(e),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    errors
+}
+
 /// Reconstruct a SortBy node (ORDER BY)
 pub(crate) fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> String {
     if let Some(ref inner) = node.node {
@@ -827,9 +954,30 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
     }
 
     
-    ctx.values_column_aliases = columns;
+    ctx.values_column_aliases = columns.clone();
     // Set flag to avoid unwrapping SELECT in function calls inside INSERT VALUES
     ctx.in_insert_values = true;
+
+    // Validate INSERT values before reconstruction
+    if let Some(ref select_stmt) = stmt.select_stmt {
+        // Extract values lists from the select statement (for VALUES clauses)
+        if let Some(ref inner) = select_stmt.node {
+            if let NodeEnum::SelectStmt(ref select) = inner {
+                if !select.values_lists.is_empty() {
+                    let validation_errors = validate_insert_values(
+                        &table_name,
+                        &columns,
+                        &select.values_lists,
+                        ctx,
+                    );
+                    // Add validation errors to context
+                    for error in validation_errors {
+                        ctx.add_error(format!("{}: {}", error.code, error.message));
+                    }
+                }
+            }
+        }
+    }
 
     
     if let Some(ref select_stmt) = stmt.select_stmt {
@@ -871,7 +1019,18 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
             }
         })
         .unwrap_or_default();
-    parts.push(table_name);
+    parts.push(table_name.clone());
+
+    // Validate UPDATE SET values before reconstruction
+    let validation_errors = validate_update_values(
+        &table_name,
+        &stmt.target_list,
+        ctx,
+    );
+    // Add validation errors to context
+    for error in validation_errors {
+        ctx.add_error(format!("{}: {}", error.code, error.message));
+    }
 
     // SET clause - strip table alias from column references in values
     parts.push("set".to_string());

@@ -23,6 +23,7 @@
 //! | [`vector`]     | pgvector-compatible vector similarity search           |
 
 pub mod debug;
+pub mod validation;
 pub mod array;
 pub mod catalog;
 pub mod copy;
@@ -41,4 +42,3 @@ pub mod stats;
 pub mod transpiler;
 pub mod vector;
 pub mod auth;
-pub mod validation;
