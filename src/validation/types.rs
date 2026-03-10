@@ -140,6 +140,65 @@ pub fn validate_timezone(tz: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// Validates that a TIME type value doesn't contain timezone information
+/// TIME type should not accept timezone info like '15:36:39 America/New_York'
+pub fn validate_time_format(input: &str) -> Result<(), ValidationError> {
+    let input = input.trim_matches('\'');
+    let lower = input.to_lowercase();
+    
+    // Check for timezone indicators in TIME values
+    // Look for common timezone patterns
+    if lower.contains("america/") || 
+       lower.contains("europe/") || 
+       lower.contains("asia/") || 
+       lower.contains("australia/") ||
+       lower.contains("pacific/") || 
+       lower.contains("africa/") ||
+       lower.contains("atlantic/") ||
+       lower.contains("indian/") ||
+       lower.contains("antarctica/") ||
+       lower.contains("arctic/") ||
+       lower.contains(" us/") ||
+       lower.contains("gmt") || 
+       lower.contains("utc") || 
+       lower.contains("est") || 
+       lower.contains("cst") || 
+       lower.contains("mst") || 
+       lower.contains("pst") {
+        return Err(ValidationError {
+            code: "22007".to_string(),
+            message: format!("invalid input syntax for type time: \"{}\"", input),
+            position: None,
+        });
+    }
+    Ok(())
+}
+
+/// Parses a date string that may include era markers (BC/AD)
+/// PostgreSQL supports dates like '2040-04-10 BC'
+/// Returns the cleaned date string or an error if BC dates are encountered
+pub fn parse_date_with_era(input: &str) -> Result<String, ValidationError> {
+    // Trim whitespace and quotes
+    let trimmed = input.trim().trim_matches('\'');
+    let lower = trimmed.to_lowercase();
+    
+    if lower.ends_with(" bc") {
+        // BC date - SQLite doesn't support BC dates natively
+        return Err(ValidationError {
+            code: "0A000".to_string(),
+            message: "BC dates not yet supported".to_string(),
+            position: None,
+        });
+    } else if lower.ends_with(" ad") {
+        // AD date - strip the AD suffix and wrap back in quotes
+        let date_part = trimmed[..trimmed.len() - 3].trim();
+        return Ok(format!("'{}'", date_part));
+    }
+    
+    // Return original input if no era marker (preserve original formatting)
+    Ok(input.to_string())
+}
+
 /// Validates that a string is valid JSON
 #[allow(dead_code)]
 pub fn validate_json(value: &str) -> Result<(), ValidationError> {
@@ -715,5 +774,82 @@ mod tests {
         assert!(validate_varchar_value("", 1).is_ok());
         assert!(validate_varchar_value(" ", 1).is_ok());
         assert!(validate_varchar_value("a", 1).is_ok());
+    }
+
+    // Time format validation tests
+    #[test]
+    fn test_time_with_timezone_fails() {
+        // TIME type should not accept timezone
+        let result = validate_time_format("'15:36:39 America/New_York'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "22007");
+    }
+
+    #[test]
+    fn test_time_with_utc_fails() {
+        let result = validate_time_format("'10:00:00 UTC'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "22007");
+    }
+
+    #[test]
+    fn test_time_with_gmt_fails() {
+        let result = validate_time_format("'10:00:00 GMT'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "22007");
+    }
+
+    #[test]
+    fn test_time_with_est_fails() {
+        let result = validate_time_format("'10:00:00 EST'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "22007");
+    }
+
+    #[test]
+    fn test_valid_time() {
+        // Valid TIME without timezone
+        assert!(validate_time_format("'15:36:39'").is_ok());
+        assert!(validate_time_format("'10:00:00'").is_ok());
+        assert!(validate_time_format("'23:59:59.999999'").is_ok());
+    }
+
+    // Date era parsing tests
+    #[test]
+    fn test_bc_date_rejected() {
+        // BC dates should be rejected
+        let result = parse_date_with_era("'2040-04-10 BC'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "0A000");
+    }
+
+    #[test]
+    fn test_ad_date_stripped() {
+        // AD dates should have the AD suffix stripped
+        let result = parse_date_with_era("'2040-04-10 AD'");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "'2040-04-10'");
+    }
+
+    #[test]
+    fn test_regular_date_unchanged() {
+        // Regular dates without era marker should pass through
+        let result = parse_date_with_era("'2040-04-10'");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "'2040-04-10'");
+    }
+
+    #[test]
+    fn test_lowercase_bc_rejected() {
+        let result = parse_date_with_era("'2040-04-10 bc'");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "0A000");
+    }
+
+    #[test]
+    fn test_lowercase_ad_stripped() {
+        let result = parse_date_with_era("'2040-04-10 ad'");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "'2040-04-10'");
     }
 }
