@@ -60,6 +60,11 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         return "''".to_string();
     }
     
+    // Handle generate_series as a recursive CTE
+    if func_name_lower == "generate_series" {
+        return reconstruct_generate_series(func_call, ctx);
+    }
+    
     let func_parts: Vec<String> = func_call
         .funcname
         .iter()
@@ -589,5 +594,29 @@ pub(crate) fn parse_return_type(
     } else {
         Ok(("VOID".to_string(), ReturnTypeKind::Void, None))
     }
+}
+
+/// Reconstruct generate_series function as a recursive CTE
+/// generate_series(start, stop) -> WITH RECURSIVE _series(n) AS (SELECT start UNION ALL SELECT n + 1 FROM _series WHERE n < stop) SELECT n FROM _series
+fn reconstruct_generate_series(func_call: &FuncCall, ctx: &mut TranspileContext) -> String {
+    if func_call.args.len() < 2 || func_call.args.len() > 3 {
+        return "generate_series(/* invalid arguments */)".to_string();
+    }
+    
+    let start = reconstruct_node(&func_call.args[0], ctx);
+    let stop = reconstruct_node(&func_call.args[1], ctx);
+    let step = if func_call.args.len() == 3 {
+        reconstruct_node(&func_call.args[2], ctx)
+    } else {
+        "1".to_string()
+    };
+    
+    // Generate a unique CTE name
+    let cte_name = "_series";
+    
+    format!(
+        "(WITH RECURSIVE {}(n) AS (SELECT {} UNION ALL SELECT n + {} FROM {} WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM {})",
+        cte_name, start, step, cte_name, step, step, stop, step, step, stop, cte_name
+    )
 }
 

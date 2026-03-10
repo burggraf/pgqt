@@ -843,3 +843,20 @@ fn test_non_numeric_cast_no_trim() {
     assert!(result.contains("'  hello  '") || result.contains("' hello '"), 
             "TEXT cast should preserve or minimally trim whitespace: {}", result);
 }
+
+#[test]
+fn test_generate_series_basic() {
+    let sql = "SELECT * FROM generate_series(1, 5)";
+    let result = transpile(sql);
+    assert!(result.contains("WITH RECURSIVE"), "Should contain WITH RECURSIVE: {}", result);
+    assert!(result.contains("_series"), "Should contain _series: {}", result);
+    assert!(result.contains("UNION ALL"), "Should contain UNION ALL: {}", result);
+}
+
+#[test]
+fn test_generate_series_with_step() {
+    let sql = "SELECT * FROM generate_series(1, 10, 2)";
+    let result = transpile(sql);
+    assert!(result.contains("WITH RECURSIVE"), "Should contain WITH RECURSIVE: {}", result);
+    assert!(result.contains("2"), "Should contain step value: {}", result);
+}
