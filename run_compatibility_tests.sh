@@ -121,20 +121,17 @@ echo "PGQT Proxy: 127.0.0.1:$PROXY_PORT"
 echo "Results: $RESULTS_FILE"
 echo ""
 
-cd postgres-compatibility-suite
-
 # Export for the test runner
 export PG_DSN
 export PGQT_PORT="$PROXY_PORT"
 
-# Run the tests
-if pytest runner.py -v --tb=short 2>&1 | tee "$RESULTS_FILE"; then
+# Run the tests (from the compatibility suite directory, but write results to parent)
+(cd postgres-compatibility-suite && pytest runner.py -v --tb=short 2>&1) | tee "$RESULTS_FILE"
+if [ "${PIPESTATUS[0]}" -eq 0 ]; then
     TEST_STATUS="PASSED"
 else
     TEST_STATUS="FAILED"
 fi
-
-cd ..
 
 # Generate summary
 echo ""
@@ -143,10 +140,10 @@ echo -e "${BLUE}Test Summary${NC}"
 echo -e "${BLUE}==========================================${NC}"
 echo ""
 
-# Parse results
+# Parse results (only count lines that start with runner.py:: to avoid double-counting from summary)
 TOTAL_TESTS=$(grep -c "^runner.py::test_compatibility" "$RESULTS_FILE" || echo "0")
-PASSED_TESTS=$(grep -c "PASSED" "$RESULTS_FILE" || echo "0")
-FAILED_TESTS=$(grep -c "FAILED" "$RESULTS_FILE" || echo "0")
+PASSED_TESTS=$(grep "^runner.py::test_compatibility" "$RESULTS_FILE" | grep -c "PASSED" || echo "0")
+FAILED_TESTS=$(grep "^runner.py::test_compatibility" "$RESULTS_FILE" | grep -c "FAILED" || echo "0")
 
 # Calculate percentage
 if [ "$TOTAL_TESTS" -gt 0 ]; then
@@ -184,7 +181,7 @@ cat > "$SUMMARY_FILE" << EOF
 
 EOF
 
-grep "PASSED" "$RESULTS_FILE" | sed 's/.*::test_compatibility\[/\* /; s/\] PASSED//' >> "$SUMMARY_FILE"
+grep "^runner.py::test_compatibility" "$RESULTS_FILE" | grep "PASSED" | sed 's/.*::test_compatibility\[/\* /; s/\] PASSED.*//' >> "$SUMMARY_FILE"
 
 cat >> "$SUMMARY_FILE" << EOF
 
@@ -192,7 +189,7 @@ cat >> "$SUMMARY_FILE" << EOF
 
 EOF
 
-grep "FAILED" "$RESULTS_FILE" | sed 's/.*::test_compatibility\[/\* /; s/\] FAILED//' >> "$SUMMARY_FILE"
+grep "^runner.py::test_compatibility" "$RESULTS_FILE" | grep "FAILED" | sed 's/.*::test_compatibility\[/\* /; s/\] FAILED.*//' >> "$SUMMARY_FILE"
 
 cat >> "$SUMMARY_FILE" << EOF
 
