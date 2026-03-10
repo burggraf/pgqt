@@ -23,6 +23,8 @@ pub struct TranspileResult {
     pub errors: Vec<String>,
     /// Column aliases extracted from SELECT target_list (for result metadata preservation)
     pub column_aliases: Vec<String>,
+    /// PostgreSQL type names for each result column (for accurate type metadata)
+    pub column_types: Vec<Option<String>>,
 }
 
 /// Type of SQL operation
@@ -65,6 +67,8 @@ pub struct TranspileContext {
     pub in_insert_values: bool,
     /// Maximum recursion depth for recursive CTEs
     pub max_recursion_depth: usize,
+    /// Column types for result set metadata (aligned with column_aliases)
+    pub column_types: Vec<Option<String>>,
 }
 
 impl Default for TranspileContext {
@@ -88,6 +92,7 @@ impl TranspileContext {
             in_values_clause: false,
             in_insert_values: false,
             max_recursion_depth: 100,
+            column_types: Vec::new(),
         }
     }
 
@@ -105,6 +110,7 @@ impl TranspileContext {
             in_values_clause: false,
             in_insert_values: false,
             max_recursion_depth: 100,
+            column_types: Vec::new(),
         }
     }
 
@@ -124,6 +130,7 @@ impl TranspileContext {
             in_values_clause: false,
             in_insert_values: false,
             max_recursion_depth: 100,
+            column_types: Vec::new(),
         }
     }
     
@@ -162,5 +169,23 @@ impl TranspileContext {
 
     pub fn exit_subquery(&mut self) {
         self.in_subquery = false;
+    }
+
+    /// Set the type for a result column at the given index
+    pub fn set_column_type(&mut self, index: usize, type_name: Option<String>) {
+        if index >= self.column_types.len() {
+            self.column_types.resize(index + 1, None);
+        }
+        self.column_types[index] = type_name;
+    }
+
+    /// Get the type for a result column at the given index
+    pub fn get_column_type(&self, index: usize) -> Option<&String> {
+        self.column_types.get(index).and_then(|t| t.as_ref())
+    }
+
+    /// Clear all column types
+    pub fn clear_column_types(&mut self) {
+        self.column_types.clear();
     }
 }

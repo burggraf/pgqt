@@ -86,6 +86,7 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
                 }
 
                 let mut json_path = String::new();
+                let mut is_single_element = false;
                 for node in &ind.indirection {
                     if let Some(ref inner) = node.node {
                         match inner {
@@ -95,15 +96,28 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
                                     let trimmed = idx_sql.trim_matches('\'');
                                     if let Ok(idx) = trimmed.parse::<i64>() {
                                         json_path.push_str(&format!("[{}]", idx - 1));
+                                        is_single_element = true;
                                     } else {
                                         json_path.push_str(&format!("[{} - 1]", trimmed));
+                                        is_single_element = true;
                                     }
                                 }
                             }
                             NodeEnum::String(ref s) => {
                                 json_path.push_str(&format!(".{}", s.sval));
+                                is_single_element = true;
                             }
                             _ => {}
+                        }
+                    }
+                }
+                
+                // Track element type for array access
+                if is_single_element && !json_path.is_empty() {
+                    if let Some(ref arg_node) = ind.arg {
+                        if let Some(element_type) = extract_element_type_from_node(arg_node) {
+                            let current_index = ctx.column_types.len();
+                            ctx.set_column_type(current_index, Some(element_type));
                         }
                     }
                 }
@@ -192,4 +206,56 @@ pub(crate) fn reconstruct_bool_expr(bool_expr: &BoolExpr, ctx: &mut TranspileCon
 /// Check if a node represents LIMIT ALL
 pub(crate) fn is_limit_all(node: &Node) -> bool {
     utils::is_limit_all(node)
+}
+
+/// Extract the element type from an array type cast node
+/// For example, '{1,2,3}'::int[] -> "int4"
+fn extract_element_type_from_node(node: &Node) -> Option<String> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    if let Some(ref inner) = node.node {
+        match inner {
+            NodeEnum::TypeCast(ref type_cast) => {
+                // Extract the type name from the type cast
+                if let Some(ref type_name) = type_cast.type_name {
+                    let type_str = crate::transpiler::utils::extract_original_type(&Some(type_name.clone()));
+                    let upper = type_str.to_uppercase();
+                    
+                    // Check if it's an array type and extract the element type
+                    if upper.ends_with("[]") {
+                        let element_type = type_str[..type_str.len() - 2].to_lowercase();
+                        return normalize_type_to_pg_type(&element_type);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Normalize a type name to PostgreSQL standard type name
+fn normalize_type_to_pg_type(type_name: &str) -> Option<String> {
+    let upper = type_name.to_uppercase();
+    
+    match upper.as_str() {
+        "INT" | "INTEGER" => Some("int4".to_string()),
+        "BIGINT" | "INT8" => Some("int8".to_string()),
+        "SMALLINT" | "INT2" => Some("int2".to_string()),
+        "REAL" | "FLOAT4" => Some("float4".to_string()),
+        "DOUBLE" | "FLOAT8" | "DOUBLE PRECISION" => Some("float8".to_string()),
+        "TEXT" => Some("text".to_string()),
+        "VARCHAR" | "CHARACTER VARYING" => Some("varchar".to_string()),
+        "CHAR" | "CHARACTER" | "BPCHAR" => Some("bpchar".to_string()),
+        "BOOL" | "BOOLEAN" => Some("bool".to_string()),
+        "NUMERIC" | "DECIMAL" => Some("numeric".to_string()),
+        "DATE" => Some("date".to_string()),
+        "TIME" => Some("time".to_string()),
+        "TIMESTAMP" => Some("timestamp".to_string()),
+        "TIMESTAMPTZ" => Some("timestamptz".to_string()),
+        "JSON" => Some("json".to_string()),
+        "JSONB" => Some("jsonb".to_string()),
+        "UUID" => Some("uuid".to_string()),
+        _ => Some(type_name.to_lowercase()),
+    }
 }

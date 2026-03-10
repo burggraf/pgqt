@@ -67,19 +67,19 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
 
         if is_select {
-            self.execute_select_with_params(&conn, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases)
+            self.execute_select_with_params(&conn, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
         } else {
             self.execute_statement_with_params(&conn, &sqlite_sql, params)
         }
     }
 
     /// Execute a SELECT statement with parameters
-    fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String], column_aliases: &[String]) -> Result<Vec<Response>> {
+    fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String], column_aliases: &[String], column_types: &[Option<String>]) -> Result<Vec<Response>> {
         let mut stmt = conn.prepare(sql)?;
         let col_count = stmt.column_count();
 
         // Build field info
-        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases)?);
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases, column_types)?);
 
         let mut data_rows = Vec::new();
         
@@ -455,7 +455,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let col_count = stmt.column_count();
 
         // Build field info using the already-locked connection
-        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, &[])?);
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, &[], &[])?);
 
         let mut data_rows = Vec::new();
         let mut rows = stmt.query([])?;
@@ -504,6 +504,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         referenced_tables: &[String],
         conn: &Connection,
         column_aliases: &[String],
+        column_types: &[Option<String>],
     ) -> Result<Vec<FieldInfo>> {
         use crate::handler::rewriter::{map_original_type_to_pg_type, ColumnFieldInfo};
         use pgwire::api::results::{FieldFormat, FieldInfo};

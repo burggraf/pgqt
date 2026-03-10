@@ -106,6 +106,7 @@ pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> Transpil
                 operation_type: OperationType::OTHER,
                 errors: ctx.errors.clone(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             }
         }
         Err(_) => {
@@ -118,6 +119,7 @@ pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> Transpil
                 operation_type: OperationType::OTHER,
                 errors: ctx.errors.clone(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             }
         }
     }
@@ -144,6 +146,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::SELECT,
                     errors: Vec::new(),
                     column_aliases,
+                    column_types: Vec::new(),
                 }
             }
             NodeEnum::DefineStmt(ref define_stmt) => TranspileResult {
@@ -154,6 +157,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::CreateEnumStmt(ref create_enum_stmt) => TranspileResult {
                 sql: ddl::reconstruct_create_enum_stmt(create_enum_stmt, ctx),
@@ -163,6 +167,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::CreateStmt(ref create_stmt) => {
                 let mut res = ddl::reconstruct_create_stmt_with_metadata(create_stmt, ctx);
@@ -177,6 +182,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::INSERT,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::UpdateStmt(ref update_stmt) => TranspileResult {
                 sql: dml::reconstruct_update_stmt(update_stmt, ctx),
@@ -186,6 +192,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::UPDATE,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::DeleteStmt(ref delete_stmt) => TranspileResult {
                 sql: dml::reconstruct_delete_stmt(delete_stmt, ctx),
@@ -195,6 +202,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DELETE,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::VariableSetStmt(ref set_stmt) => {
                 // Handle SET ROLE
@@ -211,6 +219,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                                         operation_type: OperationType::OTHER,
                                         errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                                     };
                                 }
                             }
@@ -225,6 +234,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
@@ -235,6 +245,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::SELECT,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::CreateRoleStmt(ref create_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_create_role_stmt(create_role_stmt, ctx),
@@ -244,6 +255,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::AlterRoleStmt(ref alter_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_alter_role_stmt(alter_role_stmt, ctx),
@@ -253,6 +265,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_drop_role_stmt(drop_role_stmt),
@@ -262,6 +275,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::GrantStmt(ref grant_stmt) => TranspileResult {
                 sql: rls::reconstruct_grant_stmt(grant_stmt),
@@ -271,6 +285,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::GrantRoleStmt(ref grant_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_grant_role_stmt(grant_role_stmt),
@@ -280,6 +295,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::AlterTableStmt(ref alter_stmt) => {
                 let sql = ddl::reconstruct_alter_table_stmt(alter_stmt, ctx);
@@ -291,6 +307,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::DropStmt(ref drop_stmt) => {
@@ -303,6 +320,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::IndexStmt(ref index_stmt) => {
@@ -315,6 +333,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::CopyStmt(ref copy_stmt) => {
@@ -328,6 +347,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                         operation_type: OperationType::OTHER,
                         errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                     }
                 }
             }
@@ -341,6 +361,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::ViewStmt(ref view_stmt) => {
@@ -353,6 +374,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::VacuumStmt(ref _vacuum_stmt) => {
@@ -364,6 +386,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::CommentStmt(_) => {
@@ -375,6 +398,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::AlterDefaultPrivilegesStmt(ref stmt) => {
@@ -386,6 +410,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::AlterOwnerStmt(ref stmt) => TranspileResult {
@@ -396,6 +421,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
             NodeEnum::CreatePolicyStmt(_) => {
                 TranspileResult {
@@ -406,6 +432,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::CreateTrigStmt(_) => {
@@ -417,6 +444,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             NodeEnum::DoStmt(_) => {
@@ -428,6 +456,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
                 }
             }
             _ => TranspileResult {
@@ -438,6 +467,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 operation_type: OperationType::OTHER,
                 errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
             },
         }
     } else {
@@ -449,6 +479,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             operation_type: OperationType::OTHER,
             errors: Vec::new(),
                 column_aliases: Vec::new(),
+                column_types: Vec::new(),
         }
     };
 

@@ -920,7 +920,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         
         let conn = self.conn().lock().unwrap();
         if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
-            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases)
+            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases, &transpile_result.column_types)
                 .unwrap_or_default();
             
             // For parameters, we don't know the types yet easily, so return UNKNOWN or derived from statement.parameter_types
@@ -951,7 +951,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         
         let conn = self.conn().lock().unwrap();
         if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
-            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases)
+            let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases, &transpile_result.column_types)
                 .unwrap_or_default();
             debug!("Returning {} fields for Describe portal", fields.len());
             return Ok(DescribePortalResponse::new(fields));
