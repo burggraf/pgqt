@@ -35,6 +35,10 @@ pub struct PortConfig {
     /// Disable password authentication (trust mode)
     #[serde(default)]
     pub trust_mode: bool,
+
+    /// Auto-create users that don't exist (default: false for security)
+    #[serde(default)]
+    pub auto_create_users: bool,
 }
 
 /// Top-level configuration structure
@@ -92,6 +96,7 @@ impl AppConfig {
         error_output: Option<String>,
         debug: bool,
         trust_mode: bool,
+        auto_create_users: bool,
     ) -> Self {
         Self {
             ports: vec![PortConfig {
@@ -102,6 +107,7 @@ impl AppConfig {
                 error_output,
                 debug,
                 trust_mode,
+                auto_create_users,
             }],
         }
     }

@@ -67,14 +67,20 @@ impl PasswordAuthHandler {
                 Ok(verify_password(password, &stored_hash))
             }
             None => {
-                // User doesn't exist - auto-create with no password for backward compatibility
-                // This maintains existing behavior for new users
-                conn.execute(
-                    "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
-                     VALUES (?1, 1, 1, 1, 1, 1)",
-                    [user]
-                )?;
-                Ok(true)
+                // User doesn't exist - check if auto-create is enabled
+                if self.auto_create_users {
+                    // Auto-create user with no password for development convenience
+                    conn.execute(
+                        "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
+                         VALUES (?1, 1, 1, 1, 1, 1)",
+                        [user]
+                    )?;
+                    Ok(true)
+                } else {
+                    // Reject authentication - user doesn't exist
+                    // Return PostgreSQL-compatible error (28P01 for security)
+                    Ok(false)
+                }
             }
         }
     }
@@ -428,8 +434,14 @@ if __name__ == "__main__":
    - Recommend SSL/TLS for production
 
 3. **Trust Mode**: 
-   - `--trust-mode` flag for backward compatibility
+   - `--trust-mode` flag to disable all authentication
    - Should log warning when enabled
+   - Never use in production
+
+4. **Auto-Create Users Mode**:
+   - `--auto-create-users` flag for development convenience
+   - Auto-creates users on first connection with superuser privileges
+   - Insecure - intended for development only
 
 ---
 
@@ -445,10 +457,12 @@ if __name__ == "__main__":
 
 ## Success Criteria
 
-- [ ] CREATE USER WITH PASSWORD stores hashed password
-- [ ] ALTER USER WITH PASSWORD updates password
-- [ ] Connection rejected with wrong password
-- [ ] Connection accepted with correct password
-- [ ] Trust mode flag works for backward compatibility
-- [ ] Users without passwords can still connect
-- [ ] All tests pass
+- [x] CREATE USER WITH PASSWORD stores hashed password
+- [x] ALTER USER WITH PASSWORD updates password
+- [x] Connection rejected with wrong password
+- [x] Connection accepted with correct password
+- [x] Trust mode flag works for backward compatibility
+- [x] Users without passwords can still connect
+- [x] `--auto-create-users` flag enables auto-user-creation
+- [x] Without `--auto-create-users`, unknown users are rejected
+- [x] All tests pass

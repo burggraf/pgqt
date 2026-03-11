@@ -12,3 +12,4 @@ prompts/*
 .worktrees/
 .pi/
 compatibility_results/
+postgres-compatibility-suite/test_results.json

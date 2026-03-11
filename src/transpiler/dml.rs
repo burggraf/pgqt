@@ -1054,44 +1054,41 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
     // SET clause - strip table alias from column references in values
     parts.push("set".to_string());
     
-    // Check if this is a row constructor: SET (a, b) = (1, 2)
+    // Handle row constructor syntax: SET (a, b) = (1, 2)
+    // pg_query parses this as multiple ResTarget entries, each with a MultiAssignRef value
     let mut row_constructor_targets: Vec<(String, String)> = Vec::new();
     let mut is_row_constructor = false;
     
     for n in &stmt.target_list {
         if let Some(ref inner) = n.node {
             if let NodeEnum::ResTarget(target) = inner {
-                // Check if value is a List (row constructor values)
+                // Check if value is a MultiAssignRef (row constructor values)
                 if let Some(ref val_node) = target.val {
                     if let Some(ref val_inner) = val_node.node {
-                        if let NodeEnum::List(val_list) = val_inner {
-                            // This is a row constructor - parse column names from target.name
-                            // which may be a comma-separated list
-                            let col_names: Vec<String> = target.name.split(',')
-                                .map(|s| s.trim().to_lowercase())
-                                .filter(|s| !s.is_empty())
-                                .collect();
+                        if let NodeEnum::MultiAssignRef(multi_ref) = val_inner {
+                            // This is a row constructor - store the column name and extract value
+                            let col_name = target.name.to_lowercase();
                             
-                            // Parse values from the list
-                            let values: Vec<String> = val_list.items.iter()
-                                .map(|v| {
-                                    let mut val = reconstruct_node(v, ctx);
-                                    if let Some(ref alias) = table_alias {
-                                        val = remove_table_alias_from_columns(&val, alias);
-                                    }
-                                    if table_alias.is_some() {
-                                        if let Some(ref orig_table) = original_table_name {
-                                            val = remove_table_alias_from_columns(&val, orig_table);
+                            // Extract the specific value for this column from the source
+                            if let Some(ref source_node) = multi_ref.source {
+                                if let Some(ref source_inner) = source_node.node {
+                                    if let NodeEnum::RowExpr(row_expr) = source_inner {
+                                        // Get the value at position (colno - 1) since colno is 1-indexed
+                                        let col_idx = (multi_ref.colno as usize).saturating_sub(1);
+                                        if col_idx < row_expr.args.len() {
+                                            let arg = &row_expr.args[col_idx];
+                                            let mut val = reconstruct_node(arg, ctx);
+                                            if let Some(ref alias) = table_alias {
+                                                val = remove_table_alias_from_columns(&val, alias);
+                                            }
+                                            if table_alias.is_some() {
+                                                if let Some(ref orig_table) = original_table_name {
+                                                    val = remove_table_alias_from_columns(&val, orig_table);
+                                                }
+                                            }
+                                            row_constructor_targets.push((col_name, val));
                                         }
                                     }
-                                    val
-                                })
-                                .collect();
-                            
-                            // Pair up columns with values
-                            for (i, col_name) in col_names.iter().enumerate() {
-                                if i < values.len() {
-                                    row_constructor_targets.push((col_name.clone(), values[i].clone()));
                                 }
                             }
                             is_row_constructor = true;

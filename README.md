@@ -324,6 +324,64 @@ INSERT INTO orders VALUES (1, 1, 99.99); -- ✅ Success
 DELETE FROM users WHERE id = 1;         -- ❌ Permission denied
 ```
 
+### Authentication Modes
+
+**`pgqt`** supports multiple authentication modes for different security requirements:
+
+#### Password Authentication (Default)
+
+By default, `pgqt` requires valid credentials:
+
+```bash
+# Start with password authentication (default)
+pgqt --database myapp.db
+```
+
+Users must exist in the `pg_authid` catalog and provide correct passwords:
+
+```sql
+-- Create a user with password
+CREATE USER app_user WITH PASSWORD 'secure_password';
+```
+
+#### Trust Mode
+
+For development or trusted environments, disable authentication entirely:
+
+```bash
+# Accept any connection without authentication
+pgqt --database myapp.db --trust-mode
+```
+
+⚠️ **Warning:** Trust mode allows any client to connect as any user without credentials. Never use in production.
+
+#### Auto-Create Users Mode
+
+For development convenience, `pgqt` can automatically create users on first connection:
+
+```bash
+# Auto-create users that don't exist
+pgqt --database myapp.db --auto-create-users
+```
+
+When enabled:
+- Any username can connect (no prior `CREATE USER` needed)
+- Auto-created users get full superuser privileges
+- No password is set for auto-created users
+- Users can authenticate with any password (or no password)
+
+⚠️ **Security Warning:** This mode is insecure and intended for development only. Auto-created users have unrestricted access to the database.
+
+**Example: Development Setup**
+
+```bash
+# Use auto-create-users for rapid development
+pgqt --database dev.db --auto-create-users --debug
+
+# Then connect with any username
+psql -h 127.0.0.1 -p 5432 -U any_username
+```
+
 ### Row-Level Security (RLS)
 
 **`pgqt`** implements PostgreSQL-compatible Row-Level Security (RLS), enabling fine-grained access control at the row level based on the current user or session context.
@@ -470,6 +528,7 @@ Options:
   -e, --error-output <ERROR>     Where to send error output [default: <db>.error.log]
   -D, --debug                    Enable debug output
       --trust-mode               Disable password authentication (trust mode)
+      --auto-create-users        Auto-create users that don't exist (insecure, for development only)
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -538,6 +597,16 @@ Create a JSON configuration file (e.g., `pgqt.json`):
       "error_output": null,
       "debug": true,
       "trust_mode": true
+    },
+    {
+      "port": 5435,
+      "host": "127.0.0.1",
+      "database": "/var/lib/pgqt/dev.db",
+      "output": "stdout",
+      "error_output": "/var/log/pgqt/dev.error.log",
+      "debug": true,
+      "trust_mode": false,
+      "auto_create_users": true
     }
   ]
 }
@@ -571,6 +640,7 @@ pgqt --config pgqt.json
 | `error_output` | No | `<db>.error.log` | Error output destination |
 | `debug` | No | `false` | Enable debug mode |
 | `trust_mode` | No | `false` | Disable password authentication |
+| `auto_create_users` | No | `false` | Auto-create users on first connection (insecure, for development) |
 
 ### Environment Variables
 
@@ -582,6 +652,7 @@ pgqt --config pgqt.json
 | `PGQT_DB`           | `test.db`        | SQLite database file path |
 | `PGQT_OUTPUT`       | `STDOUT`         | Server output destination |
 | `PGQT_ERROR_OUTPUT` | `<db>.error.log` | Error output destination  |
+| `PGQT_AUTO_CREATE_USERS` | - | Auto-create users on first connection |
 
 ### Programmatic Usage
 

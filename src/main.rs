@@ -140,6 +140,10 @@ struct Cli {
     /// Disable password authentication (trust mode)
     #[arg(long, env = "PGQT_TRUST_MODE", help = "Disable password authentication, allow any connection")]
     trust_mode: bool,
+
+    /// Auto-create users that don't exist (insecure, for development only)
+    #[arg(long, env = "PGQT_AUTO_CREATE_USERS", help = "Auto-create users that don't exist (insecure, for development only)")]
+    auto_create_users: bool,
 }
 
 impl Cli {
@@ -155,6 +159,7 @@ impl Cli {
 struct HandlerFactory {
     handler: Arc<SqliteHandler>,
     trust_mode: bool,
+    auto_create_users: bool,
 }
 
 impl PgWireServerHandlers for HandlerFactory {
@@ -164,7 +169,10 @@ impl PgWireServerHandlers for HandlerFactory {
             Arc::new(auth::FlexibleAuthHandler::new_trust())
         } else {
             // Password authentication mode
-            Arc::new(auth::FlexibleAuthHandler::new_password(self.handler.conn.clone()))
+            Arc::new(auth::FlexibleAuthHandler::new_password(
+                self.handler.conn.clone(),
+                self.auto_create_users,
+            ))
         }
     }
 
@@ -242,6 +250,7 @@ async fn main() -> Result<()> {
             cli.error_output.map(|o| o.to_string()),
             cli.debug,
             cli.trust_mode,
+            cli.auto_create_users,
         )
     };
 
@@ -303,6 +312,7 @@ async fn run_listener(config: PortConfig) -> Result<()> {
     let factory = Arc::new(HandlerFactory {
         handler: handler.clone(),
         trust_mode: config.trust_mode,
+        auto_create_users: config.auto_create_users,
     });
 
     // Accept loop

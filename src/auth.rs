@@ -15,11 +15,12 @@ use rusqlite::{Connection, OptionalExtension};
 #[derive(Clone)]
 pub struct PasswordAuthHandler {
     conn: Arc<std::sync::Mutex<Connection>>,
+    auto_create_users: bool,
 }
 
 impl PasswordAuthHandler {
-    pub fn new(conn: Arc<std::sync::Mutex<Connection>>) -> Self {
-        Self { conn }
+    pub fn new(conn: Arc<std::sync::Mutex<Connection>>, auto_create_users: bool) -> Self {
+        Self { conn, auto_create_users }
     }
     
     /// Check if user requires a password
@@ -43,13 +44,18 @@ impl PasswordAuthHandler {
                 Ok((true, needs_password, can_login))
             }
             None => {
-                // Auto-create user with no password
-                conn.execute(
-                    "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
-                     VALUES (?1, 1, 1, 1, 1, 1)",
-                    [user]
-                )?;
-                Ok((false, false, true)) // New user, no password needed, can login
+                // Auto-create user if enabled (development mode)
+                if self.auto_create_users {
+                    conn.execute(
+                        "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
+                         VALUES (?1, 1, 1, 1, 1, 1)",
+                        [user]
+                    )?;
+                    Ok((false, false, true)) // New user, no password needed, can login
+                } else {
+                    // User doesn't exist and auto-create is disabled
+                    Ok((false, false, false))
+                }
             }
         }
     }
@@ -86,13 +92,19 @@ impl PasswordAuthHandler {
                 Ok(verify_password(password, &stored_hash, user))
             }
             None => {
-                // User doesn't exist - auto-create with no password for backward compatibility
-                conn.execute(
-                    "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
-                     VALUES (?1, 1, 1, 1, 1, 1)",
-                    [user]
-                )?;
-                Ok(true)
+                // User doesn't exist
+                if self.auto_create_users {
+                    // Auto-create user with no password for backward compatibility
+                    conn.execute(
+                        "INSERT INTO __pg_authid__ (rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin) 
+                         VALUES (?1, 1, 1, 1, 1, 1)",
+                        [user]
+                    )?;
+                    Ok(true)
+                } else {
+                    // Reject authentication - user doesn't exist
+                    Ok(false)
+                }
             }
         }
     }
@@ -125,9 +137,23 @@ impl StartupHandler for PasswordAuthHandler {
                 
                 // Check if user needs a password
                 match self.check_user_password_status(&user) {
-                    Ok((_exists, needs_password, can_login)) => {
+                    Ok((exists, needs_password, can_login)) => {
+                        if !exists {
+                            // User doesn't exist - return PostgreSQL-compatible auth error
+                            // Using 28P01 (invalid_password) for security (prevents user enumeration)
+                            let error_info = ErrorInfo::new(
+                                "FATAL".to_owned(),
+                                "28P01".to_owned(),
+                                format!("password authentication failed for user \"{}\"", user),
+                            );
+                            let error = ErrorResponse::from(error_info);
+                            client.feed(PgWireBackendMessage::ErrorResponse(error)).await?;
+                            client.close().await?;
+                            return Ok(());
+                        }
+                        
                         if !can_login {
-                            // User cannot login
+                            // User exists but cannot login
                             let error_info = ErrorInfo::new(
                                 "FATAL".to_owned(),
                                 "28000".to_owned(),
@@ -212,8 +238,8 @@ impl FlexibleAuthHandler {
         Self::Trust
     }
     
-    pub fn new_password(conn: Arc<std::sync::Mutex<Connection>>) -> Self {
-        Self::Password(PasswordAuthHandler::new(conn))
+    pub fn new_password(conn: Arc<std::sync::Mutex<Connection>>, auto_create_users: bool) -> Self {
+        Self::Password(PasswordAuthHandler::new(conn, auto_create_users))
     }
 }
 
