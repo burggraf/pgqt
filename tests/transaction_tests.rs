@@ -28,19 +28,19 @@ fn test_transaction_rollback() {
     cleanup_db(&db_path);
     let handler = SqliteHandler::new(&db_path).unwrap();
 
-    handler.execute_query("CREATE TABLE tx_test (id INT)").unwrap();
+    handler.execute_query(0, "CREATE TABLE tx_test (id INT)").unwrap();
 
-    let res = handler.execute_query("BEGIN").unwrap();
+    let res = handler.execute_query(0, "BEGIN").unwrap();
     assert_tag(&res[0], "BEGIN");
 
-    let res = handler.execute_query("INSERT INTO tx_test VALUES (1)").unwrap();
+    let res = handler.execute_query(0, "INSERT INTO tx_test VALUES (1)").unwrap();
     assert_tag(&res[0], "INSERT 0");
 
-    let res = handler.execute_query("ROLLBACK").unwrap();
+    let res = handler.execute_query(0, "ROLLBACK").unwrap();
     assert_tag(&res[0], "ROLLBACK");
 
     // Verify row does not exist
-    let res = handler.execute_query("SELECT * FROM tx_test").unwrap();
+    let res = handler.execute_query(0, "SELECT * FROM tx_test").unwrap();
     match &res[0] {
         Response::Query(_q) => {
             // Can't easily count stream items here without async, 
@@ -61,26 +61,26 @@ fn test_transaction_error_state() {
     cleanup_db(&db_path);
     let handler = SqliteHandler::new(&db_path).unwrap();
 
-    handler.execute_query("CREATE TABLE tx_error_test (id INT)").unwrap();
+    handler.execute_query(0, "CREATE TABLE tx_error_test (id INT)").unwrap();
 
-    handler.execute_query("BEGIN").unwrap();
+    handler.execute_query(0, "BEGIN").unwrap();
 
     // Invalid SQL
-    let res = handler.execute_query("INSERT INTO non_existent_table VALUES (1)");
+    let res = handler.execute_query(0, "INSERT INTO non_existent_table VALUES (1)");
     assert!(res.is_err());
 
     // Valid SQL should now fail because transaction is in error state
-    let res = handler.execute_query("INSERT INTO tx_error_test VALUES (2)");
+    let res = handler.execute_query(0, "INSERT INTO tx_error_test VALUES (2)");
     assert!(res.is_err());
     let err_msg = res.unwrap_err().to_string();
     assert!(err_msg.contains("25P02") || err_msg.contains("current transaction is aborted"));
 
     // ROLLBACK should succeed
-    let res = handler.execute_query("ROLLBACK").unwrap();
+    let res = handler.execute_query(0, "ROLLBACK").unwrap();
     assert_tag(&res[0], "ROLLBACK");
 
     // Now valid SQL should succeed again
-    let res = handler.execute_query("INSERT INTO tx_error_test VALUES (3)").unwrap();
+    let res = handler.execute_query(0, "INSERT INTO tx_error_test VALUES (3)").unwrap();
     assert_tag(&res[0], "INSERT 0");
 
     cleanup_db(&db_path);
@@ -92,16 +92,16 @@ fn test_transaction_savepoint() {
     cleanup_db(&db_path);
     let handler = SqliteHandler::new(&db_path).unwrap();
 
-    handler.execute_query("CREATE TABLE tx_sp_test (id INT)").unwrap();
+    handler.execute_query(0, "CREATE TABLE tx_sp_test (id INT)").unwrap();
 
-    handler.execute_query("BEGIN").unwrap();
-    handler.execute_query("INSERT INTO tx_sp_test VALUES (1)").unwrap();
+    handler.execute_query(0, "BEGIN").unwrap();
+    handler.execute_query(0, "INSERT INTO tx_sp_test VALUES (1)").unwrap();
     
-    handler.execute_query("SAVEPOINT my_sp").unwrap();
-    handler.execute_query("INSERT INTO tx_sp_test VALUES (2)").unwrap();
+    handler.execute_query(0, "SAVEPOINT my_sp").unwrap();
+    handler.execute_query(0, "INSERT INTO tx_sp_test VALUES (2)").unwrap();
     
-    handler.execute_query("ROLLBACK TO SAVEPOINT my_sp").unwrap();
-    handler.execute_query("COMMIT").unwrap();
+    handler.execute_query(0, "ROLLBACK TO SAVEPOINT my_sp").unwrap();
+    handler.execute_query(0, "COMMIT").unwrap();
 
     let conn = handler.conn.lock().unwrap();
     let count: i64 = conn.query_row("SELECT count(*) FROM tx_sp_test", [], |row| row.get(0)).unwrap();

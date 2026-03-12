@@ -25,25 +25,26 @@ use rusqlite::Statement;
 /// Trait for query execution methods
 pub trait QueryExecution: HandlerUtils + Clone {
     fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider>;
-    
+
     /// Execute a SQL query with optional parameters and return the results
-    fn execute_query_params(&self, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+    /// Uses per-session connection identified by client_id
+    fn execute_query_params(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
         // Set the current user from the session for current_user() function
-        if let Some(session) = self.sessions().get(&0) {
+        if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
 
         // Check transaction error state before executing
         {
-            let session = self.sessions().get(&0).unwrap_or_else(|| {
-                self.sessions().insert(0, SessionContext {
+            let session = self.sessions().get(&client_id).unwrap_or_else(|| {
+                self.sessions().insert(client_id, SessionContext {
                     authenticated_user: "postgres".to_string(),
                     current_user: "postgres".to_string(),
                     search_path: SearchPath::default(),
                     transaction_status: crate::handler::TransactionStatus::Idle,
                     savepoints: Vec::new(),
                 });
-                self.sessions().get(&0).unwrap()
+                self.sessions().get(&client_id).unwrap()
             });
 
             if session.transaction_status == crate::handler::TransactionStatus::InError {
@@ -87,14 +88,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
         // Apply RLS
         let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
 
-        let conn = self.conn().lock().unwrap();
+        // Use per-session connection instead of shared connection
+        let conn = self.get_session_connection(client_id)?;
+        let conn_guard = conn.lock().unwrap();
         let trimmed_lower = sqlite_sql.trim().to_lowercase();
         let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
 
         if is_select {
-            self.execute_select_with_params(&conn, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
+            self.execute_select_with_params(&conn_guard, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
         } else {
-            self.execute_statement_with_params(&conn, &sqlite_sql, params)
+            self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
         }
     }
 
@@ -189,7 +192,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
     }
 
     /// Execute a SQL query and return the results
-    fn execute_query(&self, sql: &str) -> Result<Vec<Response>> {
+    fn execute_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
         // Set the current user from the session for current_user() function
         if let Some(session) = self.sessions().get(&0) {
             crate::handler::set_current_user(&session.current_user);

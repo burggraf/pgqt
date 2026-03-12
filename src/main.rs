@@ -196,6 +196,10 @@ impl SimpleQueryHandler for SqliteHandler {
     where
         C: ClientInfo + Unpin + Send + Sync,
     {
+        // Get unique client identifier from PostgreSQL PID
+        let (pid, _) = client.pid_and_secret_key();
+        let client_id = pid as u32;
+
         // Get the current user from client metadata
         let metadata = client.metadata();
         let user = metadata.get("user").map(|s| s.to_string()).unwrap_or_else(|| "postgres".to_string());
@@ -204,24 +208,24 @@ impl SimpleQueryHandler for SqliteHandler {
         crate::handler::set_current_user(&user);
 
         // Initialize session from client metadata if not already set
-        if self.sessions.is_empty() {
-            self.sessions.insert(0, SessionContext {
+        if !self.sessions.contains_key(&client_id) {
+            self.sessions.insert(client_id, SessionContext {
                 authenticated_user: user.clone(),
                 current_user: user,
                 search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
             });
         } else {
             // Update the existing session with current user
-            if let Some(mut session) = self.sessions.get_mut(&0) {
+            if let Some(mut session) = self.sessions.get_mut(&client_id) {
                 session.current_user = user.clone();
                 session.authenticated_user = user;
             }
         }
-        debug!("Received query: {}", query);
-        match self.execute_query(query) {
+        debug!("Received query from client {}: {}", client_id, query);
+        match self.execute_query(client_id, query) {
             Ok(responses) => Ok(responses),
             Err(e) => {
-                eprintln!("Error executing query: {}", e);
+                eprintln!("Error executing query for client {}: {}", client_id, e);
                 let pg_err = PgError::from_anyhow(e);
                 Ok(vec![Response::Error(Box::new(pg_err.into_error_info()))])
             }

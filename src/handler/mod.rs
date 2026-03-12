@@ -867,7 +867,7 @@ impl ExtendedQueryHandler for SqliteHandler {
 
     async fn do_query<C>(
         &self,
-        _client: &mut C,
+        client: &mut C,
         portal: &Portal<Self::Statement>,
         _max_rows: usize,
     ) -> PgWireResult<Response>
@@ -876,10 +876,14 @@ impl ExtendedQueryHandler for SqliteHandler {
         C::Error: std::fmt::Debug,
         pgwire::error::PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
+        // Get unique client identifier from PostgreSQL PID
+        let (pid, _) = client.pid_and_secret_key();
+        let client_id = pid as u32;
+
         let query = &portal.statement.statement;
         let params = &portal.parameters;
         
-        debug!("Extended query: {}", query);
+        debug!("Extended query from client {}: {}", client_id, query);
         
         // Convert params to Option<String> for execute_query_params
         let mut param_strings = Vec::new();
@@ -924,7 +928,7 @@ impl ExtendedQueryHandler for SqliteHandler {
             }
         }
 
-        match self.execute_query_params(query, &param_strings) {
+        match self.execute_query_params(client_id, query, &param_strings) {
             Ok(mut responses) => {
                 if let Some(resp) = responses.pop() {
                     // Force RowDescription for SELECTs if not already sent by client Describe
