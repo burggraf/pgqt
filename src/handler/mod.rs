@@ -21,7 +21,7 @@ use async_trait::async_trait;
 
 use crate::debug;
 use crate::catalog::{init_catalog, init_system_views};
-use crate::connection_pool::ConnectionPool;
+use crate::connection_pool::{ConnectionHandle, ConnectionPool};
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
 
@@ -75,6 +75,8 @@ pub struct SqliteHandler {
     pub conn: Arc<Mutex<Connection>>,
     pub conn_pool: ConnectionPool,
     pub sessions: Arc<DashMap<u32, SessionContext>>,
+    /// Per-client connections checked out from the pool
+    pub client_connections: Arc<DashMap<u32, (Arc<Mutex<Connection>>, ConnectionHandle)>>,
     pub schema_manager: SchemaManager,
     pub copy_handler: copy::CopyHandler,
     pub functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>,
@@ -98,6 +100,7 @@ impl SqliteHandler {
             conn: conn_arc,
             conn_pool,
             sessions: Arc::new(DashMap::new()),
+            client_connections: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
             functions: Arc::new(DashMap::new()),
@@ -702,6 +705,40 @@ impl SqliteHandler {
         })?;
 
         Ok(())
+    }
+
+    /// Get or checkout a per-session connection for a client
+    /// 
+    /// If the client already has a connection checked out, returns a clone of the Arc.
+    /// Otherwise, checks out a new connection from the pool.
+    pub fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>> {
+        // Check if client already has a connection
+        if let Some(entry) = self.client_connections.get(&client_id) {
+            let (conn, _handle) = entry.value();
+            return Ok(conn.clone());
+        }
+
+        // Checkout a new connection from the pool
+        let (conn, handle) = self.conn_pool.checkout(client_id)?;
+        self.client_connections.insert(client_id, (conn.clone(), handle));
+        Ok(conn)
+    }
+
+    /// Return a per-session connection to the pool
+    /// 
+    /// Called when a client disconnects or when explicitly returning the connection.
+    pub fn return_session_connection(&self, client_id: u32) {
+        if let Some((_, (conn, handle))) = self.client_connections.remove(&client_id) {
+            // The handle will be dropped, which marks the connection as returned in the pool
+            // Then we return the actual connection
+            drop(handle);
+            self.conn_pool.return_connection(conn);
+        }
+    }
+
+    /// Get the shared legacy connection (for backwards compatibility during migration)
+    pub fn get_shared_connection(&self) -> Arc<Mutex<Connection>> {
+        self.conn.clone()
     }
 }
 
