@@ -412,6 +412,92 @@ def test_setof_function_in_select_list():
     finally:
         stop_proxy(proc)
 
+def test_plpgsql_function_call():
+    """Test calling a PL/pgSQL function via SELECT."""
+    proc = start_proxy()
+    try:
+        conn = psycopg2.connect(
+            host=PROXY_HOST,
+            port=PROXY_PORT,
+            database="postgres",
+            user="postgres",
+            password="postgres"
+        )
+        cur = conn.cursor()
+        
+        # Create a simple PL/pgSQL function
+        cur.execute("""
+            CREATE FUNCTION plpgsql_add(a integer, b integer)
+            RETURNS integer
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RETURN a + b;
+            END;
+            $$;
+        """)
+        
+        # Call the function via SELECT
+        cur.execute("SELECT plpgsql_add(5, 3)")
+        result = cur.fetchone()
+        assert int(result[0]) == 8, f"Expected 8, got {result[0]}"
+        
+        # Test with different values
+        cur.execute("SELECT plpgsql_add(10, 20)")
+        result = cur.fetchone()
+        assert int(result[0]) == 30, f"Expected 30, got {result[0]}"
+        
+        cur.close()
+        conn.close()
+        print("test_plpgsql_function_call: PASSED")
+    finally:
+        stop_proxy(proc)
+
+def test_plpgsql_function_with_control_flow():
+    """Test PL/pgSQL function with IF/ELSE control flow."""
+    proc = start_proxy()
+    try:
+        conn = psycopg2.connect(
+            host=PROXY_HOST,
+            port=PROXY_PORT,
+            database="postgres",
+            user="postgres",
+            password="postgres"
+        )
+        cur = conn.cursor()
+        
+        # Create a PL/pgSQL function with control flow
+        cur.execute("""
+            CREATE FUNCTION plpgsql_max(a integer, b integer)
+            RETURNS integer
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF a > b THEN
+                    RETURN a;
+                ELSE
+                    RETURN b;
+                END IF;
+            END;
+            $$;
+        """)
+        
+        # Test with a > b
+        cur.execute("SELECT plpgsql_max(10, 5)")
+        result = cur.fetchone()
+        assert int(result[0]) == 10, f"Expected 10, got {result[0]}"
+        
+        # Test with b > a
+        cur.execute("SELECT plpgsql_max(3, 7)")
+        result = cur.fetchone()
+        assert int(result[0]) == 7, f"Expected 7, got {result[0]}"
+        
+        cur.close()
+        conn.close()
+        print("test_plpgsql_function_with_control_flow: PASSED")
+    finally:
+        stop_proxy(proc)
+
 if __name__ == "__main__":
     test_simple_scalar_function()
     test_function_with_out_params()
@@ -422,4 +508,6 @@ if __name__ == "__main__":
     test_drop_function()
     test_create_or_replace()
     test_function_in_where_clause()
+    test_plpgsql_function_call()
+    test_plpgsql_function_with_control_flow()
     print("\n✅ All E2E tests passed!")
