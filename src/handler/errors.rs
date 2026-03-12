@@ -188,10 +188,15 @@ impl PgError {
         match error {
             rusqlite::Error::SqliteFailure(err, msg) => {
                 let code = Self::map_sqlite_error_code(err);
-                let message = msg.clone().unwrap_or_else(|| {
-                    // Use the SQLite error string representation
-                    rusqlite::ffi::code_to_str(err.extended_code).to_string()
-                });
+                let message = if code == PgErrorCode::SerializationFailure {
+                    // Use PostgreSQL-compatible message for busy errors
+                    "could not serialize access due to concurrent update".to_string()
+                } else {
+                    msg.clone().unwrap_or_else(|| {
+                        // Use the SQLite error string representation
+                        rusqlite::ffi::code_to_str(err.extended_code).to_string()
+                    })
+                };
                 
                 Self {
                     code: code.code().to_string(),
@@ -266,10 +271,10 @@ impl PgError {
                 PgErrorCode::InsufficientPrivilege
             }
             rusqlite::ffi::ErrorCode::DatabaseBusy => {
-                PgErrorCode::ConnectionException
+                PgErrorCode::SerializationFailure
             }
             rusqlite::ffi::ErrorCode::DatabaseLocked => {
-                PgErrorCode::ConnectionException
+                PgErrorCode::SerializationFailure
             }
             rusqlite::ffi::ErrorCode::ReadOnly => {
                 PgErrorCode::InsufficientPrivilege
@@ -290,6 +295,22 @@ impl PgError {
                 PgErrorCode::SyntaxError
             }
             _ => PgErrorCode::InternalError,
+        }
+    }
+
+    /// Get a PostgreSQL-compatible error message for SQLite errors
+    /// This provides better error messages that match PostgreSQL conventions
+    pub fn message_for_sqlite_error(err: &rusqlite::Error) -> String {
+        match err {
+            rusqlite::Error::SqliteFailure(sqlite_err, _) => {
+                match sqlite_err.code {
+                    rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked => {
+                        "could not serialize access due to concurrent update".to_string()
+                    }
+                    _ => err.to_string(),
+                }
+            }
+            _ => err.to_string(),
         }
     }
 }

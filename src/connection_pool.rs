@@ -178,11 +178,17 @@ impl ConnectionPool {
         let conn = Connection::open(&self.db_path)?;
 
         // Configure WAL mode for better concurrency
-        let _journal_mode: String = conn
-            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        // WAL mode allows multiple readers and one writer concurrently
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
             .unwrap_or_else(|_| "delete".to_string());
+        
+        if journal_mode.to_lowercase() != "wal" {
+            eprintln!("Warning: Could not enable WAL mode, journal mode is: {}", journal_mode);
+        }
 
         // Set busy timeout to 5 seconds
+        // This causes SQLite to retry busy locks for 5 seconds before returning SQLITE_BUSY
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
         // Enable foreign keys
