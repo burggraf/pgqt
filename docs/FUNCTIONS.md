@@ -148,6 +148,60 @@ Controls whether the function can be executed in parallel query execution:
 - **PARALLEL RESTRICTED**: Can run in parallel but only in leader
 - **PARALLEL SAFE**: Can run fully in parallel workers
 
+## PL/pgSQL Functions
+
+**`pgqt`** supports PL/pgSQL (Procedural Language/PostgreSQL) functions via transpilation to Lua. This enables control flow, variable declarations, and procedural logic.
+
+### Simple PL/pgSQL Function
+
+```sql
+CREATE FUNCTION plpgsql_add(a integer, b integer)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN a + b;
+END;
+$$;
+
+-- Call it
+SELECT plpgsql_add(5, 3);  -- Returns 8
+```
+
+### PL/pgSQL with Control Flow
+
+```sql
+CREATE FUNCTION plpgsql_max(a integer, b integer)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF a > b THEN
+        RETURN a;
+    ELSE
+        RETURN b;
+    END IF;
+END;
+$$;
+
+-- Call it
+SELECT plpgsql_max(10, 5);  -- Returns 10
+```
+
+### PL/pgSQL Limitations
+
+While basic PL/pgSQL is supported, some advanced features are not yet available:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Basic control flow (IF/ELSE) | ✅ Supported | IF, THEN, ELSE, ELSIF, END IF |
+| Simple loops | ✅ Supported | LOOP, WHILE, FOR |
+| Variable declarations | ✅ Supported | DECLARE section |
+| Exception handling | ⚠️ Partial | Basic RAISE supported |
+| Cursors | ❌ Not supported | Use RETURNS TABLE instead |
+| Triggers | ❌ Not supported | Planned for future |
+| Dynamic SQL | ❌ Not supported | EXECUTE not available |
+
 ## Calling Functions
 
 ### In SELECT Clause
@@ -380,7 +434,8 @@ SELECT * FROM users WHERE is_valid_email(email);
 
 ### Current Limitations
 
-1. **SQL Language Only**: Only `LANGUAGE sql` is supported (PL/pgSQL coming in Phase 2)
+1. **SQL Language**: `LANGUAGE sql` is fully supported
+2. **PL/pgSQL Language**: `LANGUAGE plpgsql` is supported for basic functions with control flow (IF/ELSE, loops, etc.)
 2. **No Function Overloading**: Functions with same name but different signatures not yet supported
 3. **No Triggers**: Trigger functions not yet supported
 4. **No Aggregates**: Aggregate functions (CREATE AGGREGATE) not yet supported
