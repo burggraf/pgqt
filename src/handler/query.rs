@@ -194,7 +194,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
     /// Execute a SQL query and return the results
     fn execute_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
         // Set the current user from the session for current_user() function
-        if let Some(session) = self.sessions().get(&0) {
+        if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
 
@@ -240,15 +240,15 @@ pub trait QueryExecution: HandlerUtils + Clone {
         if crate::handler::transaction::is_transaction_control(sql) {
             // Get or create session for client 0 (legacy single-client mode during transition)
             let mut session_clone = {
-                let session_ref = self.sessions().get(&0).unwrap_or_else(|| {
-                    self.sessions().insert(0, SessionContext {
+                let session_ref = self.sessions().get(&client_id).unwrap_or_else(|| {
+                    self.sessions().insert(client_id, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
                         search_path: SearchPath::default(),
                         transaction_status: crate::handler::TransactionStatus::Idle,
                         savepoints: Vec::new(),
                     });
-                    self.sessions().get(&0).unwrap()
+                    self.sessions().get(&client_id).unwrap()
                 });
                 session_ref.clone()
             };
@@ -267,22 +267,22 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 };
 
                 // Store updated session state
-                self.sessions().insert(0, session_clone);
+                self.sessions().insert(client_id, session_clone);
                 return result;
             }
         }
 
         // Before executing anything else, check transaction error state
         {
-            let session = self.sessions().get(&0).unwrap_or_else(|| {
-                self.sessions().insert(0, SessionContext {
+            let session = self.sessions().get(&client_id).unwrap_or_else(|| {
+                self.sessions().insert(client_id, SessionContext {
                     authenticated_user: "postgres".to_string(),
                     current_user: "postgres".to_string(),
                     search_path: SearchPath::default(),
                     transaction_status: crate::handler::TransactionStatus::Idle,
                     savepoints: Vec::new(),
                 });
-                self.sessions().get(&0).unwrap()
+                self.sessions().get(&client_id).unwrap()
             });
 
             if session.transaction_status == crate::handler::TransactionStatus::InError {
@@ -373,13 +373,13 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 store_table_metadata(&conn, &metadata.table_name, &columns)?;
 
                 // Store ownership (use current user as owner)
-                let session = self.sessions().get(&0).unwrap_or_else(|| {
-                    self.sessions().insert(0, SessionContext {
+                let session = self.sessions().get(&client_id).unwrap_or_else(|| {
+                    self.sessions().insert(client_id, SessionContext {
                         authenticated_user: "postgres".to_string(),
                         current_user: "postgres".to_string(),
                         search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
                     });
-                    self.sessions().get(&0).unwrap()
+                    self.sessions().get(&client_id).unwrap()
                 });
                 // Find owner OID from __pg_authid__
                 let owner_oid: i64 = conn.query_row(
@@ -420,10 +420,10 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         // Check for error and update transaction status
         if execute_result.is_err() {
-            let mut session_clone = self.sessions().get(&0).unwrap().clone();
+            let mut session_clone = self.sessions().get(&client_id).unwrap().clone();
             if session_clone.transaction_status == crate::handler::TransactionStatus::InTransaction {
                 session_clone.transaction_status = crate::handler::TransactionStatus::InError;
-                self.sessions().insert(0, session_clone);
+                self.sessions().insert(client_id, session_clone);
             }
         }
 
