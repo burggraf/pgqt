@@ -57,6 +57,7 @@ mod debug;
 mod auth;
 mod config;
 mod validation;
+mod trigger;
 
 use debug::set_debug;
 use schema::SearchPath;

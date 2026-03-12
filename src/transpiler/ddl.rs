@@ -6,7 +6,7 @@
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt, 
+    Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt,
     IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt, CreateTrigStmt
 };
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
@@ -216,9 +216,9 @@ pub(crate) fn rewrite_type_for_sqlite(pg_type: &str) -> String {
     }
 
     // Range types - stored as TEXT
-    if upper == "INT4RANGE" 
-        || upper == "INT8RANGE" 
-        || upper == "NUMRANGE" 
+    if upper == "INT4RANGE"
+        || upper == "INT8RANGE"
+        || upper == "NUMRANGE"
         || upper == "TSRANGE"
         || upper == "TSTZRANGE"
         || upper == "DATERANGE"
@@ -227,9 +227,9 @@ pub(crate) fn rewrite_type_for_sqlite(pg_type: &str) -> String {
     }
 
     // Integer types
-    if upper.starts_with("INT") 
-        || upper.starts_with("INTEGER") 
-        || upper.starts_with("BIGINT") 
+    if upper.starts_with("INT")
+        || upper.starts_with("INTEGER")
+        || upper.starts_with("BIGINT")
         || upper.starts_with("SMALLINT")
         || upper.starts_with("INT2")
         || upper.starts_with("INT4")
@@ -305,13 +305,13 @@ pub(crate) fn rewrite_type_for_sqlite(pg_type: &str) -> String {
     }
 
     // Geometric types - all stored as TEXT (representations)
-    if upper == "POINT" 
-        || upper == "LINE" 
-        || upper == "LSEG" 
-        || upper == "BOX" 
-        || upper == "PATH" 
-        || upper == "POLYGON" 
-        || upper == "CIRCLE" 
+    if upper == "POINT"
+        || upper == "LINE"
+        || upper == "LSEG"
+        || upper == "BOX"
+        || upper == "PATH"
+        || upper == "POLYGON"
+        || upper == "CIRCLE"
     {
         return "text".to_string();
     }
@@ -848,7 +848,7 @@ pub(crate) fn reconstruct_index_elem(elem: &pg_query::protobuf::IndexElem, ctx: 
 /// Reconstruct a CREATE VIEW statement
 pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
-    
+
     // Get the view name for potential DROP
     let view_name = stmt.view.as_ref().map(|r| {
         if r.schemaname.is_empty() || r.schemaname == "public" {
@@ -857,7 +857,7 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
             format!("{}.{}", r.schemaname.to_lowercase(), r.relname.to_lowercase())
         }
     }).unwrap_or_default();
-    
+
     // SQLite doesn't support CREATE OR REPLACE VIEW directly
     // If replace is true, we need to drop the view first
     if stmt.replace {
@@ -868,7 +868,7 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
     } else {
         parts.push("create view".to_string());
     }
-    
+
     if let Some(ref relation) = stmt.view {
         let name = relation.relname.to_lowercase();
         if relation.schemaname.is_empty() || relation.schemaname == "public" {
@@ -877,7 +877,7 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
             parts.push(format!("{}.{}", relation.schemaname.to_lowercase(), name));
         }
     }
-    
+
     // Column aliases: CREATE VIEW v(x, y)
     if !stmt.aliases.is_empty() {
         let cols: Vec<String> = stmt.aliases.iter().filter_map(|n| {
@@ -892,13 +892,13 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
             parts.push(format!("({})", cols.join(", ")));
         }
     }
-    
+
     parts.push("as".to_string());
-    
+
     if let Some(ref query) = stmt.query {
         parts.push(reconstruct_node(query, ctx));
     }
-    
+
     parts.join(" ")
 }
 
@@ -912,7 +912,7 @@ pub(crate) fn reconstruct_define_stmt(stmt: &DefineStmt, _ctx: &mut TranspileCon
             None
         }
     }).collect();
-    
+
     let full_name = names.join(".");
     format!("-- CREATE TYPE {} (ignored)", full_name)
 }
@@ -925,53 +925,53 @@ pub(crate) fn reconstruct_create_enum_stmt(stmt: &CreateEnumStmt, _ctx: &mut Tra
             None
         }
     }).collect();
-    
+
     let full_name = names.join(".");
     format!("-- CREATE TYPE {} AS ENUM (ignored)", full_name)
 }
 
 /// Parse a CREATE TRIGGER statement and return trigger metadata
-/// 
+///
 /// This extracts all the trigger properties from the AST and returns
 /// a TriggerMetadata struct that can be stored in the catalog.
 pub fn parse_create_trigger(sql: &str) -> anyhow::Result<crate::catalog::TriggerMetadata> {
     use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
-    
+
     let result = pg_query::parse(sql)?;
-    
+
     if let Some(raw_stmt) = result.protobuf.stmts.first() {
         if let Some(NodeEnum::CreateTrigStmt(stmt)) = &raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
             return parse_create_trigger_stmt(stmt);
         }
     }
-    
+
     anyhow::bail!("Not a CREATE TRIGGER statement")
 }
 
 /// Parse CreateTrigStmt protobuf into TriggerMetadata
 fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::catalog::TriggerMetadata> {
     use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
-    
+
     // Extract trigger name
     let trigger_name = stmt.trigname.clone();
-    
+
     // Extract table name and convert to OID (we'll use a hash for now)
     let table_name = stmt.relation.as_ref()
         .map(|r| r.relname.clone())
         .unwrap_or_default();
     let table_oid = crate::catalog::trigger::calc_table_oid(&table_name);
-    
+
     // Determine timing (BEFORE, AFTER, INSTEAD OF) from timing field
     // PostgreSQL trigger timing values:
     // TRIGGER_TYPE_BEFORE = 2
-    // TRIGGER_TYPE_AFTER = 4  
+    // TRIGGER_TYPE_AFTER = 4
     // TRIGGER_TYPE_INSTEAD = 64
     let timing = match stmt.timing {
         2 => TriggerTiming::Before,
         64 => TriggerTiming::InsteadOf,
         _ => TriggerTiming::After, // 4 is AFTER
     };
-    
+
     // Determine events from events field
     // pg_query event values (from protobuf):
     // INSERT = 4 (bit 2)
@@ -980,7 +980,7 @@ fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::cat
     // TRUNCATE = 128 (bit 7)
     let mut events = Vec::new();
     let events_bits = stmt.events;
-    
+
     if events_bits & 0x04 != 0 {
         events.push(TriggerEvent::Insert);
     }
@@ -993,14 +993,14 @@ fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::cat
     if events_bits & 0x80 != 0 {
         events.push(TriggerEvent::Truncate);
     }
-    
+
     // Row-level or statement-level
     let row_or_statement = if stmt.row {
         RowOrStatement::Row
     } else {
         RowOrStatement::Statement
     };
-    
+
     // Extract function name
     let funcname_parts: Vec<String> = stmt.funcname.iter().filter_map(|n| {
         if let Some(NodeEnum::String(ref s)) = n.node {
@@ -1010,10 +1010,10 @@ fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::cat
         }
     }).collect();
     let function_name = funcname_parts.join(".");
-    
+
     // For now, we use a placeholder function OID - it should be looked up from __pg_functions__
     let function_oid = 0;
-    
+
     // Extract trigger arguments (if any)
     let args: Vec<String> = stmt.args.iter().filter_map(|n| {
         if let Some(NodeEnum::String(ref s)) = n.node {
@@ -1022,7 +1022,7 @@ fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::cat
             None
         }
     }).collect();
-    
+
     Ok(crate::catalog::TriggerMetadata {
         oid: 0, // Will be assigned by store_trigger
         name: trigger_name,
@@ -1043,41 +1043,58 @@ fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::cat
 }
 
 /// Parse DROP TRIGGER statement and extract trigger name and table
+///
+/// Supports syntax: DROP TRIGGER [IF EXISTS] name ON table_name [CASCADE|RESTRICT]
 pub fn parse_drop_trigger(sql: &str) -> anyhow::Result<(String, String)> {
-    let result = pg_query::parse(sql)?;
-    
-    if let Some(raw_stmt) = result.protobuf.stmts.first() {
-        if let Some(NodeEnum::DropStmt(stmt)) = &raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
-            use pg_query::protobuf::ObjectType;
-            let remove_type = ObjectType::try_from(stmt.remove_type).unwrap_or(ObjectType::Undefined);
-            
-            if remove_type == ObjectType::ObjectTrigger {
-                // Extract trigger name
-                let trigger_name = if let Some(obj) = stmt.objects.first() {
-                    if let Some(NodeEnum::List(list)) = obj.node.as_ref() {
-                        list.items.iter().filter_map(|n| {
-                            if let Some(NodeEnum::String(ref s)) = n.node.as_ref() {
-                                Some(s.sval.clone())
-                            } else {
-                                None
-                            }
-                        }).next().unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
+    // Simple regex-based parsing for DROP TRIGGER
+    // Format: DROP TRIGGER [IF EXISTS] name ON table_name [CASCADE|RESTRICT]
+    let sql_upper = sql.to_uppercase();
+
+    // Remove "IF EXISTS" if present
+    let sql_clean = sql_upper.replace("IF EXISTS", "");
+
+    // Split by whitespace and find the pattern
+    let parts: Vec<&str> = sql_clean.split_whitespace().collect();
+
+    // Find the position of "ON" keyword
+    if let Some(on_pos) = parts.iter().position(|&p| p == "ON") {
+        if on_pos >= 2 && on_pos + 1 < parts.len() {
+            // Trigger name is before ON
+            let trigger_name = parts[on_pos - 1].to_string();
+            // Table name is after ON
+            let table_name = parts[on_pos + 1].to_string();
+
+            // Get the original case from the original SQL
+            let original_parts: Vec<&str> = sql.split_whitespace().collect();
+            let original_trigger_name = if let Some(if_pos) = original_parts.iter().position(|&p| p.to_uppercase() == "IF") {
+                // Has IF EXISTS, trigger name is after EXISTS
+                if if_pos + 2 < original_parts.len() {
+                    original_parts[if_pos + 2].to_string()
                 } else {
-                    String::new()
-                };
-                
-                // Try to find table name from the statement
-                // In DROP TRIGGER, the table is often specified as TRIGGER ON TABLE
-                // pg_query may put this in different places depending on the syntax
-                let table_name = String::new(); // Will be extracted from context or arguments
-                
-                return Ok((trigger_name, table_name));
-            }
+                    trigger_name
+                }
+            } else {
+                // No IF EXISTS, trigger name is after TRIGGER
+                if on_pos < original_parts.len() {
+                    original_parts[on_pos - 1].to_string()
+                } else {
+                    trigger_name
+                }
+            };
+
+            let original_table_name = if let Some(on_idx) = original_parts.iter().position(|&p| p.to_uppercase() == "ON") {
+                if on_idx + 1 < original_parts.len() {
+                    original_parts[on_idx + 1].to_string()
+                } else {
+                    table_name
+                }
+            } else {
+                table_name
+            };
+
+            return Ok((original_trigger_name, original_table_name));
         }
     }
-    
-    anyhow::bail!("Not a DROP TRIGGER statement")
+
+    anyhow::bail!("Could not parse DROP TRIGGER statement")
 }

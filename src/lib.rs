@@ -20,6 +20,7 @@
 //! | [`rls_inject`] | RLS AST injection utilities                            |
 //! | [`schema`]     | Schema/namespace support via SQLite ATTACH DATABASE    |
 //! | [`transpiler`] | Core SQL transpilation (PostgreSQL → SQLite)           |
+//! | [`trigger`]    | Trigger execution for INSERT/UPDATE/DELETE             |
 //! | [`vector`]     | pgvector-compatible vector similarity search           |
 
 pub mod debug;
@@ -41,5 +42,6 @@ pub mod schema;
 pub mod rbac;
 pub mod stats;
 pub mod transpiler;
+pub mod trigger;
 pub mod vector;
 pub mod auth;

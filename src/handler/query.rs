@@ -19,6 +19,7 @@ use crate::handler::utils::HandlerUtils;
 #[allow(unused_imports)]
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
+use crate::trigger::{TriggerExecutor, OperationType, BeforeTriggerResult, extract_table_and_operation};
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
 use rusqlite::Statement;
 
@@ -97,7 +98,19 @@ pub trait QueryExecution: HandlerUtils + Clone {
         if is_select {
             self.execute_select_with_params(&conn_guard, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
         } else {
-            self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
+            // Check if this is a DML statement that needs trigger execution
+            match transpile_result.operation_type {
+                crate::transpiler::OperationType::INSERT |
+                crate::transpiler::OperationType::UPDATE |
+                crate::transpiler::OperationType::DELETE => {
+                    // For now, execute without trigger support for extended query protocol
+                    // TODO: Implement trigger support for extended query protocol
+                    self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
+                }
+                _ => {
+                    self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
+                }
+            }
         }
     }
 
@@ -110,7 +123,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases, column_types)?);
 
         let mut data_rows = Vec::new();
-        
+
         // Convert params to rusqlite params
         let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
             match p {
@@ -200,7 +213,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         // Check for commands BEFORE transpilation (transpiler may convert them)
         let original_upper = sql.trim().to_uppercase();
-        
+
         // SHOW commands
         if original_upper == "SHOW ALL" {
             return self.handle_show_all();
@@ -211,12 +224,12 @@ pub trait QueryExecution: HandlerUtils + Clone {
         if original_upper == "SHOW SEARCH_PATH" {
             return self.handle_show_search_path();
         }
-        
+
         // DROP FUNCTION (transpiler doesn't handle this, it deparses to invalid SQL)
         if original_upper.starts_with("DROP FUNCTION") {
             return self.handle_drop_function(sql);
         }
-        
+
         // Handle SET search_path (transpiler converts this to "select 1")
         if original_upper.starts_with("SET SEARCH_PATH") {
             return self.handle_set_search_path(sql);
@@ -225,6 +238,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
         // Handle SET ROLE and RESET ROLE
         if original_upper.starts_with("SET ROLE") || original_upper.starts_with("RESET ROLE") {
             return self.handle_set_role(sql);
+        }
+
+        // Handle CREATE TRIGGER (before transpilation, as transpiler converts it to a comment)
+        if original_upper.starts_with("CREATE TRIGGER") {
+            return self.handle_create_trigger(sql);
+        }
+
+        // Handle DROP TRIGGER (before transpilation)
+        if original_upper.starts_with("DROP TRIGGER") {
+            return self.handle_drop_trigger(sql);
         }
 
         let result = crate::transpiler::transpile_with_metadata(sql);
@@ -413,7 +436,18 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 }
                 Ok(all_responses)
             } else {
-                self.execute_statement(&conn, &sqlite_sql)
+                // Check if this is a DML statement that needs trigger execution
+                match transpile_result.operation_type {
+                    crate::transpiler::OperationType::INSERT |
+                    crate::transpiler::OperationType::UPDATE |
+                    crate::transpiler::OperationType::DELETE => {
+                        return self.execute_dml_with_triggers(&conn, sql, &sqlite_sql, transpile_result.operation_type);
+                    }
+                    _ => {
+                        // Non-DML statement, execute normally
+                        return self.execute_statement(&conn, &sqlite_sql);
+                    }
+                }
             }
         }
         })();
@@ -484,7 +518,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
             for i in 0..col_count {
                 let field_type = fields[i].datatype();
-                
+
                 // Try to get value as different types and convert to string
                 let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
                     .map(|v| v.map(|x| {
@@ -535,7 +569,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         // Build a map of table -> columns from the catalog using the already-locked connection
         let mut table_columns: HashMap<String, Vec<ColumnFieldInfo>> = HashMap::new();
-        
+
         for table_name in referenced_tables {
             if let Ok(columns) = crate::catalog::get_table_columns_with_defaults(conn, table_name) {
                 let field_infos: Vec<ColumnFieldInfo> = columns
@@ -554,7 +588,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         for i in 0..col_count {
             let col_name = sqlite_stmt.column_name(i)?.to_string();
-            
+
             // Check if this is a known column from one of the referenced tables
             let mut found = false;
             for table_name in referenced_tables {
@@ -643,6 +677,84 @@ pub trait QueryExecution: HandlerUtils + Clone {
         };
 
         Ok(vec![Response::Execution(tag)])
+    }
+
+    /// Execute a DML statement (INSERT, UPDATE, DELETE) with trigger support
+    fn execute_dml_with_triggers(
+        &self,
+        conn: &Connection,
+        original_sql: &str,
+        sqlite_sql: &str,
+        operation: crate::transpiler::OperationType,
+    ) -> Result<Vec<Response>> {
+        use crate::transpiler::OperationType as TranspileOpType;
+
+        // Map transpiler operation type to trigger operation type
+        let trigger_op = match operation {
+            TranspileOpType::INSERT => OperationType::Insert,
+            TranspileOpType::UPDATE => OperationType::Update,
+            TranspileOpType::DELETE => OperationType::Delete,
+            _ => {
+                // Not a DML operation, execute normally
+                return self.execute_statement(conn, sqlite_sql);
+            }
+        };
+
+        // Extract table name from the original SQL
+        let (table_name, _) = match extract_table_and_operation(original_sql) {
+            Some((table, op)) => (table, op),
+            None => {
+                // Could not extract table, execute normally
+                return self.execute_statement(conn, sqlite_sql);
+            }
+        };
+
+        // Create trigger executor
+        let trigger_executor = TriggerExecutor::new(self.functions().clone());
+
+        // For INSERT/UPDATE, we need to build NEW row
+        // For UPDATE/DELETE, we need to build OLD row
+        let old_row = None; // TODO: Build OLD row for UPDATE/DELETE
+
+        // TODO: Build NEW row from INSERT/UPDATE values
+        // For now, create an empty NEW row so triggers can execute
+        let new_row = Some(std::collections::HashMap::new());
+
+        // Execute BEFORE triggers
+        match trigger_executor.execute_before_triggers(
+            conn,
+            &table_name,
+            trigger_op,
+            old_row,
+            new_row,
+        )? {
+            BeforeTriggerResult::Abort => {
+                // Trigger aborted the operation
+                return Ok(vec![Response::Execution(Tag::new("OK"))]);
+            }
+            BeforeTriggerResult::Continue(modified_new_row) => {
+                // TODO: If new_row was modified, we need to update the SQL
+                // For now, just execute the original SQL
+                let _ = modified_new_row; // Suppress unused warning for now
+
+                // Execute the DML
+                let result = self.execute_statement(conn, sqlite_sql)?;
+
+                // Execute AFTER triggers
+                // Get the actual row data that was inserted/updated
+                let after_new_row = None; // TODO: Fetch actual row data
+                let old_row_for_after = None; // TODO: Build OLD row for UPDATE/DELETE
+                trigger_executor.execute_after_triggers(
+                    conn,
+                    &table_name,
+                    trigger_op,
+                    old_row_for_after,
+                    after_new_row,
+                )?;
+
+                Ok(result)
+            }
+        }
     }
 
     /// Reference to the copy handler

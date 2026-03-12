@@ -895,6 +895,37 @@ pub trait HandlerUtils {
         Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
     }
 
+    /// Handle CREATE TRIGGER statement
+    fn handle_create_trigger(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse CREATE TRIGGER
+        let metadata = crate::transpiler::parse_create_trigger(sql)?;
+
+        // Store in catalog
+        let conn = self.conn().lock().unwrap();
+        crate::catalog::store_trigger(&conn, &metadata)?;
+
+        Ok(vec![Response::Execution(Tag::new("CREATE TRIGGER"))])
+    }
+
+    /// Handle DROP TRIGGER statement
+    fn handle_drop_trigger(&self, sql: &str) -> Result<Vec<Response>> {
+        // Parse DROP TRIGGER to get trigger name and table
+        let (trigger_name, table_name) = crate::transpiler::parse_drop_trigger(sql)?;
+
+        // Get table OID
+        let table_oid = crate::catalog::trigger::calc_table_oid(&table_name);
+
+        // Remove from catalog
+        let conn = self.conn().lock().unwrap();
+        let dropped = crate::catalog::drop_trigger(&conn, &trigger_name, table_oid)?;
+
+        if dropped {
+            Ok(vec![Response::Execution(Tag::new("DROP TRIGGER"))])
+        } else {
+            Err(anyhow!("Trigger {} on {} does not exist", trigger_name, table_name))
+        }
+    }
+
     /// Register a user-defined function as a SQLite custom function
     fn register_sqlite_function(&self, conn: &Connection, metadata: &crate::catalog::FunctionMetadata) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
