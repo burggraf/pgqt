@@ -33,6 +33,31 @@ pub trait QueryExecution: HandlerUtils + Clone {
             crate::handler::set_current_user(&session.current_user);
         }
 
+        // Check transaction error state before executing
+        {
+            let session = self.sessions().get(&0).unwrap_or_else(|| {
+                self.sessions().insert(0, SessionContext {
+                    authenticated_user: "postgres".to_string(),
+                    current_user: "postgres".to_string(),
+                    search_path: SearchPath::default(),
+                    transaction_status: crate::handler::TransactionStatus::Idle,
+                    savepoints: Vec::new(),
+                });
+                self.sessions().get(&0).unwrap()
+            });
+
+            if session.transaction_status == crate::handler::TransactionStatus::InError {
+                let upper_sql = sql.trim().to_uppercase();
+                if !upper_sql.starts_with("ROLLBACK") {
+                    let pg_err = crate::handler::errors::PgError::new(
+                        crate::handler::errors::PgErrorCode::InFailedSqlTransaction,
+                        "current transaction is aborted, commands ignored until end of transaction block",
+                    );
+                    return Err(anyhow::anyhow!(pg_err));
+                }
+            }
+        }
+
         let result = crate::transpiler::transpile_with_metadata(sql);
         if !result.errors.is_empty() {
             return Err(anyhow::anyhow!(result.errors.join("\n")));
@@ -259,7 +284,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
             if session.transaction_status == crate::handler::TransactionStatus::InError {
                 if !upper_sql.starts_with("ROLLBACK") {
-                    return Err(anyhow::anyhow!("25P02: current transaction is aborted, commands ignored until end of transaction block"));
+                    let pg_err = crate::handler::errors::PgError::new(
+                        crate::handler::errors::PgErrorCode::InFailedSqlTransaction,
+                        "current transaction is aborted, commands ignored until end of transaction block",
+                    );
+                    return Err(anyhow::anyhow!(pg_err));
                 }
             }
         }

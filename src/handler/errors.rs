@@ -59,6 +59,12 @@ pub enum PgErrorCode {
     FeatureNotSupported,
     /// Invalid authorization specification
     InvalidAuthorizationSpecification,
+    /// Transaction rollback (generic)
+    TransactionRollback,
+    /// Serialization failure (concurrent update)
+    SerializationFailure,
+    /// In failed SQL transaction (25P02)
+    InFailedSqlTransaction,
 }
 
 impl PgErrorCode {
@@ -89,6 +95,9 @@ impl PgErrorCode {
             PgErrorCode::DatetimeFieldOverflow => "22008",
             PgErrorCode::FeatureNotSupported => "0A000",
             PgErrorCode::InvalidAuthorizationSpecification => "28000",
+            PgErrorCode::TransactionRollback => "40000",
+            PgErrorCode::SerializationFailure => "40001",
+            PgErrorCode::InFailedSqlTransaction => "25P02",
         }
     }
 }

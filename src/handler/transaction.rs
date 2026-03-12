@@ -73,6 +73,7 @@ pub fn parse_transaction_command(sql: &str) -> Option<TransactionCommand> {
 ///
 /// This function updates the session state and executes the corresponding
 /// SQLite transaction command on the provided connection.
+/// Returns TransactionStart/TransactionEnd responses for wire protocol integration.
 pub fn execute_transaction_command(
     cmd: TransactionCommand,
     session: &mut SessionContext,
@@ -82,81 +83,88 @@ pub fn execute_transaction_command(
         TransactionCommand::Begin => {
             if session.transaction_status != TransactionStatus::Idle {
                 // Already in a transaction - PostgreSQL allows this and just returns success
-                return Ok(vec![Response::Execution(Tag::new("BEGIN"))]);
+                return Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))]);
             }
-            
+
             // Execute SQLite BEGIN
             conn.execute("BEGIN", [])?;
             session.transaction_status = TransactionStatus::InTransaction;
-            Ok(vec![Response::Execution(Tag::new("BEGIN"))])
+            Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))])
         }
-        
+
         TransactionCommand::Commit => {
             if session.transaction_status == TransactionStatus::Idle {
                 // Not in a transaction - PostgreSQL returns success anyway
-                return Ok(vec![Response::Execution(Tag::new("COMMIT"))]);
+                return Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))]);
             }
-            
+
             // Execute SQLite COMMIT
             conn.execute("COMMIT", [])?;
             session.transaction_status = TransactionStatus::Idle;
             session.savepoints.clear();
-            Ok(vec![Response::Execution(Tag::new("COMMIT"))])
+            Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))])
         }
-        
+
         TransactionCommand::Rollback => {
             // Execute SQLite ROLLBACK (works even if not in a transaction)
             let _ = conn.execute("ROLLBACK", []);
             session.transaction_status = TransactionStatus::Idle;
             session.savepoints.clear();
-            Ok(vec![Response::Execution(Tag::new("ROLLBACK"))])
+            Ok(vec![Response::TransactionEnd(Tag::new("ROLLBACK"))])
         }
-        
+
         TransactionCommand::Savepoint(name) => {
             // Savepoints can only be created inside a transaction
-            if session.transaction_status == TransactionStatus::Idle {
+            let started_transaction = session.transaction_status == TransactionStatus::Idle;
+            if started_transaction {
                 // PostgreSQL automatically starts a transaction for SAVEPOINT
                 conn.execute("BEGIN", [])?;
                 session.transaction_status = TransactionStatus::InTransaction;
             }
-            
+
             conn.execute(&format!("SAVEPOINT {}", escape_identifier(&name)), [])?;
             session.savepoints.push(name);
-            Ok(vec![Response::Execution(Tag::new("SAVEPOINT"))])
+
+            // Return TransactionStart if we just started a transaction, otherwise Execution
+            if started_transaction {
+                Ok(vec![Response::TransactionStart(Tag::new("SAVEPOINT"))])
+            } else {
+                Ok(vec![Response::Execution(Tag::new("SAVEPOINT"))])
+            }
         }
-        
+
         TransactionCommand::RollbackToSavepoint(name) => {
             if !session.savepoints.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
                 return Err(anyhow!("savepoint \"{}\" does not exist", name));
             }
-            
+
             conn.execute(&format!("ROLLBACK TO {}", escape_identifier(&name)), [])?;
-            
+
             // Remove savepoints after the rolled-back one
             if let Some(idx) = session.savepoints.iter().rposition(|s| s.eq_ignore_ascii_case(&name)) {
                 session.savepoints.truncate(idx + 1);
             }
-            
-            // Rolling back to savepoint clears error state
+
+            // Rolling back to savepoint clears error state but stays in transaction
             if session.transaction_status == TransactionStatus::InError {
                 session.transaction_status = TransactionStatus::InTransaction;
             }
-            
+
             Ok(vec![Response::Execution(Tag::new("ROLLBACK"))])
         }
-        
+
         TransactionCommand::ReleaseSavepoint(name) => {
             if !session.savepoints.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
                 return Err(anyhow!("savepoint \"{}\" does not exist", name));
             }
-            
+
             conn.execute(&format!("RELEASE {}", escape_identifier(&name)), [])?;
-            
+
             // Remove the savepoint and any after it
             if let Some(idx) = session.savepoints.iter().rposition(|s| s.eq_ignore_ascii_case(&name)) {
                 session.savepoints.truncate(idx);
             }
-            
+
             Ok(vec![Response::Execution(Tag::new("RELEASE"))])
         }
     }
@@ -171,34 +179,39 @@ pub fn handle_transaction_control(sql: &str, session: &mut SessionContext) -> Op
         // This is a shim that doesn't actually execute on a connection.
         // The actual execution happens in query.rs using the shared connection.
         // TODO: Refactor to use execute_transaction_command with per-session connection
-        
+
         match cmd {
             TransactionCommand::Begin => {
                 if session.transaction_status != TransactionStatus::Idle {
-                    return Ok(vec![Response::Execution(Tag::new("BEGIN"))]);
+                    return Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))]);
                 }
                 session.transaction_status = TransactionStatus::InTransaction;
-                Ok(vec![Response::Execution(Tag::new("BEGIN"))])
+                Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))])
             }
             TransactionCommand::Commit => {
                 if session.transaction_status == TransactionStatus::Idle {
-                    return Ok(vec![Response::Execution(Tag::new("COMMIT"))]);
+                    return Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))]);
                 }
                 session.transaction_status = TransactionStatus::Idle;
                 session.savepoints.clear();
-                Ok(vec![Response::Execution(Tag::new("COMMIT"))])
+                Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))])
             }
             TransactionCommand::Rollback => {
                 session.transaction_status = TransactionStatus::Idle;
                 session.savepoints.clear();
-                Ok(vec![Response::Execution(Tag::new("ROLLBACK"))])
+                Ok(vec![Response::TransactionEnd(Tag::new("ROLLBACK"))])
             }
             TransactionCommand::Savepoint(name) => {
-                if session.transaction_status == TransactionStatus::Idle {
+                let started_transaction = session.transaction_status == TransactionStatus::Idle;
+                if started_transaction {
                     session.transaction_status = TransactionStatus::InTransaction;
                 }
                 session.savepoints.push(name);
-                Ok(vec![Response::Execution(Tag::new("SAVEPOINT"))])
+                if started_transaction {
+                    Ok(vec![Response::TransactionStart(Tag::new("SAVEPOINT"))])
+                } else {
+                    Ok(vec![Response::Execution(Tag::new("SAVEPOINT"))])
+                }
             }
             TransactionCommand::RollbackToSavepoint(name) => {
                 if !session.savepoints.iter().any(|s| s.eq_ignore_ascii_case(&name)) {

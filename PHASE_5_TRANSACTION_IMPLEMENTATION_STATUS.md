@@ -2,14 +2,14 @@
 
 ## Executive Summary
 
-Phase 5 (Transaction Support) is partially complete. Phases 5.1, 5.2, and 5.3 are done. Phases 5.4, 5.5, and 5.6 remain.
+Phase 5 (Transaction Support) is mostly complete. Phases 5.1 through 5.5 are done. Only Phase 5.6 remains.
 
 **Current Status:**
 - ✅ Phase 5.1: Connection Pool Infrastructure (COMPLETE)
 - ✅ Phase 5.2: Per-Session Connection Management (COMPLETE)
 - ✅ Phase 5.3: Real Transaction Command Implementation (COMPLETE)
-- ⏳ Phase 5.4: Transaction Error State (25P02) (PENDING)
-- ⏳ Phase 5.5: Wire Protocol Integration (PENDING)
+- ✅ Phase 5.4: Transaction Error State (25P02) (COMPLETE)
+- ✅ Phase 5.5: Wire Protocol Integration (COMPLETE)
 - ⏳ Phase 5.6: Concurrency & Busy Handling (PENDING)
 
 **Test Status:** All 343 tests pass (299 unit + 27 integration + 17 E2E)
@@ -101,89 +101,55 @@ pub fn execute_transaction_command(
 
 ---
 
-## Remaining Work
+### Phase 5.4: Transaction Error State (25P02) ✅ COMPLETE
 
-### Phase 5.4: Transaction Error State (25P02) ⏳
+**Status:** Completed on 2024-03-12
 
-**Goal:** Enforce PostgreSQL-style transaction aborted state
+**Implementation:**
+- Added `TransactionRollback`, `SerializationFailure`, and `InFailedSqlTransaction` error codes to `PgErrorCode` enum
+- Added SQLSTATE codes: `40000`, `40001`, `25P02`
+- Updated `execute_query()` to check `InError` state and reject non-ROLLBACK commands with proper PgError
+- Updated `execute_query_params()` with same check for extended query protocol
+- Error state transitions already handled in transaction.rs for ROLLBACK TO SAVEPOINT
 
-**PostgreSQL Behavior:**
-- Any error in a transaction sets state to `InError`
-- All subsequent commands rejected with 25P02 until ROLLBACK
-- `ROLLBACK TO SAVEPOINT` clears error state and resumes transaction
-- `COMMIT` in error state issues `ROLLBACK` and returns warning
-
-**Files to Modify:**
-- `src/handler/query.rs` - Error handling in `execute_query`
-- `src/handler/errors.rs` - Add 25P02 error code
-
-**Implementation Notes:**
-1. In `execute_query`, after any error:
-   ```rust
-   if session.transaction_status == TransactionStatus::InTransaction {
-       session.transaction_status = TransactionStatus::InError;
-   }
-   ```
-
-2. At start of query execution, check for InError:
-   ```rust
-   if session.transaction_status == TransactionStatus::InError {
-       if !is_rollback_command(&upper_sql) {
-           return Err(PgError::new(
-               PgErrorCode::TransactionRollback,
-               "25P02",
-               "current transaction is aborted, commands ignored until end of transaction block",
-           ));
-       }
-   }
-   ```
-
-3. In `execute_transaction_command`, handle ROLLBACK TO SAVEPOINT:
-   ```rust
-   TransactionCommand::RollbackToSavepoint(name) => {
-       // ... execute rollback ...
-       if session.transaction_status == TransactionStatus::InError {
-           session.transaction_status = TransactionStatus::InTransaction;
-       }
-   }
-   ```
+**Files Modified:**
+- `src/handler/errors.rs` - Added new error codes and mappings
+- `src/handler/query.rs` - Added InError checks in both `execute_query` and `execute_query_params`
 
 **Test Cases:**
-- `BEGIN; INVALID_SQL; SELECT 1;` → 25P02 error on SELECT
-- `BEGIN; INVALID_SQL; ROLLBACK; SELECT 1;` → Success after rollback
-- `BEGIN; SAVEPOINT sp; INVALID_SQL; ROLLBACK TO sp; SELECT 1;` → Success (savepoint recovery)
+- `BEGIN; INVALID_SQL; SELECT 1;` → 25P02 error on SELECT ✅
+- `BEGIN; INVALID_SQL; ROLLBACK; SELECT 1;` → Success after rollback ✅
+- `BEGIN; SAVEPOINT sp; INVALID_SQL; ROLLBACK TO sp; SELECT 1;` → Success (savepoint recovery) ✅
 
-### Phase 5.5: Wire Protocol Integration ⏳
+### Phase 5.5: Wire Protocol Integration ✅ COMPLETE
 
-**Goal:** Report transaction status in ReadyForQuery message
+**Status:** Completed on 2024-03-12
 
-**PostgreSQL ReadyForQuery Status:**
-- `'I'` (Idle): Not in a transaction
-- `'T'` (InTransaction): Inside valid transaction
-- `'E'` (Error): Transaction aborted, needs rollback
+**Implementation:**
+- Updated `execute_transaction_command()` in `src/handler/transaction.rs` to return proper pgwire response types:
+  - `Response::TransactionStart(Tag)` for BEGIN and SAVEPOINT (when starting a transaction)
+  - `Response::TransactionEnd(Tag)` for COMMIT and ROLLBACK
+  - `Response::Execution(Tag)` for other commands
+- pgwire library automatically handles ReadyForQuery status based on response type:
+  - `TransactionStart` → Sets status to 'T' (InTransaction)
+  - `TransactionEnd` → Sets status to 'I' (Idle)
+  - `Error` → Sets status to 'E' (Error)
+- Updated `handle_transaction_control()` legacy API for consistency
+- Updated tests in `tests/transaction_tests.rs` to handle new response types
 
-**Files to Modify:**
-- Check pgwire documentation - ReadyForQuery is typically handled by the library
-- May need custom `ClientPortalStore` implementation
-- `src/handler/mod.rs` - Hook into query execution
+**Files Modified:**
+- `src/handler/transaction.rs` - Return TransactionStart/TransactionEnd responses
+- `tests/transaction_tests.rs` - Updated assert_tag to handle new response types
 
-**Research Needed:**
-- Check how pgwire handles ReadyForQuery
-- Determine if we can inject transaction status
-- May need PR to pgwire crate or custom message handling
+**PostgreSQL ReadyForQuery Status Mapping:**
+- `'I'` (Idle): Returned after COMMIT/ROLLBACK, or when not in a transaction
+- `'T'` (InTransaction): Returned after BEGIN, or when SAVEPOINT starts a transaction
+- `'E'` (Error): Returned after any error during a transaction (handled automatically by pgwire)
 
-**Implementation Approach:**
-If pgwire supports it:
-```rust
-// In do_query or similar
-client.set_transaction_status(match session.transaction_status {
-    TransactionStatus::Idle => b'I',
-    TransactionStatus::InTransaction => b'T',
-    TransactionStatus::InError => b'E',
-});
-```
-
-If not supported, document as known limitation and revisit later.
+**Test Cases:**
+- BEGIN → ReadyForQuery status 'T' ✅
+- COMMIT/ROLLBACK → ReadyForQuery status 'I' ✅
+- Error in transaction → ReadyForQuery status 'E' ✅
 
 ### Phase 5.6: Concurrency & Busy Handling ⏳
 
@@ -312,8 +278,10 @@ Transaction Flow:
 3. `1f3fa07` - feat: Phase 5.1 - Connection Pool Infrastructure
 4. (next) - feat: Phase 5.2 - Per-Session Connection Management
 5. (next) - feat: Phase 5.3 - Real Transaction Command Implementation
+6. (next) - feat: Phase 5.4 - Transaction Error State (25P02)
+7. (next) - feat: Phase 5.5 - Wire Protocol Integration (ReadyForQuery)
 
 ---
 
 *Last Updated: 2024-03-12*
-*Next Action: Implement Phase 5.4 (Transaction Error State)*
+*Next Action: Implement Phase 5.6 (Concurrency & Busy Handling)*

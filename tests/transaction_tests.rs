@@ -14,11 +14,11 @@ fn cleanup_db(path: &str) {
 
 fn assert_tag(response: &Response, expected_tag: &str) {
     match response {
-        Response::Execution(tag) => {
+        Response::Execution(tag) | Response::TransactionStart(tag) | Response::TransactionEnd(tag) => {
             let tag_str = format!("{:?}", tag);
             assert!(tag_str.contains(expected_tag), "Expected tag {} in {:?}", expected_tag, tag_str);
         },
-        _ => panic!("Expected Execution response, got {:?}", response),
+        _ => panic!("Expected Execution/TransactionStart/TransactionEnd response, got {:?}", response),
     }
 }
 
