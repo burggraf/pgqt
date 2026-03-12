@@ -17,18 +17,21 @@ fn test_unique_violation_sqlstate() {
     
     // Create a table with a unique constraint
     let result = handler.execute_query(
+        1,
         "CREATE TABLE unique_test (id INTEGER PRIMARY KEY, email VARCHAR(100) UNIQUE)"
     );
     assert!(result.is_ok(), "Failed to create table: {:?}", result);
     
     // Insert first row
     let result = handler.execute_query(
+        1,
         "INSERT INTO unique_test (id, email) VALUES (1, 'test@example.com')"
     );
     assert!(result.is_ok(), "Failed to insert first row: {:?}", result);
     
     // Try to insert a duplicate - should fail with unique violation
     let result = handler.execute_query(
+        1,
         "INSERT INTO unique_test (id, email) VALUES (2, 'test@example.com')"
     );
     assert!(result.is_err(), "Expected error for duplicate email");
@@ -52,12 +55,14 @@ fn test_not_null_violation_sqlstate() {
     
     // Create a table with a NOT NULL constraint
     let result = handler.execute_query(
+        1,
         "CREATE TABLE notnull_test (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL)"
     );
     assert!(result.is_ok(), "Failed to create table: {:?}", result);
     
     // Try to insert NULL - should fail with not null violation
     let result = handler.execute_query(
+        1,
         "INSERT INTO notnull_test (id, name) VALUES (1, NULL)"
     );
     assert!(result.is_err(), "Expected error for NULL violation");
@@ -79,6 +84,7 @@ fn test_undefined_table_sqlstate() {
     
     // Try to select from a non-existent table
     let result = handler.execute_query(
+        1,
         "SELECT * FROM nonexistent_table"
     );
     assert!(result.is_err(), "Expected error for nonexistent table");
@@ -100,6 +106,7 @@ fn test_syntax_error_sqlstate() {
     
     // Try to execute invalid SQL
     let result = handler.execute_query(
+        1,
         "SELEC * FROM invalid"
     );
     assert!(result.is_err(), "Expected error for syntax error");
@@ -123,12 +130,14 @@ fn test_check_violation_sqlstate() {
     // Note: SQLite doesn't have native CHECK constraint support in the same way,
     // but we can test the error mapping path
     let result = handler.execute_query(
+        1,
         "CREATE TABLE check_test (id INTEGER PRIMARY KEY, age INTEGER CHECK(age >= 0))"
     );
     assert!(result.is_ok(), "Failed to create table: {:?}", result);
     
     // Try to insert a value that violates the CHECK constraint
     let result = handler.execute_query(
+        1,
         "INSERT INTO check_test (id, age) VALUES (1, -1)"
     );
     // This may or may not fail depending on SQLite's handling

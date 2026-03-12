@@ -55,6 +55,7 @@ pub use context::{
 
 // Re-export public functions
 pub use func::parse_create_function;
+pub use ddl::{parse_create_trigger, parse_drop_trigger};
 
 /// Extract column aliases from a SELECT statement's target list
 fn extract_column_aliases_from_select(select_stmt: &pg_query::protobuf::SelectStmt) -> Vec<String> {
@@ -435,9 +436,15 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 column_types: Vec::new(),
                 }
             }
-            NodeEnum::CreateTrigStmt(_) => {
+            NodeEnum::CreateTrigStmt(ref trig_stmt) => {
+                // Parse the trigger to get its name and table
+                let trigger_name = trig_stmt.trigname.clone();
+                let table_name = trig_stmt.relation.as_ref()
+                    .map(|r| r.relname.clone())
+                    .unwrap_or_default();
+                
                 TranspileResult {
-                    sql: format!("-- CREATE TRIGGER IGNORED"),
+                    sql: format!("-- CREATE TRIGGER: {} ON {}", trigger_name, table_name),
                     create_table_metadata: None, 
                     copy_metadata: None,
                     referenced_tables: Vec::new(),

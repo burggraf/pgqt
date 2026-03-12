@@ -401,6 +401,41 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create schema index on __pg_functions__")?;
 
+    // Create __pg_triggers__ table for trigger metadata
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS __pg_triggers__ (
+            oid INTEGER PRIMARY KEY AUTOINCREMENT,
+            tgname TEXT NOT NULL,           -- trigger name
+            tgrelid INTEGER NOT NULL,       -- table OID
+            tgtype INTEGER NOT NULL,        -- trigger type (timing + events)
+            tgenabled BOOLEAN NOT NULL DEFAULT TRUE,
+            tgisinternal BOOLEAN NOT NULL DEFAULT FALSE,
+            tgconstraint INTEGER,           -- constraint OID (if constraint trigger)
+            tgdeferrable BOOLEAN,
+            tginitdeferred BOOLEAN,
+            tgnargs INTEGER DEFAULT 0,      -- number of arguments
+            tgargs TEXT,                    -- trigger arguments (JSON array)
+            function_oid INTEGER NOT NULL,  -- function to execute
+            function_name TEXT NOT NULL,    -- function name (for convenience)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tgname, tgrelid)
+        )",
+        [],
+    )
+    .context("Failed to create __pg_triggers__ table")?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pg_triggers_table ON __pg_triggers__(tgrelid)",
+        [],
+    )
+    .context("Failed to create index on __pg_triggers__")?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pg_triggers_name ON __pg_triggers__(tgname)",
+        [],
+    )
+    .context("Failed to create name index on __pg_triggers__")?;
+
     Ok(())
 }
 

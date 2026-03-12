@@ -51,6 +51,9 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use crate::catalog::FunctionMetadata;
 
+#[allow(unused_imports)]
+use mlua::{Lua, Value as LuaValue};
+
 /// Execute a PL/pgSQL function by name (looks up in catalog)
 #[allow(dead_code)]
 pub fn execute_plpgsql_function(
@@ -74,16 +77,53 @@ pub fn execute_plpgsql_function(
 }
 
 /// Execute a PL/pgSQL trigger function
+/// 
+/// Trigger functions receive special variables:
+/// - NEW: the new row (for INSERT/UPDATE)
+/// - OLD: the old row (for UPDATE/DELETE)
+/// - TG_NAME: name of the trigger
+/// - TG_WHEN: BEFORE, AFTER, or INSTEAD OF
+/// - TG_LEVEL: ROW or STATEMENT
+/// - TG_OP: INSERT, UPDATE, DELETE, or TRUNCATE
+/// - TG_TABLE_NAME: name of the table
+/// - TG_TABLE_SCHEMA: schema of the table
+/// - TG_NARGS: number of arguments
+/// - TG_ARGV: array of arguments
+///
+/// For BEFORE triggers, the function can return NULL to abort the operation,
+/// or return a row (possibly modified) to change the data.
+/// 
+/// NOTE: This is a simplified stub implementation. Full trigger execution
+/// requires setting up the Lua environment with OLD/NEW rows and trigger
+/// variables, then executing the trigger function and processing the result.
 #[allow(dead_code)]
 pub fn execute_plpgsql_trigger(
     _conn: &Connection,
-    _function_name: &str,
+    function_name: &str,
+    _trigger_name: &str,
+    _trigger_timing: &str,
+    _trigger_event: &str,
+    _table_name: &str,
+    _table_schema: &str,
+    _trigger_args: &[String],
     _old_row: Option<HashMap<String, Value>>,
-    _new_row: Option<HashMap<String, Value>>,
+    new_row: Option<HashMap<String, Value>>,
+    functions_cache: &Arc<DashMap<String, FunctionMetadata>>,
 ) -> Result<Option<HashMap<String, Value>>> {
-    // TODO: Look up trigger function, execute with OLD/NEW
-    anyhow::bail!("execute_plpgsql_trigger not yet implemented")
+    // Verify the function exists in catalog
+    let _metadata = functions_cache.get(function_name)
+        .ok_or_else(|| anyhow::anyhow!("Trigger function {} not found", function_name))?;
+    
+    // For now, just return the new_row unchanged
+    // Full implementation would:
+    // 1. Transpile the PL/pgSQL function to Lua
+    // 2. Set up trigger variables (TG_NAME, TG_OP, NEW, OLD, etc.)
+    // 3. Execute the Lua function
+    // 4. Process the return value (modified row or NULL)
+    Ok(new_row)
 }
+
+
 
 #[cfg(test)]
 mod tests {

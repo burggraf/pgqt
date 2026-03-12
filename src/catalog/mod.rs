@@ -12,6 +12,7 @@
 //! | [`init`]        | Catalog initialization and pg_types population               |
 //! | [`table`]       | Table and column metadata storage and retrieval              |
 //! | [`function`]    | User-defined function (UDF) metadata storage                 |
+//! | [`trigger`]     | Trigger metadata storage                                     |
 //! | [`rls`]         | Row-Level Security policy storage                            |
 //! | [`system_views`]| PostgreSQL-compatible system catalog views (pg_class, etc.)  |
 //!
@@ -19,6 +20,7 @@
 //!
 //! - `__pg_meta__` — Column-level type metadata (table, column, original_type, constraints)
 //! - `__pg_functions__` — User-defined function definitions
+//! - `__pg_triggers__` — Trigger definitions
 //! - `__pg_rls_policies__` — Row-Level Security policies
 //! - `__pg_rls_tables__` — Tables with RLS enabled/forced
 
@@ -27,6 +29,7 @@ use serde::{Deserialize, Serialize};
 mod init;
 mod table;
 mod function;
+pub mod trigger;
 mod rls;
 mod system_views;
 
@@ -41,6 +44,7 @@ pub use table::{
 #[allow(unused_imports)]
 pub use table::{store_column_metadata, get_table_metadata, get_column_metadata, delete_table_metadata, get_table_columns_with_defaults, extract_default_from_constraints};
 pub use function::{store_function, get_function, drop_function};
+pub use trigger::{store_trigger, get_trigger, drop_trigger, get_triggers_for_table};
 pub use rls::{is_rls_enabled, is_rls_forced, get_applicable_policies};
 #[allow(unused_imports)]
 pub use rls::{enable_rls, disable_rls, store_rls_policy, drop_rls_policy, get_table_policies};
@@ -107,6 +111,50 @@ pub struct RlsPolicy {
     pub using_expr: Option<String>,
     pub with_check_expr: Option<String>,
     pub enabled: bool,
+}
+
+/// Trigger timing - BEFORE, AFTER, or INSTEAD OF
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriggerTiming {
+    Before,
+    After,
+    InsteadOf,
+}
+
+/// Trigger event - INSERT, UPDATE, DELETE, or TRUNCATE
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriggerEvent {
+    Insert,
+    Update,
+    Delete,
+    Truncate,
+}
+
+/// Row-level or statement-level trigger
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RowOrStatement {
+    Row,
+    Statement,
+}
+
+/// Trigger metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerMetadata {
+    pub oid: i64,
+    pub name: String,
+    pub table_oid: i64,
+    pub table_name: String,       // for convenience
+    pub timing: TriggerTiming,    // BEFORE, AFTER, INSTEAD OF
+    pub events: Vec<TriggerEvent>, // INSERT, UPDATE, DELETE, TRUNCATE
+    pub row_or_statement: RowOrStatement, // ROW or STATEMENT
+    pub enabled: bool,
+    pub function_oid: i64,
+    pub function_name: String,    // for convenience
+    pub args: Vec<String>,        // trigger arguments
+    pub is_internal: bool,
+    pub is_constraint: bool,
+    pub deferrable: bool,
+    pub initially_deferred: bool,
 }
 
 #[cfg(test)]

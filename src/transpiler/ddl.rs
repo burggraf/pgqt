@@ -7,7 +7,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt, 
-    IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt
+    IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt, CreateTrigStmt
 };
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
 use crate::transpiler::reconstruct_node;
@@ -928,4 +928,156 @@ pub(crate) fn reconstruct_create_enum_stmt(stmt: &CreateEnumStmt, _ctx: &mut Tra
     
     let full_name = names.join(".");
     format!("-- CREATE TYPE {} AS ENUM (ignored)", full_name)
+}
+
+/// Parse a CREATE TRIGGER statement and return trigger metadata
+/// 
+/// This extracts all the trigger properties from the AST and returns
+/// a TriggerMetadata struct that can be stored in the catalog.
+pub fn parse_create_trigger(sql: &str) -> anyhow::Result<crate::catalog::TriggerMetadata> {
+    use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
+    
+    let result = pg_query::parse(sql)?;
+    
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(NodeEnum::CreateTrigStmt(stmt)) = &raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
+            return parse_create_trigger_stmt(stmt);
+        }
+    }
+    
+    anyhow::bail!("Not a CREATE TRIGGER statement")
+}
+
+/// Parse CreateTrigStmt protobuf into TriggerMetadata
+fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::catalog::TriggerMetadata> {
+    use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
+    
+    // Extract trigger name
+    let trigger_name = stmt.trigname.clone();
+    
+    // Extract table name and convert to OID (we'll use a hash for now)
+    let table_name = stmt.relation.as_ref()
+        .map(|r| r.relname.clone())
+        .unwrap_or_default();
+    let table_oid = crate::catalog::trigger::calc_table_oid(&table_name);
+    
+    // Determine timing (BEFORE, AFTER, INSTEAD OF) from timing field
+    // PostgreSQL trigger timing values:
+    // TRIGGER_TYPE_BEFORE = 2
+    // TRIGGER_TYPE_AFTER = 4  
+    // TRIGGER_TYPE_INSTEAD = 64
+    let timing = match stmt.timing {
+        2 => TriggerTiming::Before,
+        64 => TriggerTiming::InsteadOf,
+        _ => TriggerTiming::After, // 4 is AFTER
+    };
+    
+    // Determine events from events field
+    // pg_query event values (from protobuf):
+    // INSERT = 4 (bit 2)
+    // DELETE = 8 (bit 3)
+    // UPDATE = 16 (bit 4)
+    // TRUNCATE = 128 (bit 7)
+    let mut events = Vec::new();
+    let events_bits = stmt.events;
+    
+    if events_bits & 0x04 != 0 {
+        events.push(TriggerEvent::Insert);
+    }
+    if events_bits & 0x08 != 0 {
+        events.push(TriggerEvent::Delete);
+    }
+    if events_bits & 0x10 != 0 {
+        events.push(TriggerEvent::Update);
+    }
+    if events_bits & 0x80 != 0 {
+        events.push(TriggerEvent::Truncate);
+    }
+    
+    // Row-level or statement-level
+    let row_or_statement = if stmt.row {
+        RowOrStatement::Row
+    } else {
+        RowOrStatement::Statement
+    };
+    
+    // Extract function name
+    let funcname_parts: Vec<String> = stmt.funcname.iter().filter_map(|n| {
+        if let Some(NodeEnum::String(ref s)) = n.node {
+            Some(s.sval.clone())
+        } else {
+            None
+        }
+    }).collect();
+    let function_name = funcname_parts.join(".");
+    
+    // For now, we use a placeholder function OID - it should be looked up from __pg_functions__
+    let function_oid = 0;
+    
+    // Extract trigger arguments (if any)
+    let args: Vec<String> = stmt.args.iter().filter_map(|n| {
+        if let Some(NodeEnum::String(ref s)) = n.node {
+            Some(s.sval.clone())
+        } else {
+            None
+        }
+    }).collect();
+    
+    Ok(crate::catalog::TriggerMetadata {
+        oid: 0, // Will be assigned by store_trigger
+        name: trigger_name,
+        table_oid,
+        table_name,
+        timing,
+        events,
+        row_or_statement,
+        enabled: true,
+        function_oid,
+        function_name,
+        args,
+        is_internal: false,
+        is_constraint: false,
+        deferrable: false,
+        initially_deferred: false,
+    })
+}
+
+/// Parse DROP TRIGGER statement and extract trigger name and table
+pub fn parse_drop_trigger(sql: &str) -> anyhow::Result<(String, String)> {
+    let result = pg_query::parse(sql)?;
+    
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(NodeEnum::DropStmt(stmt)) = &raw_stmt.stmt.as_ref().and_then(|s| s.node.as_ref()) {
+            use pg_query::protobuf::ObjectType;
+            let remove_type = ObjectType::try_from(stmt.remove_type).unwrap_or(ObjectType::Undefined);
+            
+            if remove_type == ObjectType::ObjectTrigger {
+                // Extract trigger name
+                let trigger_name = if let Some(obj) = stmt.objects.first() {
+                    if let Some(NodeEnum::List(list)) = obj.node.as_ref() {
+                        list.items.iter().filter_map(|n| {
+                            if let Some(NodeEnum::String(ref s)) = n.node.as_ref() {
+                                Some(s.sval.clone())
+                            } else {
+                                None
+                            }
+                        }).next().unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                
+                // Try to find table name from the statement
+                // In DROP TRIGGER, the table is often specified as TRIGGER ON TABLE
+                // pg_query may put this in different places depending on the syntax
+                let table_name = String::new(); // Will be extracted from context or arguments
+                
+                return Ok((trigger_name, table_name));
+            }
+        }
+    }
+    
+    anyhow::bail!("Not a DROP TRIGGER statement")
 }
