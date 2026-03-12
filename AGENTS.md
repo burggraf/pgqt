@@ -12,6 +12,76 @@ PGQT is a PostgreSQL-compatible proxy that translates PostgreSQL wire protocol q
 - When you're about to check logs, defer that to a subagent (ideally using gemini-2.5-flash).
 - For complex problems you're going around in circles with, get a fresh perspective by asking subagents.
 
+## Codebase Search with RustDex
+
+RustDex is a powerful code indexing and search tool available for navigating the PGQT codebase. It provides:
+
+- **Symbol search**: Find functions, structs, methods by exact name
+- **Semantic search**: Search code using natural language descriptions
+- **Route extraction**: Find HTTP routes from web framework definitions
+- **Fast indexed search**: Results are instant - no grepping through files
+
+### Indexing the Codebase
+
+Before using RustDex, ensure the codebase is indexed:
+
+```bash
+rustdex_index /Users/markb/dev/pgqt --name pgqt
+```
+
+This creates a local SQLite database with symbol metadata and embeddings. Re-run this after major changes to keep the index current.
+
+### Symbol Search (Exact Name)
+
+Find specific functions, structs, or methods:
+
+```rust
+rustdex_search query="reconstruct_a_expr" repo=pgqt
+rustdex_search query="transpile_with_rls" repo=pgqt
+rustdex_search query="SqliteHandler" repo=pgqt
+```
+
+Returns matching symbols with file paths and byte ranges.
+
+### Semantic Search (Natural Language)
+
+Find code related to a concept or behavior:
+
+```rust
+rustdex_semantic query="how array operators are distinguished from range operators" repo=pgqt
+rustdex_semantic query="row-level security policy injection" repo=pgqt
+rustdex_semantic query="PostgreSQL wire protocol message handling" repo=pgqt
+```
+
+Use this when you don't know the exact function name but know what the code does.
+
+### Reading Source Code
+
+After finding a symbol with RustDex, read its actual source code:
+
+```rust
+rustdex_read_symbol file=/Users/markb/dev/pgqt/src/transpiler/expr.rs start_byte=12345 end_byte=12500
+```
+
+The byte ranges come from RustDex search results.
+
+### When to Use RustDex
+
+- **Finding implementation locations**: Where is a specific function defined?
+- **Understanding code flow**: Which functions call a particular method?
+- **Cross-file references**: Locate all uses of a struct or function
+- **Feature discovery**: Find code related to a concept without knowing exact names
+
+### Integration with pi Tools
+
+RustDex is available as a pi tool and can be used alongside:
+
+- `read`: Read full file contents
+- `bash`: Use `rg`, `grep` for unindexed searches
+- Subagents: Offload complex codebase exploration tasks
+
+Always prefer RustDex over manual grepping for symbol searches - it's faster and more accurate.
+
 ## Testing Infrastructure
 
 ### Running Tests

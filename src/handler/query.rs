@@ -504,7 +504,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         referenced_tables: &[String],
         conn: &Connection,
         column_aliases: &[String],
-        column_types: &[Option<String>],
+        _column_types: &[Option<String>],
     ) -> Result<Vec<FieldInfo>> {
         use crate::handler::rewriter::{map_original_type_to_pg_type, ColumnFieldInfo};
         use pgwire::api::results::{FieldFormat, FieldInfo};

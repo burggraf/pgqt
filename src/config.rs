@@ -145,6 +145,7 @@ mod tests {
             error_output: None,
             debug: false,
             trust_mode: false,
+            auto_create_users: false,
         };
         assert!(valid_config.validate().is_ok());
 
@@ -156,6 +157,7 @@ mod tests {
             error_output: None,
             debug: false,
             trust_mode: false,
+            auto_create_users: false,
         };
         assert!(invalid_port.validate().is_err());
 
@@ -167,6 +169,7 @@ mod tests {
             error_output: None,
             debug: false,
             trust_mode: false,
+            auto_create_users: false,
         };
         assert!(invalid_db.validate().is_err());
     }
@@ -228,6 +231,7 @@ mod tests {
             "test.db".to_string(),
             "stdout".to_string(),
             None,
+            false,
             false,
             false,
         );

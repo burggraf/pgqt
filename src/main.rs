@@ -37,6 +37,7 @@ use tokio::net::TcpListener;
 use crate::handler::errors::PgError;
 
 mod catalog;
+mod connection_pool;
 mod copy;
 mod distinct_on;
 mod rls;

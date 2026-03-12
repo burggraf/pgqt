@@ -21,6 +21,7 @@ use async_trait::async_trait;
 
 use crate::debug;
 use crate::catalog::{init_catalog, init_system_views};
+use crate::connection_pool::ConnectionPool;
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
 
@@ -72,6 +73,7 @@ pub struct SessionContext {
 #[derive(Clone)]
 pub struct SqliteHandler {
     pub conn: Arc<Mutex<Connection>>,
+    pub conn_pool: ConnectionPool,
     pub sessions: Arc<DashMap<u32, SessionContext>>,
     pub schema_manager: SchemaManager,
     pub copy_handler: copy::CopyHandler,
@@ -89,8 +91,12 @@ impl SqliteHandler {
         let conn_arc = Arc::new(Mutex::new(conn));
         let copy_handler = crate::copy::CopyHandler::new(conn_arc.clone());
 
+        // Create connection pool with default size of 10
+        let conn_pool = ConnectionPool::new(std::path::Path::new(db_path), 10)?;
+
         let handler = Self {
             conn: conn_arc,
+            conn_pool,
             sessions: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,

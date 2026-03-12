@@ -26,6 +26,7 @@ pub mod debug;
 pub mod validation;
 pub mod array;
 pub mod catalog;
+pub mod connection_pool;
 pub mod copy;
 pub mod distinct_on;
 pub mod fts;
