@@ -1050,8 +1050,8 @@ pub trait HandlerUtils {
         }
 
 
-        // Execute the function
-        let result = crate::functions::execute_sql_function(&conn, &metadata, &args)?;
+        // Execute the function (handles both SQL and PL/pgSQL)
+        let result = crate::functions::execute_function(&conn, &metadata, &args)?;
 
 
         // Convert result to Response
