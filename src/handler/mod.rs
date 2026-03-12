@@ -761,6 +761,19 @@ impl HandlerUtils for SqliteHandler {
     fn functions(&self) -> &Arc<DashMap<String, crate::catalog::FunctionMetadata>> {
         &self.functions
     }
+
+    fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>> {
+        // Check if client already has a connection
+        if let Some(entry) = self.client_connections.get(&client_id) {
+            let (conn, _handle) = entry.value();
+            return Ok(conn.clone());
+        }
+
+        // Checkout a new connection from the pool
+        let (conn, handle) = self.conn_pool.checkout(client_id)?;
+        self.client_connections.insert(client_id, (conn.clone(), handle));
+        Ok(conn)
+    }
 }
 
 impl MetadataProvider for SqliteHandler {

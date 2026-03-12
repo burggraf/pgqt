@@ -208,8 +208,9 @@ pub trait QueryExecution: HandlerUtils + Clone {
         debug!("Transpiled: {}", transpiled);
         let upper_sql = transpiled.trim().to_uppercase();
 
-        // Transaction Control commands
+        // Handle transaction control statements
         if crate::handler::transaction::is_transaction_control(sql) {
+            // Get or create session for client 0 (legacy single-client mode during transition)
             let mut session_clone = {
                 let session_ref = self.sessions().get(&0).unwrap_or_else(|| {
                     self.sessions().insert(0, SessionContext {
@@ -224,36 +225,22 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 session_ref.clone()
             };
 
-            let prev_status = session_clone.transaction_status.clone();
-            if let Some(res) = crate::handler::transaction::handle_transaction_control(sql, &mut session_clone) {
-                // If the transaction state changed from Idle to InTransaction, we should execute SQLite BEGIN
-                let conn = self.conn().lock().unwrap();
-                if prev_status == crate::handler::TransactionStatus::Idle && session_clone.transaction_status == crate::handler::TransactionStatus::InTransaction {
-                    let _ = conn.execute("BEGIN", []);
-                } else if prev_status != crate::handler::TransactionStatus::Idle && session_clone.transaction_status == crate::handler::TransactionStatus::Idle {
-                    if upper_sql.starts_with("ROLLBACK") {
-                        let _ = conn.execute("ROLLBACK", []);
-                    } else {
-                        let _ = conn.execute("COMMIT", []);
-                    }
-                } else if upper_sql.starts_with("SAVEPOINT ") {
-                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let sp_name = parts[1].trim_end_matches(';');
-                        let _ = conn.execute(&format!("SAVEPOINT {}", sp_name), []);
-                    }
-                } else if upper_sql.starts_with("ROLLBACK TO ") {
-                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
-                    let sp_name = if parts.len() >= 4 { parts[3] } else { parts[2] }.trim_end_matches(';');
-                    let _ = conn.execute(&format!("ROLLBACK TO {}", sp_name), []);
-                } else if upper_sql.starts_with("RELEASE ") {
-                    let parts: Vec<&str> = sql.trim().split_whitespace().collect();
-                    let sp_name = if parts.len() >= 3 { parts[2] } else { parts[1] }.trim_end_matches(';');
-                    let _ = conn.execute(&format!("RELEASE {}", sp_name), []);
-                }
+            // Parse and execute transaction command
+            if let Some(cmd) = crate::handler::transaction::parse_transaction_command(sql) {
+                // For now, use the shared connection to maintain backward compatibility
+                // TODO: Migrate to per-session connections once all tests are updated
+                let result = {
+                    let conn_guard = self.conn().lock().unwrap();
+                    crate::handler::transaction::execute_transaction_command(
+                        cmd,
+                        &mut session_clone,
+                        &conn_guard,
+                    )
+                };
 
+                // Store updated session state
                 self.sessions().insert(0, session_clone);
-                return res;
+                return result;
             }
         }
 

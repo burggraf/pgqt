@@ -25,6 +25,9 @@ pub trait HandlerUtils {
     fn sessions(&self) -> &Arc<DashMap<u32, SessionContext>>;
     fn schema_manager(&self) -> &SchemaManager;
     fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
+    
+    /// Get or checkout a per-session connection for a client
+    fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>>;
 
     /// Check if the current user has permission to execute a function
     #[allow(dead_code)]
