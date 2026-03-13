@@ -743,6 +743,9 @@ pub trait QueryExecution: HandlerUtils + Clone {
             OperationType::Delete => None,
         };
 
+        // Clone new_row for later comparison
+        let new_row_clone = new_row.clone();
+
         // Execute BEFORE triggers
         match trigger_executor.execute_before_triggers(
             conn,
@@ -756,12 +759,49 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 return Ok(vec![Response::Execution(Tag::new("OK"))]);
             }
             BeforeTriggerResult::Continue(modified_new_row) => {
-                // TODO: If new_row was modified, we need to update the SQL
-                // For now, just execute the original SQL
-                let _ = modified_new_row; // Suppress unused warning for now
-
                 // Execute the DML
                 let result = self.execute_statement(conn, sqlite_sql)?;
+
+                // If the trigger modified the row and this is an INSERT,
+                // we need to update the inserted row with the modified values
+                if let (Some(modified), OperationType::Insert) = (&modified_new_row,
+                    trigger_op
+                ) {
+                    // Only update if there are actual modifications
+                    // Compare with original new_row to find changed columns
+                    let columns_to_update: Vec<(String, rusqlite::types::Value)> = if let Some(ref original) = new_row_clone {
+                        modified
+                            .iter()
+                            .filter(|(col, val)| {
+                                // Only include columns that are different from original
+                                original.get(*col) != Some(*val)
+                            })
+                            .map(|(col, val)| (col.clone(), val.clone()))
+                            .collect()
+                    } else {
+                        // If no original row, update all modified columns
+                        modified.iter().map(|(col, val)| (col.clone(), val.clone())).collect()
+                    };
+                    
+                    if !columns_to_update.is_empty() {
+                        // Get the rowid of the inserted row
+                        let rowid: i64 = conn.last_insert_rowid();
+                        
+                        // Build UPDATE statement for modified columns only
+                        let updates: Vec<String> = columns_to_update
+                            .iter()
+                            .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
+                            .collect();
+                        
+                        let update_sql = format!(
+                            "UPDATE {} SET {} WHERE rowid = {}",
+                            table_name,
+                            updates.join(", "),
+                            rowid
+                        );
+                        let _ = conn.execute(&update_sql, []);
+                    }
+                }
 
                 // Execute AFTER triggers
                 // For INSERT, fetch the actual row that was inserted
@@ -789,4 +829,15 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Reference to the copy handler
     fn copy_handler(&self) -> &copy::CopyHandler;
+}
+
+/// Convert a SQLite Value to SQL string
+fn value_to_sql(val: &rusqlite::types::Value) -> String {
+    match val {
+        rusqlite::types::Value::Null => "NULL".to_string(),
+        rusqlite::types::Value::Integer(i) => i.to_string(),
+        rusqlite::types::Value::Real(f) => f.to_string(),
+        rusqlite::types::Value::Text(s) => format!("'{}'", s.replace('\'', "''")),
+        rusqlite::types::Value::Blob(b) => format!("X'{}'", hex::encode(b)),
+    }
 }

@@ -281,16 +281,70 @@ pub fn execute_plpgsql_trigger(
     // Load and execute the function
     let func: mlua::Function = lua.load(&lua_code).eval()?;
     
-    // Create a minimal API table for the trigger function
+    // Create API table for the trigger function (_ctx)
+    // The transpiler generates code that expects _ctx to have these functions
     let api = lua.create_table()?;
     
-    // Add NOW() function
+    // Add NOW() function - returns current timestamp
     let now_fn = lua.create_function(|_lua, ()| {
         Ok(chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.f").to_string())
     })?;
     api.set("now", now_fn)?;
     
-    // Call the function
+    // Add CURRENT_DATE function
+    let current_date_fn = lua.create_function(|_lua, ()| {
+        Ok(chrono::Local::now().format("%Y-%m-%d").to_string())
+    })?;
+    api.set("current_date", current_date_fn)?;
+    
+    // Add CURRENT_TIME function
+    let current_time_fn = lua.create_function(|_lua, ()| {
+        Ok(chrono::Local::now().format("%H:%M:%S").to_string())
+    })?;
+    api.set("current_time", current_time_fn)?;
+    
+    // Add COALESCE function
+    let coalesce_fn = lua.create_function(|_lua, args: Vec<mlua::Value>| {
+        for arg in args {
+            if !matches!(arg, mlua::Value::Nil) {
+                return Ok(arg);
+            }
+        }
+        Ok(mlua::Value::Nil)
+    })?;
+    api.set("coalesce", coalesce_fn)?;
+    
+    // Add NULLIF function
+    let nullif_fn = lua.create_function(|_lua, (a, b): (mlua::Value, mlua::Value)| {
+        let equal = match (&a, &b) {
+            (mlua::Value::Nil, mlua::Value::Nil) => true,
+            (mlua::Value::Boolean(x), mlua::Value::Boolean(y)) => x == y,
+            (mlua::Value::Integer(x), mlua::Value::Integer(y)) => x == y,
+            (mlua::Value::Number(x), mlua::Value::Number(y)) => x == y,
+            (mlua::Value::String(x), mlua::Value::String(y)) => x == y,
+            _ => false,
+        };
+        if equal {
+            Ok(mlua::Value::Nil)
+        } else {
+            Ok(a)
+        }
+    })?;
+    api.set("nullif", nullif_fn)?;
+
+    // Add LOWER function
+    let lower_fn = lua.create_function(|_lua, s: String| {
+        Ok(s.to_lowercase())
+    })?;
+    api.set("lower", lower_fn)?;
+
+    // Add UPPER function
+    let upper_fn = lua.create_function(|_lua, s: String| {
+        Ok(s.to_uppercase())
+    })?;
+    api.set("upper", upper_fn)?;
+
+    // Call the function with the API table as _ctx
     let result: mlua::Value = func.call(api)?;
 
     // Process the result

@@ -358,6 +358,7 @@ fn emit_assign(ctx: &mut TranspileContext, assign: &PlPgSQLStmtAssign) -> Result
             if target.starts_with("NEW.") || target.starts_with("OLD.") {
                 // Transpile the right-hand side
                 let expr_lua = plpgsql_expr_to_lua(rhs);
+                
                 // Generate: NEW["column"] = value (or NEW.column = value)
                 ctx.emit_line(&format!("{} = {}", target, expr_lua));
                 return Ok(());
@@ -800,6 +801,8 @@ fn map_postgres_functions(expr: &str) -> String {
         ("CURRENT_TIME", "_ctx.current_time()"),
         ("COALESCE(", "_ctx.coalesce("),
         ("NULLIF(", "_ctx.nullif("),
+        ("LOWER(", "_ctx.lower("),
+        ("UPPER(", "_ctx.upper("),
     ];
     
     // Apply mappings (case-insensitive)
@@ -808,9 +811,15 @@ fn map_postgres_functions(expr: &str) -> String {
         let upper_func = pg_func.to_uppercase();
         let lower_func = pg_func.to_lowercase();
         
-        result = result.replace(&upper_func, lua_func);
-        if upper_func != lower_func {
+        // Try uppercase first
+        let new_result = result.replace(&upper_func, lua_func);
+        
+        // Only do lowercase replacement if uppercase didn't match
+        // This prevents double-conversion (e.g., NOW() -> _ctx.now() -> _ctx._ctx.now())
+        if new_result == result && upper_func != lower_func {
             result = result.replace(&lower_func, lua_func);
+        } else {
+            result = new_result;
         }
     }
     
