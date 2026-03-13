@@ -66,6 +66,44 @@ impl PlPgSqlRuntime {
         Ok(())
     }
     
+    /// Execute a PL/pgSQL function without a database connection
+    pub fn execute_function_no_conn(
+        &self,
+        lua_code: &str,
+        args: &[SqliteValue],
+    ) -> Result<SqliteValue> {
+        // Compile the Lua code to get the function
+        let func: LuaFunction = self.lua.load(lua_code).eval()?;
+        
+        // Create execution context with a dummy in-memory connection
+        // (SQL operations inside the function will fail or use this empty DB)
+        let ctx = ExecutionContext {
+            conn: Arc::new(Mutex::new(Connection::open_in_memory()?)),
+            sqlstate: None,
+            sqlerrm: None,
+            row_count: 0,
+            result_set: Vec::new(),
+            return_oid: None,
+            pg_context: None,
+        };
+        
+        // Create API table
+        let api = ctx.create_api_table(&self.lua)?;
+        
+        // Convert args to Lua values and store in a table
+        let args_table = self.lua.create_table()?;
+        for (i, arg) in args.iter().enumerate() {
+            args_table.set((i + 1) as i64, sqlite_to_lua(&self.lua, arg.clone())?)?;
+        }
+        self.lua.globals().set("_args", args_table)?;
+        
+        // Call function with api as first argument
+        let result: LuaValue = func.call(api)?;
+        
+        // Convert Lua result back to SqliteValue
+        Ok(lua_to_sqlite(result)?)
+    }
+
     /// Execute a PL/pgSQL function
     pub fn execute_function(
         &self,

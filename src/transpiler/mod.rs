@@ -390,13 +390,14 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 column_types: Vec::new(),
                 }
             }
-            NodeEnum::CommentStmt(_) => {
+            NodeEnum::CommentStmt(ref comment_stmt) => {
+                let (obj_type, obj_name) = ddl::extract_comment_object_info(comment_stmt);
                 TranspileResult {
-                    sql: format!("-- COMMENT IGNORED"),
+                    sql: format!("select __pg_comment_on('{}', '{}', '{}')", obj_type, obj_name.replace('\'', "''"), comment_stmt.comment.replace('\'', "''")),
                     create_table_metadata: None, 
                     copy_metadata: None,
                     referenced_tables: Vec::new(),
-                    operation_type: OperationType::DDL,
+                    operation_type: OperationType::SELECT,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
@@ -454,13 +455,14 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 column_types: Vec::new(),
                 }
             }
-            NodeEnum::DoStmt(_) => {
+            NodeEnum::DoStmt(ref do_stmt) => {
+                let code = ddl::extract_do_block_code(do_stmt).unwrap_or_else(|| "BEGIN END;".to_string());
                 TranspileResult {
-                    sql: format!("-- DO IGNORED"),
+                    sql: format!("select __pg_do_block('{}')", code.replace('\'', "''")),
                     create_table_metadata: None, 
                     copy_metadata: None,
                     referenced_tables: Vec::new(),
-                    operation_type: OperationType::OTHER,
+                    operation_type: OperationType::SELECT,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
@@ -703,5 +705,12 @@ VALUES
         println!("Transpiled range contains: {}", result.sql);
         assert!(result.sql.contains("range_contains"), "Should use range_contains for single value: {}", result.sql);
         assert!(!result.sql.contains("array_contains"), "Should NOT use array_contains: {}", result.sql);
+    }
+
+    #[test]
+    fn test_update_row_constructor() {
+        let sql = "UPDATE t SET (a, b) = (1, 2)";
+        let result = transpile_with_metadata(sql);
+        assert_eq!(result.sql, "update t set a = 1, b = 2");
     }
 }

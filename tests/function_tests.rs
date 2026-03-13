@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use pgqt::catalog::{init_catalog, FunctionMetadata, ParamMode, ReturnTypeKind};
 use pgqt::transpiler::parse_create_function;
 use rusqlite::Connection;
@@ -357,7 +358,8 @@ fn test_parse_returns_void() {
 fn test_builtin_repeat_function() {
     use pgqt::handler::SqliteHandler;
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    SqliteHandler::register_builtin_functions(&conn).unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions).unwrap();
     
     let mut stmt = conn.prepare("SELECT repeat('ab', 3)").unwrap();
     let result: String = stmt.query_row([], |row| row.get(0)).unwrap();

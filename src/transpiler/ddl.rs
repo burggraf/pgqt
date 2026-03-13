@@ -1100,3 +1100,45 @@ pub fn parse_drop_trigger(sql: &str) -> anyhow::Result<(String, String)> {
 
     anyhow::bail!("Could not parse DROP TRIGGER statement")
 }
+
+/// Extract PL/pgSQL code from a DO statement
+pub fn extract_do_block_code(stmt: &pg_query::protobuf::DoStmt) -> Option<String> {
+    for arg in &stmt.args {
+        if let Some(NodeEnum::DefElem(ref def)) = &arg.node {
+            if def.defname == "as" {
+                if let Some(NodeEnum::List(ref list)) = def.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                    if let Some(NodeEnum::String(ref s)) = list.items.first().and_then(|n| n.node.as_ref()) {
+                        return Some(s.sval.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract object type and name from a COMMENT statement
+pub fn extract_comment_object_info(stmt: &pg_query::protobuf::CommentStmt) -> (String, String) {
+    let obj_type = match stmt.objtype {
+        42 => "TABLE",
+        11 => "COLUMN",
+        19 => "INDEX",
+        26 => "VIEW",
+        16 => "DATABASE",
+        34 => "SCHEMA",
+        30 => "ROLE",
+        _ => "UNKNOWN",
+    }.to_string();
+
+    let mut obj_parts = Vec::new();
+    if let Some(ref obj) = stmt.object {
+        if let Some(NodeEnum::List(ref list)) = &obj.node {
+            for item in &list.items {
+                if let Some(NodeEnum::String(ref s)) = &item.node {
+                    obj_parts.push(s.sval.clone());
+                }
+            }
+        }
+    }
+    (obj_type, obj_parts.join("."))
+}

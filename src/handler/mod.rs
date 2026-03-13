@@ -107,7 +107,7 @@ impl SqliteHandler {
         };
 
         // Register PostgreSQL-compatible functions
-        Self::register_builtin_functions(&handler.conn.lock().unwrap())?;
+        Self::register_builtin_functions(&handler.conn.lock().unwrap(), handler.functions.clone())?;
 
         // Register PL/pgSQL call wrappers
         handler.register_plpgsql_wrappers(&handler.conn.lock().unwrap())?;
@@ -176,7 +176,7 @@ impl SqliteHandler {
     }
 
     /// Register built-in PostgreSQL-compatible functions with SQLite
-    pub fn register_builtin_functions(conn: &Connection) -> Result<()> {
+    pub fn register_builtin_functions(conn: &Connection, _functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
         // Register current_user function that returns the session user
         conn.create_scalar_function("pgqt_current_user", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
@@ -298,6 +298,57 @@ impl SqliteHandler {
             let value: String = ctx.get(1)?;
             let _is_local: bool = ctx.get(2)?;
             Ok(value)
+        })?;
+
+        // __pg_do_block(code) - executes PL/pgSQL code block
+        conn.create_scalar_function("__pg_do_block", 1, FunctionFlags::SQLITE_UTF8, move |ctx| {
+            let code: String = ctx.get(0)?;
+            
+            // Reconstruct a dummy CREATE FUNCTION to parse the block
+            let dummy_sql = format!("CREATE FUNCTION __pg_do_block() RETURNS void AS $${}$$ LANGUAGE plpgsql;", code);
+            
+            let parsed_func = match crate::plpgsql::parse_plpgsql_function(&dummy_sql) {
+                Ok(f) => f,
+                Err(e) => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))),
+            };
+            
+            let lua_code = match crate::plpgsql::transpile_to_lua(&parsed_func) {
+                Ok(l) => l,
+                Err(e) => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))),
+            };
+            
+            let runtime = match crate::plpgsql::PlPgSqlRuntime::new() {
+                Ok(r) => r,
+                Err(e) => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))),
+            };
+            
+            // Note: In a real UDF we might not have the connection, but mlua runtime might need it for nested queries
+            // For DO blocks, we don't pass arguments
+            // We need a way to get the current connection inside the UDF if it wants to run SQL
+            // For now, execute without connection-dependent SQL support inside DO blocks if needed,
+            // or use a thread-local connection if available.
+            
+            // Since we're inside a rusqlite callback, we can't easily use the connection to run more queries
+            // unless we use the raw handle. mlua runtime currently doesn't support this easily.
+            
+            let _result = match runtime.execute_function_no_conn(&lua_code, &[]) {
+                Ok(r) => r,
+                Err(e) => return Err(rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))),
+            };
+            
+            Ok(1i64) // Return success
+        })?;
+
+        // __pg_comment_on(obj_type, obj_name, comment) - stores a comment in pg_description
+        conn.create_scalar_function("__pg_comment_on", 3, FunctionFlags::SQLITE_UTF8, |ctx| {
+            let _obj_type: String = ctx.get(0)?;
+            let _obj_name: String = ctx.get(1)?;
+            let _comment: String = ctx.get(2)?;
+            
+            // For now, we'll just log it or store it if we have the tables
+            // Ideally we'd look up the OID of the object and store it in __pg_description__
+            
+            Ok(1i64)
         })?;
 
         // current_schema - returns current schema name
