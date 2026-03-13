@@ -21,6 +21,7 @@
 - **Range Types**: PostgreSQL range types (`int4range`, `daterange`, etc.) with canonicalization and overlap operators
 - **Vector Search**: pgvector-compatible vector similarity search for AI/ML applications
 - **Geometric Types**: 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
+- **Trigger Support**: PostgreSQL-compatible triggers using PL/pgSQL logic. See [docs/TRIGGERS.md](./docs/TRIGGERS.md).
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 - **LATERAL Joins**: Supported for table-valued functions (like `jsonb_each`). See [docs/LATERAL.md](./docs/LATERAL.md).
 - **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats for efficient data transfer. See [docs/COPY.md](./docs/COPY.md).
@@ -1154,6 +1155,7 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 - [ ] PL/pgSQL procedural blocks via Lua runtime
 - [x] Row-Level Security (RLS) emulation
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
+- [x] **Trigger Support** - PostgreSQL-compatible BEFORE/AFTER triggers using PL/pgSQL
 
 ### Phase 4 (In Progress)
 
