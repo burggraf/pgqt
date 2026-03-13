@@ -400,6 +400,57 @@ impl ExecutionContext {
             api.set("PG_CONTEXT", context.clone())?;
         }
         
+        // PostgreSQL built-in function mappings
+        // These are called from transpiled PL/pgSQL code
+        
+        // _ctx.now() -> current timestamp
+        let now_fn = lua.create_function(|_lua, ()| {
+            Ok(chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.f").to_string())
+        })?;
+        api.set("now", now_fn)?;
+        
+        // _ctx.current_date() -> current date
+        let current_date_fn = lua.create_function(|_lua, ()| {
+            Ok(chrono::Local::now().format("%Y-%m-%d").to_string())
+        })?;
+        api.set("current_date", current_date_fn)?;
+        
+        // _ctx.current_time() -> current time
+        let current_time_fn = lua.create_function(|_lua, ()| {
+            Ok(chrono::Local::now().format("%H:%M:%S").to_string())
+        })?;
+        api.set("current_time", current_time_fn)?;
+        
+        // _ctx.coalesce(a, b, ...) -> first non-null value
+        let coalesce_fn = lua.create_function(|_lua, args: Vec<LuaValue>| {
+            for arg in args {
+                if !matches!(arg, LuaValue::Nil) {
+                    return Ok(arg);
+                }
+            }
+            Ok(LuaValue::Nil)
+        })?;
+        api.set("coalesce", coalesce_fn)?;
+        
+        // _ctx.nullif(a, b) -> NULL if a == b, else a
+        let nullif_fn = lua.create_function(|_lua, (a, b): (LuaValue, LuaValue)| {
+            // Compare values and return nil if equal
+            let equal = match (&a, &b) {
+                (LuaValue::Nil, LuaValue::Nil) => true,
+                (LuaValue::Boolean(x), LuaValue::Boolean(y)) => x == y,
+                (LuaValue::Integer(x), LuaValue::Integer(y)) => x == y,
+                (LuaValue::Number(x), LuaValue::Number(y)) => x == y,
+                (LuaValue::String(x), LuaValue::String(y)) => x == y,
+                _ => false,
+            };
+            if equal {
+                Ok(LuaValue::Nil)
+            } else {
+                Ok(a)
+            }
+        })?;
+        api.set("nullif", nullif_fn)?;
+        
         Ok(api)
     }
 }

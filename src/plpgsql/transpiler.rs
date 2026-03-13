@@ -344,6 +344,27 @@ fn emit_assign(ctx: &mut TranspileContext, assign: &PlPgSQLStmtAssign) -> Result
     // We need to extract just the right-hand side
     let expr_query = &assign.expr.query;
     
+    // Check if this is an assignment to a record field (e.g., "NEW.column = value")
+    // In this case, the varname will be something like "var_3" (unnamed datum)
+    // and the expr_query will contain the full assignment "NEW.column = value"
+    if varname.starts_with("var_") && expr_query.contains('=') {
+        // Parse the expression to extract target and value
+        // Format: "NEW.column = value" or "NEW.column := value"
+        if let Some(eq_pos) = expr_query.find('=') {
+            let target = expr_query[..eq_pos].trim();
+            let rhs = expr_query[eq_pos + 1..].trim();
+            
+            // Check if target looks like a record field access (NEW.column or OLD.column)
+            if target.starts_with("NEW.") || target.starts_with("OLD.") {
+                // Transpile the right-hand side
+                let expr_lua = plpgsql_expr_to_lua(rhs);
+                // Generate: NEW["column"] = value (or NEW.column = value)
+                ctx.emit_line(&format!("{} = {}", target, expr_lua));
+                return Ok(());
+            }
+        }
+    }
+    
     // Check if the query contains := (assignment operator)
     let rhs = if let Some(pos) = expr_query.find(":=") {
         // Extract the right-hand side after :=
@@ -717,6 +738,9 @@ fn transpile_expr(expr: &PlPgSQLExpr) -> Result<String> {
 fn plpgsql_expr_to_lua(expr: &str) -> String {
     let mut result = expr.to_string();
     
+    // Map PostgreSQL built-in functions to Lua equivalents
+    result = map_postgres_functions(&result);
+    
     // Convert PostgreSQL string concatenation (||) to Lua (..)
     // Be careful not to convert inside string literals
     let mut in_string = false;
@@ -756,6 +780,39 @@ fn plpgsql_expr_to_lua(expr: &str) -> String {
     
     // Convert := to = (assignment operator)
     result = result.replace(":=", "=");
+    
+    result
+}
+
+/// Map PostgreSQL built-in functions to Lua equivalents
+/// 
+/// This function replaces PostgreSQL function calls with their Lua runtime equivalents.
+/// The Lua runtime provides these functions via the _ctx table.
+fn map_postgres_functions(expr: &str) -> String {
+    let mut result = expr.to_string();
+    
+    // Define function mappings: PostgreSQL function -> Lua equivalent
+    // These functions are provided by the Lua runtime in _ctx
+    let function_mappings: Vec<(&str, &str)> = vec![
+        ("NOW()", "_ctx.now()"),
+        ("CURRENT_TIMESTAMP", "_ctx.now()"),
+        ("CURRENT_DATE", "_ctx.current_date()"),
+        ("CURRENT_TIME", "_ctx.current_time()"),
+        ("COALESCE(", "_ctx.coalesce("),
+        ("NULLIF(", "_ctx.nullif("),
+    ];
+    
+    // Apply mappings (case-insensitive)
+    for (pg_func, lua_func) in function_mappings {
+        // Match both uppercase and lowercase versions
+        let upper_func = pg_func.to_uppercase();
+        let lower_func = pg_func.to_lowercase();
+        
+        result = result.replace(&upper_func, lua_func);
+        if upper_func != lower_func {
+            result = result.replace(&lower_func, lua_func);
+        }
+    }
     
     result
 }
@@ -900,5 +957,125 @@ mod tests {
         let lua = transpile_to_lua(&func).unwrap();
         
         assert!(lua.contains("_ctx.perform"));
+    }
+
+    #[test]
+    fn test_transpile_new_column_assignment() {
+        // Test that NEW.column assignments generate proper Lua code
+        let sql = r#"
+            CREATE FUNCTION set_timestamp() RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.created_at = '2024-01-01';
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // The generated Lua should set the NEW table's column directly
+        // Should be: NEW.created_at = '2024-01-01'
+        // NOT: var_x = NEW.created_at = '2024-01-01' (which is invalid Lua)
+        assert!(lua.contains("NEW.created_at = '2024-01-01'"));
+        // Make sure we don't have the invalid chained assignment
+        assert!(!lua.contains("var_3 = NEW.created_at"));
+    }
+    
+    #[test]
+    fn test_transpile_old_column_assignment() {
+        // Test that OLD.column assignments also work
+        let sql = r#"
+            CREATE FUNCTION audit_delete() RETURNS TRIGGER AS $$
+            BEGIN
+                OLD.deleted_at = '2024-01-01';
+                RETURN OLD;
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // Should generate: OLD.deleted_at = '2024-01-01'
+        assert!(lua.contains("OLD.deleted_at = '2024-01-01'"));
+    }
+    
+    #[test]
+    fn test_transpile_regular_variable_assignment() {
+        // Test that regular variable assignments still work
+        let sql = r#"
+            CREATE FUNCTION test_assign() RETURNS int AS $$
+            DECLARE
+                x int := 5;
+            BEGIN
+                x := x + 1;
+                RETURN x;
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // Regular variables should still use the datum name
+        assert!(lua.contains("x = x + 1"));
+    }
+
+    #[test]
+    fn test_transpile_now_function() {
+        // Test that NOW() is mapped to _ctx.now()
+        let sql = r#"
+            CREATE FUNCTION get_timestamp() RETURNS TEXT AS $$
+            BEGIN
+                RETURN NOW();
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // Should use _ctx.now() instead of NOW()
+        assert!(lua.contains("_ctx.now()"));
+        assert!(!lua.contains("NOW()"));
+    }
+
+    #[test]
+    fn test_transpile_current_timestamp() {
+        // Test that CURRENT_TIMESTAMP is mapped to _ctx.now()
+        let sql = r#"
+            CREATE FUNCTION get_timestamp() RETURNS TEXT AS $$
+            BEGIN
+                RETURN CURRENT_TIMESTAMP;
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // Should use _ctx.now() instead of CURRENT_TIMESTAMP
+        assert!(lua.contains("_ctx.now()"));
+        assert!(!lua.contains("CURRENT_TIMESTAMP"));
+    }
+
+    #[test]
+    fn test_transpile_coalesce() {
+        // Test that COALESCE is mapped to _ctx.coalesce()
+        let sql = r#"
+            CREATE FUNCTION safe_value(a int, b int) RETURNS int AS $$
+            BEGIN
+                RETURN COALESCE(a, b);
+            END;
+            $$ LANGUAGE plpgsql;
+        "#;
+        
+        let func = parse_plpgsql_function(sql).unwrap();
+        let lua = transpile_to_lua(&func).unwrap();
+        
+        // Should use _ctx.coalesce() instead of COALESCE
+        assert!(lua.contains("_ctx.coalesce"));
+        assert!(!lua.contains("COALESCE("));
     }
 }

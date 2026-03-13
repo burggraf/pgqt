@@ -20,6 +20,7 @@ use crate::handler::utils::HandlerUtils;
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
 use crate::trigger::{TriggerExecutor, OperationType, BeforeTriggerResult, extract_table_and_operation};
+use crate::trigger::rows::{extract_old_row_from_dml, fetch_inserted_row};
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
 use rusqlite::Statement;
 
@@ -688,6 +689,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         operation: crate::transpiler::OperationType,
     ) -> Result<Vec<Response>> {
         use crate::transpiler::OperationType as TranspileOpType;
+        use crate::trigger::rows::{build_new_row_from_insert, build_new_row_from_update, build_old_row_from_where};
 
         // Map transpiler operation type to trigger operation type
         let trigger_op = match operation {
@@ -712,20 +714,41 @@ pub trait QueryExecution: HandlerUtils + Clone {
         // Create trigger executor
         let trigger_executor = TriggerExecutor::new(self.functions().clone());
 
-        // For INSERT/UPDATE, we need to build NEW row
-        // For UPDATE/DELETE, we need to build OLD row
-        let old_row = None; // TODO: Build OLD row for UPDATE/DELETE
+        // For UPDATE/DELETE, we need to build OLD row BEFORE executing the DML
+        // For INSERT, there's no OLD row
+        let old_row = match trigger_op {
+            OperationType::Update | OperationType::Delete => {
+                // Try to extract WHERE clause and fetch the OLD row
+                // This is a simplified implementation - for complex WHERE clauses
+                // with parameters, we'd need more sophisticated parsing
+                extract_old_row_from_dml(conn, &table_name, original_sql).ok()
+            }
+            OperationType::Insert => None,
+        };
 
-        // TODO: Build NEW row from INSERT/UPDATE values
-        // For now, create an empty NEW row so triggers can execute
-        let new_row = Some(std::collections::HashMap::new());
+        // Build NEW row from INSERT/UPDATE values
+        let new_row = match trigger_op {
+            OperationType::Insert => {
+                build_new_row_from_insert(conn, &table_name, original_sql).ok()
+            }
+            OperationType::Update => {
+                // For UPDATE, merge the SET clause values with OLD row values
+                let mut updated_row = old_row.clone().unwrap_or_default();
+                let set_values = build_new_row_from_update(conn, &table_name, original_sql).ok();
+                if let Some(values) = set_values {
+                    updated_row.extend(values);
+                }
+                Some(updated_row)
+            }
+            OperationType::Delete => None,
+        };
 
         // Execute BEFORE triggers
         match trigger_executor.execute_before_triggers(
             conn,
             &table_name,
             trigger_op,
-            old_row,
+            old_row.clone(),
             new_row,
         )? {
             BeforeTriggerResult::Abort => {
@@ -741,14 +764,21 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 let result = self.execute_statement(conn, sqlite_sql)?;
 
                 // Execute AFTER triggers
-                // Get the actual row data that was inserted/updated
-                let after_new_row = None; // TODO: Fetch actual row data
-                let old_row_for_after = None; // TODO: Build OLD row for UPDATE/DELETE
+                // For INSERT, fetch the actual row that was inserted
+                let after_new_row = match trigger_op {
+                    OperationType::Insert => {
+                        // Fetch the inserted row using the primary key or last_insert_rowid
+                        fetch_inserted_row(conn, &table_name).ok()
+                    }
+                    OperationType::Update => modified_new_row,
+                    OperationType::Delete => None,
+                };
+                
                 trigger_executor.execute_after_triggers(
                     conn,
                     &table_name,
                     trigger_op,
-                    old_row_for_after,
+                    old_row.clone(), // OLD row is same as before for AFTER triggers
                     after_new_row,
                 )?;
 

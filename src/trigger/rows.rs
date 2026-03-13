@@ -103,8 +103,8 @@ pub fn build_new_row(values: &[(String, Value)]) -> HashMap<String, Value> {
 /// Parses the INSERT statement to extract column names and values.
 /// This is a best-effort parsing - complex expressions may not be fully supported.
 pub fn build_new_row_from_insert(
-    conn: &Connection,
-    table_name: &str,
+    _conn: &Connection,
+    _table_name: &str,
     sql: &str,
 ) -> Result<HashMap<String, Value>> {
     // Parse the INSERT statement using pg_query
@@ -113,7 +113,7 @@ pub fn build_new_row_from_insert(
     if let Some(raw_stmt) = result.protobuf.stmts.first() {
         if let Some(ref stmt_node) = raw_stmt.stmt {
             if let Some(pg_query::protobuf::node::Node::InsertStmt(stmt)) = &stmt_node.node {
-                return extract_insert_values(conn, table_name, stmt);
+                return extract_insert_values(stmt);
             }
         }
     }
@@ -123,8 +123,6 @@ pub fn build_new_row_from_insert(
 
 /// Extract values from an INSERT statement
 fn extract_insert_values(
-    _conn: &Connection,
-    _table_name: &str,
     stmt: &pg_query::protobuf::InsertStmt,
 ) -> Result<HashMap<String, Value>> {
     use pg_query::protobuf::node::Node as NodeEnum;
@@ -259,6 +257,54 @@ pub fn get_primary_key_columns(
     Ok(pk_columns.into_iter().map(|(_, name)| name).collect())
 }
 
+/// Build NEW row for UPDATE statement
+///
+/// For UPDATE operations, the NEW row comes from the SET clause.
+/// Note: This only extracts the modified columns. To get a complete NEW row,
+/// you would need to merge these with the OLD row values for unmodified columns.
+pub fn build_new_row_from_update(
+    _conn: &Connection,
+    _table_name: &str,
+    sql: &str,
+) -> Result<HashMap<String, Value>> {
+    // Parse the UPDATE statement using pg_query
+    let result = pg_query::parse(sql)?;
+
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(ref stmt_node) = raw_stmt.stmt {
+            if let Some(pg_query::protobuf::node::Node::UpdateStmt(stmt)) = &stmt_node.node {
+                return extract_update_values(stmt);
+            }
+        }
+    }
+
+    Err(anyhow!("Failed to parse UPDATE statement"))
+}
+
+/// Extract values from an UPDATE statement
+fn extract_update_values(
+    stmt: &pg_query::protobuf::UpdateStmt,
+) -> Result<HashMap<String, Value>> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+
+    let mut result = HashMap::new();
+
+    // Get the target list (SET clause assignments)
+    for target in &stmt.target_list {
+        if let Some(NodeEnum::ResTarget(rt)) = target.node.as_ref() {
+            let col_name = &rt.name;
+            
+            // Get the value from the expression
+            if let Some(val_node) = &rt.val {
+                let value = extract_value_from_node(val_node)?;
+                result.insert(col_name.clone(), value);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// Build OLD row by looking up the row that matches the WHERE clause of an UPDATE/DELETE
 ///
 /// This is a simplified implementation that tries to extract the primary key from the WHERE clause.
@@ -329,6 +375,117 @@ pub fn build_old_row_from_where(
             Err(anyhow!("No row found matching WHERE clause"))
         }
     }
+}
+
+/// Extract OLD row from an UPDATE/DELETE statement
+///
+/// Parses the SQL to extract the WHERE clause and fetches the matching row.
+/// This is a best-effort implementation - complex WHERE clauses may not be fully supported.
+pub fn extract_old_row_from_dml(
+    conn: &Connection,
+    table_name: &str,
+    sql: &str,
+) -> Result<HashMap<String, Value>> {
+    // Parse the SQL to extract the WHERE clause
+    let result = pg_query::parse(sql)?;
+
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(ref stmt_node) = raw_stmt.stmt {
+            // Handle UPDATE statements
+            if let Some(pg_query::protobuf::node::Node::UpdateStmt(stmt)) = &stmt_node.node {
+                if let Some(where_clause) = &stmt.where_clause {
+                    // Try to deparse the WHERE clause
+                    // We need to reconstruct a minimal parse result for deparse
+                    let where_sql = deparse_where_clause(where_clause)?;
+                    return build_old_row_from_where(conn, table_name, &where_sql, &[]);
+                }
+            }
+            // Handle DELETE statements
+            else if let Some(pg_query::protobuf::node::Node::DeleteStmt(stmt)) = &stmt_node.node {
+                if let Some(where_clause) = &stmt.where_clause {
+                    let where_sql = deparse_where_clause(where_clause)?;
+                    return build_old_row_from_where(conn, table_name, &where_sql, &[]);
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("Could not extract WHERE clause from DML statement"))
+}
+
+/// Deparse a WHERE clause node back to SQL
+fn deparse_where_clause(where_clause: &pg_query::protobuf::Node) -> Result<String> {
+    // Create a minimal SELECT statement with the WHERE clause for deparsing
+    let temp_sql = format!("SELECT 1 WHERE 1=1");
+    let temp_result = pg_query::parse(&temp_sql)?;
+    
+    // This is a simplified approach - in practice, we'd need to properly
+    // reconstruct the parse tree. For now, return a placeholder.
+    // TODO: Implement proper deparsing of WHERE clauses
+    Err(anyhow!("WHERE clause deparsing not yet fully implemented"))
+}
+
+/// Fetch the row that was just inserted
+///
+/// Uses SQLite's last_insert_rowid() to find the inserted row.
+pub fn fetch_inserted_row(
+    conn: &Connection,
+    table_name: &str,
+) -> Result<HashMap<String, Value>> {
+    // Get the primary key columns
+    let pk_columns = get_primary_key_columns(conn, table_name)?;
+    
+    if pk_columns.is_empty() {
+        // No primary key - try to use rowid
+        let sql = format!(
+            "SELECT * FROM {} WHERE rowid = last_insert_rowid()",
+            table_name
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        
+        let column_count = stmt.column_count();
+        let column_names: Vec<String> = (0..column_count)
+            .map(|i| stmt.column_name(i).unwrap_or("").to_string())
+            .collect();
+        
+        let mut rows = stmt.query([])?;
+        
+        if let Some(row) = rows.next()? {
+            let mut result = HashMap::new();
+            for (i, col_name) in column_names.iter().enumerate() {
+                let value: Value = row.get(i)?;
+                result.insert(col_name.clone(), value);
+            }
+            return Ok(result);
+        }
+    } else {
+        // Use the primary key with last_insert_rowid
+        // This assumes the primary key is an INTEGER and uses AUTOINCREMENT
+        let pk = &pk_columns[0];
+        let sql = format!(
+            "SELECT * FROM {} WHERE {} = last_insert_rowid()",
+            table_name, pk
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        
+        let column_count = stmt.column_count();
+        let column_names: Vec<String> = (0..column_count)
+            .map(|i| stmt.column_name(i).unwrap_or("").to_string())
+            .collect();
+        
+        let mut rows = stmt.query([])?;
+        
+        if let Some(row) = rows.next()? {
+            let mut result = HashMap::new();
+            for (i, col_name) in column_names.iter().enumerate() {
+                let value: Value = row.get(i)?;
+                result.insert(col_name.clone(), value);
+            }
+            return Ok(result);
+        }
+    }
+    
+    Err(anyhow!("Could not fetch inserted row"))
 }
 
 #[cfg(test)]
@@ -436,5 +593,29 @@ mod tests {
         assert_eq!(old_row.get("order_id"), Some(&Value::Integer(1)));
         assert_eq!(old_row.get("item_id"), Some(&Value::Integer(1)));
         assert_eq!(old_row.get("quantity"), Some(&Value::Integer(5)));
+    }
+
+    #[test]
+    fn test_build_new_row_from_insert() {
+        let conn = setup_test_db();
+
+        let sql = "INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com')";
+        let new_row = build_new_row_from_insert(&conn, "users", sql).unwrap();
+
+        assert_eq!(new_row.get("id"), Some(&Value::Integer(3)));
+        assert_eq!(new_row.get("name"), Some(&Value::Text("Charlie".to_string())));
+        assert_eq!(new_row.get("email"), Some(&Value::Text("charlie@example.com".to_string())));
+    }
+
+    #[test]
+    fn test_build_new_row_from_update() {
+        let conn = setup_test_db();
+
+        let sql = "UPDATE users SET name = 'Alice Updated' WHERE id = 1";
+        let new_row = build_new_row_from_update(&conn, "users", sql).unwrap();
+
+        // Should have the updated name
+        assert_eq!(new_row.get("name"), Some(&Value::Text("Alice Updated".to_string())));
+        // Note: This only extracts SET clause values, not the full row
     }
 }

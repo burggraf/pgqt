@@ -463,7 +463,7 @@ mod tests {
 
         let handler = SqliteHandler::new(&db_path).unwrap();
 
-        let _ = handler.execute_query("CREATE TABLE test_table (id SERIAL, name VARCHAR(10), created_at TIMESTAMP WITH TIME ZONE)");
+        let _ = handler.execute_query(1, "CREATE TABLE test_table (id SERIAL, name VARCHAR(10), created_at TIMESTAMP WITH TIME ZONE)");
 
         let conn = handler.conn.lock().unwrap();
         let metadata = catalog::get_table_metadata(&conn, "test_table").unwrap();
