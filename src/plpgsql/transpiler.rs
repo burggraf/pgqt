@@ -9,6 +9,8 @@
 use anyhow::Result;
 use crate::plpgsql::ast::*;
 use std::fmt::Write;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 /// Transpile PL/pgSQL AST to Lua source code
 pub fn transpile_to_lua(function: &PlpgsqlFunction) -> Result<String> {
@@ -748,6 +750,9 @@ fn plpgsql_expr_to_lua(expr: &str) -> String {
     // Convert PostgreSQL comparisons (=, <>, !=) to Lua (==, ~=)
     result = convert_comparisons_to_lua(&result);
     
+    // Convert EXTRACT(field FROM timestamp) to _ctx.extract('field', timestamp)
+    result = convert_extract_to_lua(&result);
+    
     // Lowercase NEW.field and OLD.field access
     result = lowercase_record_access(&result);
     
@@ -893,6 +898,53 @@ fn convert_comparisons_to_lua(expr: &str) -> String {
     result
 }
 
+/// Convert PostgreSQL EXTRACT(field FROM timestamp) to _ctx.extract('field', timestamp)
+fn convert_extract_to_lua(expr: &str) -> String {
+    lazy_static! {
+        static ref EXTRACT_RE: Regex = Regex::new(r"(?i)EXTRACT\s*\(\s*(\w+)\s+FROM\s+").unwrap();
+    }
+    
+    let mut result = expr.to_string();
+    
+    // We need to find the matching closing parenthesis for the EXTRACT call
+    // Simple regex replacement won't work well with nested parentheses in the timestamp expression
+    // so we iterate and find matches
+    
+    while let Some(mat) = EXTRACT_RE.find(&result) {
+        let start = mat.start();
+        let field = mat.as_str()[mat.as_str().find('(').unwrap()+1..mat.as_str().find(" FROM").unwrap()].trim();
+        
+        // Find matching closing parenthesis
+        let mut depth = 1;
+        let mut end = None;
+        let search_start = mat.end();
+        let chars: Vec<char> = result[search_start..].chars().collect();
+        
+        for (i, c) in chars.iter().enumerate() {
+            if *c == '(' {
+                depth += 1;
+            } else if *c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(search_start + i);
+                    break;
+                }
+            }
+        }
+        
+        if let Some(e) = end {
+            let timestamp_expr = &result[search_start..e];
+            let replacement = format!("_ctx.extract('{}', {})", field, timestamp_expr);
+            result.replace_range(start..e+1, &replacement);
+        } else {
+            // Unbalanced parentheses, break to avoid infinite loop
+            break;
+        }
+    }
+    
+    result
+}
+
 /// Map PostgreSQL built-in functions to Lua equivalents
 /// 
 /// This function replaces PostgreSQL function calls with their Lua runtime equivalents.
@@ -917,6 +969,12 @@ fn map_postgres_functions(expr: &str) -> String {
         ("CEIL(", "_ctx.ceil("),
         ("FLOOR(", "_ctx.floor("),
         ("REPLACE(", "_ctx.replace("),
+        ("TRIM(", "_ctx.trim("),
+        ("SUBSTRING(", "_ctx.substring("),
+        ("GREATEST(", "_ctx.greatest("),
+        ("LEAST(", "_ctx.least("),
+        ("DATE_TRUNC(", "_ctx.date_trunc("),
+        ("AGE(", "_ctx.age("),
     ];
     
     // Apply mappings (case-insensitive)

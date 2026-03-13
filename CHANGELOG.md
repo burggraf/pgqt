@@ -10,9 +10,10 @@ All notable changes to PGQT will be documented in this file.
 - **Trigger Functions**: Added support for several PostgreSQL built-in functions in triggers:
   - `NOW()`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME`
   - `COALESCE()`, `NULLIF()`
-  - `LOWER()`, `UPPER()`, `LENGTH()`, `REPLACE()`
-  - `ABS()`, `ROUND()`, `CEIL()`, `FLOOR()`
-- **Multi-Row Trigger Support**: Triggers now correctly handle `OLD` row fetching even for statements without `WHERE` clauses.
+  - `LOWER()`, `UPPER()`, `LENGTH()`, `REPLACE()`, `TRIM()`, `SUBSTRING()`
+  - `ABS()`, `ROUND()`, `CEIL()`, `FLOOR()`, `GREATEST()`, `LEAST()`
+  - `DATE_TRUNC()`, `EXTRACT()`, `AGE()`
+- **Multi-Row Trigger Support**: True "FOR EACH ROW" semantics for multi-row `UPDATE` and `DELETE` statements. Triggers now fire for every affected row, and `BEFORE` triggers can modify individual rows in a multi-row operation.
 
 ### Fixed
 - Fixed several build warnings related to unused variables and imports.

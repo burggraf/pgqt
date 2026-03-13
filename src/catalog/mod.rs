@@ -44,7 +44,8 @@ pub use table::{
 #[allow(unused_imports)]
 pub use table::{store_column_metadata, get_table_metadata, get_column_metadata, delete_table_metadata, get_table_columns_with_defaults, extract_default_from_constraints};
 pub use function::{store_function, get_function, drop_function};
-pub use trigger::{store_trigger, drop_trigger, get_triggers_for_table, calc_table_oid};
+#[allow(unused_imports)]
+pub use trigger::{store_trigger, get_trigger, drop_trigger, get_triggers_for_table, calc_table_oid};
 pub use rls::{is_rls_enabled, is_rls_forced, get_applicable_policies};
 #[allow(unused_imports)]
 pub use rls::{enable_rls, disable_rls, store_rls_policy, drop_rls_policy, get_table_policies};

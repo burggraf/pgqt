@@ -8,6 +8,7 @@ pub struct ValidationError {
     pub position: Option<usize>,
 }
 
+#[allow(dead_code)]
 pub fn validate_varchar(value: &str, max_length: usize) -> Result<(), ValidationError> {
     if value.len() > max_length {
         return Err(ValidationError {
@@ -19,6 +20,7 @@ pub fn validate_varchar(value: &str, max_length: usize) -> Result<(), Validation
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_char(value: &str, length: usize) -> Result<(), ValidationError> {
     if value.len() > length {
         return Err(ValidationError {

@@ -404,6 +404,144 @@ pub fn execute_plpgsql_trigger(
     })?;
     api.set("concat", concat_fn)?;
 
+    // Add TRIM function
+    let trim_fn = lua.create_function(|_lua, s: String| {
+        Ok(s.trim().to_string())
+    })?;
+    api.set("trim", trim_fn)?;
+
+    // Add SUBSTRING function
+    let substring_fn = lua.create_function(|_lua, (s, start, len): (String, i64, Option<i64>)| {
+        let s_len = s.chars().count() as i64;
+        let start = if start < 1 { 1 } else { start };
+        if start > s_len {
+            return Ok("".to_string());
+        }
+        let end = if let Some(l) = len {
+            (start + l - 1).min(s_len)
+        } else {
+            s_len
+        };
+        
+        let chars: Vec<char> = s.chars().collect();
+        let result: String = chars[(start as usize - 1)..(end as usize)].iter().collect();
+        Ok(result)
+    })?;
+    api.set("substring", substring_fn)?;
+
+    // Add GREATEST function
+    let greatest_fn = lua.create_function(|_lua, args: Vec<mlua::Value>| {
+        let mut max_val: Option<f64> = None;
+        for arg in args {
+            if let Some(n) = match arg {
+                mlua::Value::Integer(i) => Some(i as f64),
+                mlua::Value::Number(n) => Some(n),
+                _ => None,
+            } {
+                if max_val.is_none() || n > max_val.unwrap() {
+                    max_val = Some(n);
+                }
+            }
+        }
+        Ok(max_val)
+    })?;
+    api.set("greatest", greatest_fn)?;
+
+    // Add LEAST function
+    let least_fn = lua.create_function(|_lua, args: Vec<mlua::Value>| {
+        let mut min_val: Option<f64> = None;
+        for arg in args {
+            if let Some(n) = match arg {
+                mlua::Value::Integer(i) => Some(i as f64),
+                mlua::Value::Number(n) => Some(n),
+                _ => None,
+            } {
+                if min_val.is_none() || n < min_val.unwrap() {
+                    min_val = Some(n);
+                }
+            }
+        }
+        Ok(min_val)
+    })?;
+    api.set("least", least_fn)?;
+
+    // Add DATE_TRUNC function
+    let date_trunc_fn = lua.create_function(|_lua, (field, ts): (String, String)| {
+        use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+        
+        let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+            NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).or_else(|_| {
+             NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).map_err(|e| mlua::Error::RuntimeError(format!("Failed to parse timestamp {}: {}", ts, e)))?;
+
+        let truncated = match field.to_lowercase().as_str() {
+            "year" => dt.with_month(1).and_then(|d| d.with_day(1)).and_then(|d| d.with_hour(0)).and_then(|d| d.with_minute(0)).and_then(|d| d.with_second(0)),
+            "month" => dt.with_day(1).and_then(|d| d.with_hour(0)).and_then(|d| d.with_minute(0)).and_then(|d| d.with_second(0)),
+            "day" => dt.with_hour(0).and_then(|d| d.with_minute(0)).and_then(|d| d.with_second(0)),
+            "hour" => dt.with_minute(0).and_then(|d| d.with_second(0)),
+            "minute" => dt.with_second(0),
+            "second" => Some(dt),
+            _ => Some(dt),
+        }.ok_or_else(|| mlua::Error::RuntimeError("Truncation failed".to_string()))?;
+        
+        Ok(truncated.format("%Y-%m-%d %H:%M:%S").to_string())
+    })?;
+    api.set("date_trunc", date_trunc_fn)?;
+
+    // Add EXTRACT function
+    let extract_fn = lua.create_function(|_lua, (field, ts): (String, String)| {
+        use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+        
+        let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+            NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).or_else(|_| {
+             NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).map_err(|e| mlua::Error::RuntimeError(format!("Failed to parse timestamp {}: {}", ts, e)))?;
+
+        let val = match field.to_lowercase().as_str() {
+            "year" => dt.year() as f64,
+            "month" => dt.month() as f64,
+            "day" => dt.day() as f64,
+            "hour" => dt.hour() as f64,
+            "minute" => dt.minute() as f64,
+            "second" => dt.second() as f64,
+            "dow" => dt.weekday().number_from_sunday() as i64 as f64 - 1.0, // 0-6
+            "doy" => dt.ordinal() as f64,
+            _ => 0.0,
+        };
+        Ok(val)
+    })?;
+    api.set("extract", extract_fn)?;
+
+    // Add AGE function
+    let age_fn = lua.create_function(|_lua, ts: String| {
+        use chrono::{Utc, NaiveDateTime, DateTime};
+        
+        let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+            NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).or_else(|_| {
+             NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+        }).map_err(|e| mlua::Error::RuntimeError(format!("Failed to parse timestamp {}: {}", ts, e)))?;
+
+        let now = Utc::now();
+        let duration = now.signed_duration_since(dt);
+        
+        let total_seconds = duration.num_seconds();
+        let years = total_seconds / (365 * 24 * 3600);
+        let months = (total_seconds % (365 * 24 * 3600)) / (30 * 24 * 3600);
+        let days = (total_seconds % (30 * 24 * 3600)) / (24 * 3600);
+        
+        Ok(format!("{} years {} months {} days", years, months, days))
+    })?;
+    api.set("age", age_fn)?;
+
     // Call the function with the API table as _ctx
     let result: mlua::Value = func.call(api)?;
 

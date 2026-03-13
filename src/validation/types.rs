@@ -142,6 +142,7 @@ pub fn validate_timezone(tz: &str) -> Result<(), ValidationError> {
 
 /// Validates that a TIME type value doesn't contain timezone information
 /// TIME type should not accept timezone info like '15:36:39 America/New_York'
+#[allow(dead_code)]
 pub fn validate_time_format(input: &str) -> Result<(), ValidationError> {
     let input = input.trim_matches('\'');
     let lower = input.to_lowercase();
@@ -177,6 +178,7 @@ pub fn validate_time_format(input: &str) -> Result<(), ValidationError> {
 /// Parses a date string that may include era markers (BC/AD)
 /// PostgreSQL supports dates like '2040-04-10 BC'
 /// Returns the cleaned date string or an error if BC dates are encountered
+#[allow(dead_code)]
 pub fn parse_date_with_era(input: &str) -> Result<String, ValidationError> {
     // Trim whitespace and quotes
     let trimmed = input.trim().trim_matches('\'');

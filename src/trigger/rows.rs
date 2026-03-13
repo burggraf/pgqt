@@ -23,6 +23,7 @@ use std::collections::HashMap;
 /// # Returns
 ///
 /// A HashMap containing column names and their values
+#[allow(dead_code)]
 pub fn build_old_row(
     conn: &Connection,
     table_name: &str,
@@ -94,6 +95,7 @@ pub fn build_old_row(
 /// # Returns
 ///
 /// A HashMap containing column names and their values
+#[allow(dead_code)]
 pub fn build_new_row(values: &[(String, Value)]) -> HashMap<String, Value> {
     values.iter().cloned().collect()
 }
@@ -262,6 +264,7 @@ pub fn get_primary_key_columns(
 /// For UPDATE operations, the NEW row comes from the SET clause.
 /// Note: This only extracts the modified columns. To get a complete NEW row,
 /// you would need to merge these with the OLD row values for unmodified columns.
+#[allow(dead_code)]
 pub fn build_new_row_from_update(
     conn: &Connection,
     table_name: &str,
@@ -311,6 +314,7 @@ fn extract_update_values(
 ///
 /// This is a simplified implementation that tries to extract the primary key from the WHERE clause.
 /// For complex WHERE clauses, it may not work correctly.
+#[allow(dead_code)]
 pub fn build_old_row_from_where(
     conn: &Connection,
     table_name: &str,
@@ -383,6 +387,7 @@ pub fn build_old_row_from_where(
 ///
 /// Parses the SQL to extract the WHERE clause and fetches the matching row.
 /// This is a best-effort implementation - complex WHERE clauses may not be fully supported.
+#[allow(dead_code)]
 pub fn extract_old_row_from_dml(
     conn: &Connection,
     table_name: &str,

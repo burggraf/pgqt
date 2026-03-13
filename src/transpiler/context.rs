@@ -180,11 +180,13 @@ impl TranspileContext {
     }
 
     /// Get the type for a result column at the given index
+    #[allow(dead_code)]
     pub fn get_column_type(&self, index: usize) -> Option<&String> {
         self.column_types.get(index).and_then(|t| t.as_ref())
     }
 
     /// Clear all column types
+    #[allow(dead_code)]
     pub fn clear_column_types(&mut self) {
         self.column_types.clear();
     }

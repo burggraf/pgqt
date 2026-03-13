@@ -711,6 +711,7 @@ impl SqliteHandler {
     /// 
     /// If the client already has a connection checked out, returns a clone of the Arc.
     /// Otherwise, checks out a new connection from the pool.
+    #[allow(dead_code)]
     pub fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>> {
         // Check if client already has a connection
         if let Some(entry) = self.client_connections.get(&client_id) {
@@ -727,6 +728,7 @@ impl SqliteHandler {
     /// Return a per-session connection to the pool
     /// 
     /// Called when a client disconnects or when explicitly returning the connection.
+    #[allow(dead_code)]
     pub fn return_session_connection(&self, client_id: u32) {
         if let Some((_, (conn, handle))) = self.client_connections.remove(&client_id) {
             // The handle will be dropped, which marks the connection as returned in the pool
@@ -737,6 +739,7 @@ impl SqliteHandler {
     }
 
     /// Get the shared legacy connection (for backwards compatibility during migration)
+    #[allow(dead_code)]
     pub fn get_shared_connection(&self) -> Arc<Mutex<Connection>> {
         self.conn.clone()
     }

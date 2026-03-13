@@ -174,6 +174,7 @@ pub fn execute_transaction_command(
 ///
 /// This is the original API that doesn't use per-session connections.
 /// For new code, use parse_transaction_command + execute_transaction_command.
+#[allow(dead_code)]
 pub fn handle_transaction_control(sql: &str, session: &mut SessionContext) -> Option<Result<Vec<Response>>> {
     parse_transaction_command(sql).map(|cmd| {
         // This is a shim that doesn't actually execute on a connection.

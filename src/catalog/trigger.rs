@@ -56,6 +56,7 @@ pub fn store_trigger(conn: &Connection, metadata: &TriggerMetadata) -> Result<i6
 }
 
 /// Retrieve trigger metadata by name and table
+#[allow(dead_code)]
 pub fn get_trigger(
     conn: &Connection,
     trigger_name: &str,
@@ -243,6 +244,7 @@ pub fn calc_table_oid(table_name: &str) -> i64 {
 }
 
 /// Enable or disable a trigger
+#[allow(dead_code)]
 pub fn set_trigger_enabled(
     conn: &Connection,
     trigger_name: &str,

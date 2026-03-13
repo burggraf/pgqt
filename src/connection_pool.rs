@@ -147,6 +147,7 @@ impl ConnectionPool {
 
     /// Return a connection to the pool
     /// Called when a client disconnects or we're done with the connection
+    #[allow(dead_code)]
     pub fn return_connection(&self, conn: Arc<Mutex<Connection>>) {
         // Rollback any active transaction before returning to pool
         if let Ok(guard) = conn.lock() {
@@ -158,17 +159,20 @@ impl ConnectionPool {
     }
 
     /// Check if a client has a checked-out connection
+    #[allow(dead_code)]
     pub fn has_connection(&self, client_id: u32) -> bool {
         let in_use = self.in_use.lock().unwrap();
         in_use.contains(&client_id)
     }
 
     /// Get the number of available connections in the pool
+    #[allow(dead_code)]
     pub fn available_count(&self) -> usize {
         self.available.lock().unwrap().len()
     }
 
     /// Get the number of connections currently checked out
+    #[allow(dead_code)]
     pub fn in_use_count(&self) -> usize {
         self.in_use.lock().unwrap().len()
     }
