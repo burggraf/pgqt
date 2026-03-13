@@ -803,6 +803,12 @@ fn map_postgres_functions(expr: &str) -> String {
         ("NULLIF(", "_ctx.nullif("),
         ("LOWER(", "_ctx.lower("),
         ("UPPER(", "_ctx.upper("),
+        ("LENGTH(", "_ctx.length("),
+        ("ABS(", "_ctx.abs("),
+        ("ROUND(", "_ctx.round("),
+        ("CEIL(", "_ctx.ceil("),
+        ("FLOOR(", "_ctx.floor("),
+        ("REPLACE(", "_ctx.replace("),
     ];
     
     // Apply mappings (case-insensitive)

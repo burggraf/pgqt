@@ -689,7 +689,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         operation: crate::transpiler::OperationType,
     ) -> Result<Vec<Response>> {
         use crate::transpiler::OperationType as TranspileOpType;
-        use crate::trigger::rows::{build_new_row_from_insert, build_new_row_from_update, build_old_row_from_where};
+        use crate::trigger::rows::{build_new_row_from_insert, build_new_row_from_update};
 
         // Map transpiler operation type to trigger operation type
         let trigger_op = match operation {

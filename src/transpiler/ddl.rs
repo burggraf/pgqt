@@ -935,6 +935,7 @@ pub(crate) fn reconstruct_create_enum_stmt(stmt: &CreateEnumStmt, _ctx: &mut Tra
 /// This extracts all the trigger properties from the AST and returns
 /// a TriggerMetadata struct that can be stored in the catalog.
 pub fn parse_create_trigger(sql: &str) -> anyhow::Result<crate::catalog::TriggerMetadata> {
+    #[allow(unused_imports)]
     use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
 
     let result = pg_query::parse(sql)?;
@@ -950,6 +951,7 @@ pub fn parse_create_trigger(sql: &str) -> anyhow::Result<crate::catalog::Trigger
 
 /// Parse CreateTrigStmt protobuf into TriggerMetadata
 fn parse_create_trigger_stmt(stmt: &CreateTrigStmt) -> anyhow::Result<crate::catalog::TriggerMetadata> {
+    #[allow(unused_imports)]
     use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
 
     // Extract trigger name

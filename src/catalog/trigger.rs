@@ -21,7 +21,7 @@ pub fn store_trigger(conn: &Connection, metadata: &TriggerMetadata) -> Result<i6
     // Encode events as a bitmask for efficient filtering
     let tgtype = encode_tgtype(&metadata.timing, &metadata.events, &metadata.row_or_statement);
     
-    let events_json = serde_json::to_string(&metadata.events)?;
+    let _events_json = serde_json::to_string(&metadata.events)?;
     let args_json = serde_json::to_string(&metadata.args)?;
 
     conn.execute(
@@ -88,7 +88,7 @@ pub fn get_trigger(
 
     match row_result {
         Ok((oid, name, table_oid, tgtype, enabled, is_internal, 
-            constraint, deferrable, initdeferred, nargs, args_json, 
+            constraint, deferrable, initdeferred, _nargs, args_json, 
             function_oid, function_name)) => {
             let (timing, events, row_or_statement) = decode_tgtype(tgtype);
             let args: Vec<String> = serde_json::from_str(&args_json)?;
@@ -130,7 +130,7 @@ pub fn get_triggers_for_table(
          FROM __pg_triggers__ WHERE tgrelid = ? AND tgenabled = 1"
     );
     
-    let mut params: Vec<rusqlite::types::Value> = vec![table_oid.into()];
+    let mut _params: Vec<rusqlite::types::Value> = vec![table_oid.into()];
     
     // Add timing filter if specified
     // Timing bits:
@@ -165,7 +165,7 @@ pub fn get_triggers_for_table(
     query.push_str(" ORDER BY oid");
     
     let mut stmt = conn.prepare(&query)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+    let rows = stmt.query_map(rusqlite::params_from_iter(_params.iter()), |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -186,7 +186,7 @@ pub fn get_triggers_for_table(
     let mut triggers = Vec::new();
     for row in rows {
         let (oid, name, table_oid, tgtype, enabled, is_internal, 
-             constraint, deferrable, initdeferred, nargs, args_json, 
+             constraint, deferrable, initdeferred, _nargs, args_json, 
              function_oid, function_name) = row?;
         
         let (timing, events, row_or_statement) = decode_tgtype(tgtype);

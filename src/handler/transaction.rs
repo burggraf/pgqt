@@ -6,7 +6,7 @@
 use anyhow::{anyhow, Result};
 use pgwire::api::results::{Response, Tag};
 use rusqlite::Connection;
-use std::sync::{Arc, Mutex};
+// use std::sync::{Arc, Mutex};
 
 use crate::handler::{SessionContext, TransactionStatus};
 

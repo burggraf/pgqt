@@ -398,6 +398,9 @@ pub fn extract_old_row_from_dml(
                     // We need to reconstruct a minimal parse result for deparse
                     let where_sql = deparse_where_clause(where_clause)?;
                     return build_old_row_from_where(conn, table_name, &where_sql, &[]);
+                } else {
+                    // No WHERE clause - fetch any row (usually first)
+                    return build_old_row_from_where(conn, table_name, "1=1", &[]);
                 }
             }
             // Handle DELETE statements
@@ -405,6 +408,9 @@ pub fn extract_old_row_from_dml(
                 if let Some(where_clause) = &stmt.where_clause {
                     let where_sql = deparse_where_clause(where_clause)?;
                     return build_old_row_from_where(conn, table_name, &where_sql, &[]);
+                } else {
+                    // No WHERE clause
+                    return build_old_row_from_where(conn, table_name, "1=1", &[]);
                 }
             }
         }
@@ -415,14 +421,69 @@ pub fn extract_old_row_from_dml(
 
 /// Deparse a WHERE clause node back to SQL
 fn deparse_where_clause(where_clause: &pg_query::protobuf::Node) -> Result<String> {
-    // Create a minimal SELECT statement with the WHERE clause for deparsing
-    let temp_sql = format!("SELECT 1 WHERE 1=1");
-    let temp_result = pg_query::parse(&temp_sql)?;
+    // pg_query::deparse can deparse a Node back to SQL, but it requires
+    // the node to be wrapped in a RawStmt or similar in some versions.
+    // However, let's try a direct approach by looking at the node type.
     
-    // This is a simplified approach - in practice, we'd need to properly
-    // reconstruct the parse tree. For now, return a placeholder.
-    // TODO: Implement proper deparsing of WHERE clauses
-    Err(anyhow!("WHERE clause deparsing not yet fully implemented"))
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    match &where_clause.node {
+        Some(NodeEnum::AExpr(expr)) => {
+            // Simple expressions like "id = 1"
+            let left = if let Some(ref lexpr) = expr.lexpr {
+                deparse_node(lexpr)?
+            } else {
+                "".to_string()
+            };
+            
+            let right = if let Some(ref rexpr) = expr.rexpr {
+                deparse_node(rexpr)?
+            } else {
+                "".to_string()
+            };
+            
+            let op = match expr.name.first()
+                .and_then(|n| if let Some(NodeEnum::String(ref s)) = n.node { Some(s.sval.clone()) } else { None }) {
+                Some(s) => s.clone(),
+                None => "=".to_string()
+            };
+                
+            Ok(format!("{} {} {}", left, op, right))
+        }
+        _ => {
+            // For more complex expressions, we really need a proper deparser.
+            // Let's try to use pg_query's deparse if we can.
+            // Since we don't have a full deparser for individual nodes easily,
+            // we'll fall back to a placeholder for very complex cases.
+            Err(anyhow!("Complex WHERE clause deparsing not yet fully implemented"))
+        }
+    }
+}
+
+/// Helper to deparse simple nodes
+fn deparse_node(node: &pg_query::protobuf::Node) -> Result<String> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    match &node.node {
+        Some(NodeEnum::ColumnRef(cref)) => {
+            if let Some(NodeEnum::String(ref s)) = cref.fields.last().and_then(|f| f.node.as_ref()) {
+                Ok(s.sval.clone())
+            } else {
+                Ok("?".to_string())
+            }
+        }
+        Some(NodeEnum::AConst(aconst)) => {
+            use pg_query::protobuf::a_const::Val;
+            match &aconst.val {
+                Some(Val::Ival(i)) => Ok(i.ival.to_string()),
+                Some(Val::Fval(f)) => Ok(f.fval.clone()),
+                Some(Val::Sval(s)) => Ok(format!("'{}'", s.sval.replace('\'', "''"))),
+                Some(Val::Boolval(b)) => Ok(if b.boolval { "true" } else { "false" }.to_string()),
+                _ => Ok("NULL".to_string()),
+            }
+        }
+        _ => Ok("?".to_string()),
+    }
 }
 
 /// Fetch the row that was just inserted

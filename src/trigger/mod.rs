@@ -23,12 +23,13 @@ use std::collections::HashMap;
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use crate::catalog::{TriggerMetadata, TriggerTiming, TriggerEvent, FunctionMetadata};
+use crate::catalog::{TriggerTiming, TriggerEvent, FunctionMetadata};
 use crate::catalog::trigger::{get_triggers_for_table, calc_table_oid};
 
 pub mod rows;
 
-pub use rows::{build_old_row, build_new_row};
+#[allow(unused_imports)]
+pub use rows::{extract_old_row_from_dml};
 
 /// Operation type for trigger execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,7 +184,7 @@ impl TriggerExecutor {
 /// For BEFORE triggers, the function can return NULL to abort the operation,
 /// or return a row (possibly modified) to change the data.
 pub fn execute_plpgsql_trigger(
-    conn: &Connection,
+    _conn: &Connection,
     function_name: &str,
     trigger_name: &str,
     trigger_timing: &str,
@@ -200,7 +201,7 @@ pub fn execute_plpgsql_trigger(
         .ok_or_else(|| anyhow!("Trigger function {} not found", function_name))?;
 
     // Create Lua runtime
-    let runtime = crate::plpgsql::PlPgSqlRuntime::new()
+    let _runtime = crate::plpgsql::PlPgSqlRuntime::new()
         .map_err(|e| anyhow!("Failed to create Lua runtime: {}", e))?;
 
     // Reconstruct the CREATE FUNCTION statement to parse the PL/pgSQL
@@ -343,6 +344,42 @@ pub fn execute_plpgsql_trigger(
         Ok(s.to_uppercase())
     })?;
     api.set("upper", upper_fn)?;
+
+    // Add LENGTH function
+    let length_fn = lua.create_function(|_lua, s: String| {
+        Ok(s.len())
+    })?;
+    api.set("length", length_fn)?;
+
+    // Add ABS function
+    let abs_fn = lua.create_function(|_lua, n: f64| {
+        Ok(n.abs())
+    })?;
+    api.set("abs", abs_fn)?;
+
+    // Add ROUND function
+    let round_fn = lua.create_function(|_lua, n: f64| {
+        Ok((n + 0.5).floor())
+    })?;
+    api.set("round", round_fn)?;
+
+    // Add CEIL function
+    let ceil_fn = lua.create_function(|_lua, n: f64| {
+        Ok(n.ceil())
+    })?;
+    api.set("ceil", ceil_fn)?;
+
+    // Add FLOOR function
+    let floor_fn = lua.create_function(|_lua, n: f64| {
+        Ok(n.floor())
+    })?;
+    api.set("floor", floor_fn)?;
+
+    // Add REPLACE function
+    let replace_fn = lua.create_function(|_lua, (s, from, to): (String, String, String)| {
+        Ok(s.replace(&from, &to))
+    })?;
+    api.set("replace", replace_fn)?;
 
     // Call the function with the API table as _ctx
     let result: mlua::Value = func.call(api)?;
