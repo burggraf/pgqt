@@ -263,8 +263,8 @@ pub fn get_primary_key_columns(
 /// Note: This only extracts the modified columns. To get a complete NEW row,
 /// you would need to merge these with the OLD row values for unmodified columns.
 pub fn build_new_row_from_update(
-    _conn: &Connection,
-    _table_name: &str,
+    conn: &Connection,
+    table_name: &str,
     sql: &str,
 ) -> Result<HashMap<String, Value>> {
     // Parse the UPDATE statement using pg_query
@@ -273,7 +273,7 @@ pub fn build_new_row_from_update(
     if let Some(raw_stmt) = result.protobuf.stmts.first() {
         if let Some(ref stmt_node) = raw_stmt.stmt {
             if let Some(pg_query::protobuf::node::Node::UpdateStmt(stmt)) = &stmt_node.node {
-                return extract_update_values(stmt);
+                return extract_update_values(conn, table_name, stmt);
             }
         }
     }
@@ -283,6 +283,8 @@ pub fn build_new_row_from_update(
 
 /// Extract values from an UPDATE statement
 fn extract_update_values(
+    _conn: &Connection,
+    _table_name: &str,
     stmt: &pg_query::protobuf::UpdateStmt,
 ) -> Result<HashMap<String, Value>> {
     use pg_query::protobuf::node::Node as NodeEnum;
@@ -482,8 +484,57 @@ fn deparse_node(node: &pg_query::protobuf::Node) -> Result<String> {
                 _ => Ok("NULL".to_string()),
             }
         }
+        Some(NodeEnum::AExpr(expr)) => {
+            let left = if let Some(ref lexpr) = expr.lexpr {
+                deparse_node(lexpr)?
+            } else {
+                "".to_string()
+            };
+            
+            let right = if let Some(ref rexpr) = expr.rexpr {
+                deparse_node(rexpr)?
+            } else {
+                "".to_string()
+            };
+            
+            let op = match expr.name.first()
+                .and_then(|n| if let Some(NodeEnum::String(ref s)) = n.node { Some(s.sval.clone()) } else { None }) {
+                Some(s) => s.clone(),
+                None => "=".to_string()
+            };
+                
+            Ok(format!("{} {} {}", left, op, right))
+        }
         _ => Ok("?".to_string()),
     }
+}
+
+/// Extract expressions from an UPDATE statement
+pub fn extract_update_expressions(
+    sql: &str,
+) -> Result<HashMap<String, String>> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+
+    let result = pg_query::parse(sql)?;
+    let mut exprs = HashMap::new();
+
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(ref stmt_node) = raw_stmt.stmt {
+            if let Some(NodeEnum::UpdateStmt(stmt)) = &stmt_node.node {
+                for target in &stmt.target_list {
+                    if let Some(NodeEnum::ResTarget(rt)) = target.node.as_ref() {
+                        let col_name = &rt.name;
+                        if let Some(val_node) = &rt.val {
+                            let expr = deparse_node(val_node)?;
+                            exprs.insert(col_name.clone(), expr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(exprs)
 }
 
 /// Fetch the row that was just inserted

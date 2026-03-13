@@ -6,7 +6,7 @@ PGQT supports PostgreSQL-compatible triggers, allowing you to execute PL/pgSQL l
 
 - **BEFORE Triggers**: Run before the data is modified. Can modify the `NEW` row or return `NULL` to abort the operation.
 - **AFTER Triggers**: Run after the operation completes. Cannot modify the data.
-- **FOR EACH ROW**: Triggers fire once for every row affected by the SQL statement.
+- **FOR EACH ROW**: Triggers fire once for every row affected by the SQL statement. Multi-row updates and deletes correctly fire triggers for each row.
 
 ## Trigger Variables
 

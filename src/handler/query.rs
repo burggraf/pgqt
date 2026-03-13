@@ -6,6 +6,7 @@
 //! - DML statement execution (INSERT, UPDATE, DELETE)
 //! - COPY statement handling
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
@@ -20,7 +21,7 @@ use crate::handler::utils::HandlerUtils;
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
 use crate::trigger::{TriggerExecutor, OperationType, BeforeTriggerResult, extract_table_and_operation};
-use crate::trigger::rows::{extract_old_row_from_dml, fetch_inserted_row};
+use crate::trigger::rows::{fetch_inserted_row};
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
 use rusqlite::Statement;
 
@@ -680,7 +681,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
         Ok(vec![Response::Execution(tag)])
     }
 
-    /// Execute a DML statement (INSERT, UPDATE, DELETE) with trigger support
     fn execute_dml_with_triggers(
         &self,
         conn: &Connection,
@@ -689,7 +689,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         operation: crate::transpiler::OperationType,
     ) -> Result<Vec<Response>> {
         use crate::transpiler::OperationType as TranspileOpType;
-        use crate::trigger::rows::{build_new_row_from_insert, build_new_row_from_update};
+        use crate::trigger::rows::{build_new_row_from_insert};
 
         // Map transpiler operation type to trigger operation type
         let trigger_op = match operation {
@@ -711,37 +711,19 @@ pub trait QueryExecution: HandlerUtils + Clone {
             }
         };
 
+        // For UPDATE and DELETE, we support multi-row triggers
+        if trigger_op == OperationType::Update || trigger_op == OperationType::Delete {
+            return self.execute_multi_row_dml_with_triggers(conn, &table_name, original_sql, sqlite_sql, trigger_op);
+        }
+
         // Create trigger executor
         let trigger_executor = TriggerExecutor::new(self.functions().clone());
 
-        // For UPDATE/DELETE, we need to build OLD row BEFORE executing the DML
         // For INSERT, there's no OLD row
-        let old_row = match trigger_op {
-            OperationType::Update | OperationType::Delete => {
-                // Try to extract WHERE clause and fetch the OLD row
-                // This is a simplified implementation - for complex WHERE clauses
-                // with parameters, we'd need more sophisticated parsing
-                extract_old_row_from_dml(conn, &table_name, original_sql).ok()
-            }
-            OperationType::Insert => None,
-        };
+        let old_row = None;
 
-        // Build NEW row from INSERT/UPDATE values
-        let new_row = match trigger_op {
-            OperationType::Insert => {
-                build_new_row_from_insert(conn, &table_name, original_sql).ok()
-            }
-            OperationType::Update => {
-                // For UPDATE, merge the SET clause values with OLD row values
-                let mut updated_row = old_row.clone().unwrap_or_default();
-                let set_values = build_new_row_from_update(conn, &table_name, original_sql).ok();
-                if let Some(values) = set_values {
-                    updated_row.extend(values);
-                }
-                Some(updated_row)
-            }
-            OperationType::Delete => None,
-        };
+        // Build NEW row from INSERT statement values
+        let new_row = build_new_row_from_insert(conn, &table_name, original_sql).ok();
 
         // Clone new_row for later comparison
         let new_row_clone = new_row.clone();
@@ -764,9 +746,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
                 // If the trigger modified the row and this is an INSERT,
                 // we need to update the inserted row with the modified values
-                if let (Some(modified), OperationType::Insert) = (&modified_new_row,
-                    trigger_op
-                ) {
+                if let Some(modified) = &modified_new_row {
                     // Only update if there are actual modifications
                     // Compare with original new_row to find changed columns
                     let columns_to_update: Vec<(String, rusqlite::types::Value)> = if let Some(ref original) = new_row_clone {
@@ -805,14 +785,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
                 // Execute AFTER triggers
                 // For INSERT, fetch the actual row that was inserted
-                let after_new_row = match trigger_op {
-                    OperationType::Insert => {
-                        // Fetch the inserted row using the primary key or last_insert_rowid
-                        fetch_inserted_row(conn, &table_name).ok()
-                    }
-                    OperationType::Update => modified_new_row,
-                    OperationType::Delete => None,
-                };
+                let after_new_row = fetch_inserted_row(conn, &table_name).ok();
                 
                 trigger_executor.execute_after_triggers(
                     conn,
@@ -825,6 +798,173 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 Ok(result)
             }
         }
+    }
+
+    /// Execute a multi-row DML statement (UPDATE, DELETE) with trigger support
+    fn execute_multi_row_dml_with_triggers(
+        &self,
+        conn: &Connection,
+        table_name: &str,
+        original_sql: &str,
+        sqlite_sql: &str,
+        operation: OperationType,
+    ) -> Result<Vec<Response>> {
+        use crate::trigger::rows::{extract_update_expressions};
+
+        // Check if there are ANY triggers for this operation on this table
+        let table_oid = crate::catalog::calc_table_oid(table_name);
+        let triggers = crate::catalog::get_triggers_for_table(
+            conn,
+            table_oid,
+            None,
+            Some(operation.to_trigger_event()),
+        )?;
+
+        // If no triggers, just execute the original SQL statement directly
+        if triggers.is_empty() {
+            return self.execute_statement(conn, sqlite_sql);
+        }
+
+        // 1. Identify all rows to be affected
+        // Try to extract the WHERE part from sqlite_sql
+        let lower_sql = sqlite_sql.to_lowercase();
+        let where_sql = if let Some(where_pos) = lower_sql.find(" where ") {
+            &sqlite_sql[where_pos + 7..]
+        } else {
+            "1=1"
+        };
+
+        // Get affected rowids
+        let select_sql = format!("SELECT rowid FROM {} WHERE {}", table_name, where_sql);
+        let mut stmt = conn.prepare(&select_sql)?;
+        let rowids: Vec<i64> = stmt.query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if rowids.is_empty() {
+            let tag = if operation == OperationType::Update {
+                Tag::new("UPDATE").with_rows(0)
+            } else {
+                Tag::new("DELETE").with_rows(0)
+            };
+            return Ok(vec![Response::Execution(tag)]);
+        }
+
+        // Create trigger executor
+        let trigger_executor = TriggerExecutor::new(self.functions().clone());
+        let mut affected_rows = 0;
+
+        // For UPDATE, we need the SET expressions from the statement
+        let set_exprs = if operation == OperationType::Update {
+            extract_update_expressions(original_sql).ok()
+        } else {
+            None
+        };
+
+        // 2. Iterate through each row
+        for rid in rowids {
+            // Fetch OLD row
+            let mut fetch_stmt = conn.prepare(&format!("SELECT * FROM {} WHERE rowid = ?", table_name))?;
+            let column_count = fetch_stmt.column_count();
+            let column_names: Vec<String> = (0..column_count)
+                .map(|i| fetch_stmt.column_name(i).unwrap_or("").to_string())
+                .collect();
+            
+            let mut rows = fetch_stmt.query([rid])?;
+            let old_row = if let Some(row) = rows.next()? {
+                let mut map = HashMap::new();
+                for (i, col_name) in column_names.iter().enumerate() {
+                    let value: rusqlite::types::Value = row.get(i)?;
+                    map.insert(col_name.clone(), value);
+                }
+                Some(map)
+            } else {
+                continue; // Row might have been deleted by a previous trigger
+            };
+
+            // Build NEW row for UPDATE by evaluating expressions
+            let new_row = if operation == OperationType::Update {
+                let mut updated = old_row.clone().unwrap_or_default();
+                if let Some(ref exprs) = set_exprs {
+                    for (col, expr) in exprs {
+                        // Evaluate expression against existing row in SQLite
+                        let eval_sql = format!("SELECT {} FROM {} WHERE rowid = ?", expr, table_name);
+                        if let Ok(val) = conn.query_row(&eval_sql, [rid], |row| row.get::<_, rusqlite::types::Value>(0)) {
+                            updated.insert(col.clone(), val);
+                        }
+                    }
+                }
+                Some(updated)
+            } else {
+                None
+            };
+
+            // 3. Execute BEFORE triggers
+            let trigger_res = trigger_executor.execute_before_triggers(
+                conn,
+                table_name,
+                operation,
+                old_row.clone(),
+                new_row.clone(),
+            )?;
+
+            match trigger_res {
+                BeforeTriggerResult::Abort => continue, // Skip this row
+                BeforeTriggerResult::Continue(modified_new_row) => {
+                    // 4. Perform the DML for this row
+                    if operation == OperationType::Update {
+                        // Use modified NEW row if provided, otherwise the one we built
+                        let row_to_update = modified_new_row.unwrap_or_else(|| new_row.clone().unwrap_or_default());
+                        
+                        // Build a specific SET clause for updated columns
+                        let updates: Vec<String> = row_to_update
+                            .iter()
+                            .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
+                            .collect();
+                        
+                        let update_sql = format!(
+                            "UPDATE {} SET {} WHERE rowid = {}",
+                            table_name,
+                            updates.join(", "),
+                            rid
+                        );
+                        conn.execute(&update_sql, [])?;
+                        affected_rows += 1;
+
+                        // 5. Execute AFTER triggers
+                        trigger_executor.execute_after_triggers(
+                            conn,
+                            table_name,
+                            operation,
+                            old_row,
+                            Some(row_to_update),
+                        )?;
+                    } else {
+                        // DELETE
+                        let delete_sql = format!("DELETE FROM {} WHERE rowid = {}", table_name, rid);
+                        conn.execute(&delete_sql, [])?;
+                        affected_rows += 1;
+
+                        // 5. Execute AFTER triggers
+                        trigger_executor.execute_after_triggers(
+                            conn,
+                            table_name,
+                            operation,
+                            old_row,
+                            None,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        let tag = if operation == OperationType::Update {
+            Tag::new("UPDATE").with_rows(affected_rows)
+        } else {
+            Tag::new("DELETE").with_rows(affected_rows)
+        };
+
+        Ok(vec![Response::Execution(tag)])
     }
 
     /// Reference to the copy handler

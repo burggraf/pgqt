@@ -24,7 +24,7 @@ use dashmap::DashMap;
 use std::sync::Arc;
 
 use crate::catalog::{TriggerTiming, TriggerEvent, FunctionMetadata};
-use crate::catalog::trigger::{get_triggers_for_table, calc_table_oid};
+use crate::catalog::{get_triggers_for_table, calc_table_oid};
 
 pub mod rows;
 
@@ -261,7 +261,8 @@ pub fn execute_plpgsql_trigger(
         let new_table = lua.create_table()?;
         for (key, value) in new {
             let lua_value = sqlite_to_lua(&lua, value)?;
-            new_table.set(key, lua_value)?;
+            // Always use lowercase keys for Lua table access to match PL/pgSQL expectations
+            new_table.set(key.to_lowercase(), lua_value)?;
         }
         globals.set("NEW", new_table)?;
     } else {
@@ -272,7 +273,7 @@ pub fn execute_plpgsql_trigger(
         let old_table = lua.create_table()?;
         for (key, value) in old {
             let lua_value = sqlite_to_lua(&lua, value)?;
-            old_table.set(key, lua_value)?;
+            old_table.set(key.to_lowercase(), lua_value)?;
         }
         globals.set("OLD", old_table)?;
     } else {
@@ -380,6 +381,28 @@ pub fn execute_plpgsql_trigger(
         Ok(s.replace(&from, &to))
     })?;
     api.set("replace", replace_fn)?;
+
+    // Add CONCAT function for safer || handling
+    let concat_fn = lua.create_function(|lua, args: Vec<mlua::Value>| {
+        let mut result = String::new();
+        for arg in args {
+            match arg {
+                mlua::Value::Nil => {
+                    // In Postgres, NULL || something is NULL
+                    // but many people expect it to be ignored.
+                    // For now, let's match Postgres: return Nil if any arg is Nil
+                    return Ok(mlua::Value::Nil);
+                }
+                mlua::Value::String(s) => result.push_str(&s.to_str()?),
+                mlua::Value::Integer(i) => result.push_str(&i.to_string()),
+                mlua::Value::Number(n) => result.push_str(&n.to_string()),
+                mlua::Value::Boolean(b) => result.push_str(if b { "true" } else { "false" }),
+                _ => {}
+            }
+        }
+        Ok(mlua::Value::String(lua.create_string(&result)?))
+    })?;
+    api.set("concat", concat_fn)?;
 
     // Call the function with the API table as _ctx
     let result: mlua::Value = func.call(api)?;

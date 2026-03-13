@@ -742,6 +742,15 @@ fn plpgsql_expr_to_lua(expr: &str) -> String {
     // Map PostgreSQL built-in functions to Lua equivalents
     result = map_postgres_functions(&result);
     
+    // Convert := to = (assignment operator)
+    result = result.replace(":=", "=");
+    
+    // Convert PostgreSQL comparisons (=, <>, !=) to Lua (==, ~=)
+    result = convert_comparisons_to_lua(&result);
+    
+    // Lowercase NEW.field and OLD.field access
+    result = lowercase_record_access(&result);
+    
     // Convert PostgreSQL string concatenation (||) to Lua (..)
     // Be careful not to convert inside string literals
     let mut in_string = false;
@@ -763,7 +772,7 @@ fn plpgsql_expr_to_lua(expr: &str) -> String {
             }
             new_result.push(c);
         } else if !in_string && c == '|' && i + 1 < chars.len() && chars[i + 1] == '|' {
-            // Convert || to ..
+            // Convert || to safe concatenation
             new_result.push_str("..");
             i += 1; // Skip next |
         } else {
@@ -775,13 +784,112 @@ fn plpgsql_expr_to_lua(expr: &str) -> String {
     result = new_result;
     
     // Wrap division operations with zero check
-    // Pattern: a / b -> (b ~= 0 and a / b or error("division_by_zero"))
-    // This is a simplified approach - we look for / not inside strings
+    // This MUST be the last step to avoid its own = being converted to ==
     result = wrap_division_with_zero_check(&result);
     
-    // Convert := to = (assignment operator)
-    result = result.replace(":=", "=");
+    result
+}
+
+/// Lowercase NEW.field and OLD.field access in PL/pgSQL expressions
+fn lowercase_record_access(expr: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
     
+    while i < chars.len() {
+        let c = chars[i];
+        
+        // Track string literals
+        if (c == '\'' || c == '"') && (i == 0 || chars[i-1] != '\\') {
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == string_char {
+                in_string = false;
+            }
+            result.push(c);
+        } else if !in_string {
+            // Look for NEW. or OLD. (case insensitive)
+            let remaining = &expr[i..];
+            if remaining.to_uppercase().starts_with("NEW.") || remaining.to_uppercase().starts_with("OLD.") {
+                // Push "NEW." or "OLD."
+                result.push_str(&remaining[..4]);
+                i += 4;
+                
+                // Lowercase the following identifier
+                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                    result.push(chars[i].to_ascii_lowercase());
+                    i += 1;
+                }
+                // Decrement i because the loop will increment it
+                i -= 1;
+            } else {
+                result.push(c);
+            }
+        } else {
+            result.push(c);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Convert PostgreSQL comparisons to Lua equivalents
+fn convert_comparisons_to_lua(expr: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    
+    while i < chars.len() {
+        let c = chars[i];
+        
+        // Track string literals
+        if (c == '\'' || c == '"') && (i == 0 || chars[i-1] != '\\') {
+            if !in_string {
+                in_string = true;
+                string_char = c;
+            } else if c == string_char {
+                in_string = false;
+            }
+            result.push(c);
+        } else if !in_string {
+            // Check for operators
+            if c == '=' {
+                // If it's not followed by another =, and not preceded by <, >, !, :
+                let prev = if i > 0 { Some(chars[i-1]) } else { None };
+                let next = if i + 1 < chars.len() { Some(chars[i+1]) } else { None };
+                
+                if next == Some('=') {
+                    // Already ==
+                    result.push_str("==");
+                    i += 1;
+                } else if matches!(prev, Some('<') | Some('>') | Some('!') | Some(':')) {
+                    // Part of <=, >=, !=, :=
+                    result.push('=');
+                } else {
+                    // Single = -> convert to ==
+                    result.push_str("==");
+                }
+            } else if c == '<' && i + 1 < chars.len() && chars[i+1] == '>' {
+                // <> -> ~=
+                result.push_str("~=");
+                i += 1;
+            } else if c == '!' && i + 1 < chars.len() && chars[i+1] == '=' {
+                // != -> ~=
+                result.push_str("~=");
+                i += 1;
+            } else {
+                result.push(c);
+            }
+        } else {
+            result.push(c);
+        }
+        i += 1;
+    }
     result
 }
 
