@@ -286,6 +286,30 @@ impl SqliteHandler {
             Ok(base.powf(exp))
         })?;
 
+        // split_part(string, delimiter, index) - split string by delimiter and return nth part
+        // PostgreSQL: split_part('abc~def~ghi', '~', 2) => 'def'
+        // Negative index counts from end: -1 => last part
+        conn.create_scalar_function("split_part", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let string: String = ctx.get(0)?;
+            let delimiter: String = ctx.get(1)?;
+            let index: i64 = ctx.get(2)?;
+            
+            let parts: Vec<&str> = string.split(&delimiter).collect();
+            
+            if index > 0 {
+                // Positive index: 1-indexed from start
+                let idx = (index - 1) as usize;
+                Ok(parts.get(idx).map(|s| s.to_string()).unwrap_or_default())
+            } else if index < 0 {
+                // Negative index: count from end (-1 = last)
+                let idx = (parts.len() as i64 + index) as usize;
+                Ok(parts.get(idx).map(|s| s.to_string()).unwrap_or_default())
+            } else {
+                // Index 0 returns empty string
+                Ok(String::new())
+            }
+        })?;
+
         // format_type - formats type OID to type name
         conn.create_scalar_function("format_type", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let type_oid: i64 = ctx.get(0)?;

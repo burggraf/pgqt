@@ -415,3 +415,44 @@ fn test_builtin_power_function_transpilation() {
     let result = transpile(input);
     assert!(result.contains("power"), "Transpiled SQL should contain power function");
 }
+
+#[test]
+fn test_builtin_split_part_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+    
+    // Test basic split: split_part('abc~def~ghi', '~', 2) => 'def'
+    let result: String = conn.query_row("SELECT split_part('abc~def~ghi', '~', 2)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "def");
+    
+    // Test first part: split_part('abc~def', '~', 1) => 'abc'
+    let result: String = conn.query_row("SELECT split_part('abc~def', '~', 1)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "abc");
+    
+    // Test last part with negative index: split_part('abc~def~ghi', '~', -1) => 'ghi'
+    let result: String = conn.query_row("SELECT split_part('abc~def~ghi', '~', -1)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "ghi");
+    
+    // Test out of range (returns empty string): split_part('abc~def', '~', 5) => ''
+    let result: String = conn.query_row("SELECT split_part('abc~def', '~', 5)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+    
+    // Test index 0 (returns empty string)
+    let result: String = conn.query_row("SELECT split_part('abc~def', '~', 0)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+    
+    // Test single element
+    let result: String = conn.query_row("SELECT split_part('abc', '~', 1)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "abc");
+}
+
+#[test]
+fn test_builtin_split_part_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT split_part(name, '-', 2) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("split_part"), "Transpiled SQL should contain split_part function");
+}
