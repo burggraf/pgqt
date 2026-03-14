@@ -310,6 +310,107 @@ impl SqliteHandler {
             }
         })?;
 
+        // date_trunc(field, timestamp) - truncate timestamp to specified precision
+        // PostgreSQL: date_trunc('year', '2024-03-15 10:30:45'::timestamp) => '2024-01-01 00:00:00'
+        // Supported fields: millennium, century, decade, year, quarter, month, week, day, hour, minute, second
+        conn.create_scalar_function("date_trunc", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+            
+            let field: String = ctx.get::<String>(0)?.to_lowercase();
+            let ts: String = ctx.get(1)?;
+            
+            // Parse the timestamp
+            let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+            
+            match dt {
+                Ok(dt) => {
+                    let truncated = match field.as_str() {
+                        "millennium" => {
+                            let m = (dt.year() - 1) / 1000 + 1;
+                            dt.with_year((m - 1) * 1000 + 1)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "century" => {
+                            let c = (dt.year() - 1) / 100 + 1;
+                            dt.with_year((c - 1) * 100 + 1)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "decade" => {
+                            dt.with_year((dt.year() / 10) * 10)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "year" => {
+                            dt.with_month(1)
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "quarter" => {
+                            let q_month = ((dt.month() - 1) / 3) * 3 + 1;
+                            dt.with_month(q_month)
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "month" => {
+                            dt.with_day(1)
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "week" => {
+                            // Truncate to Monday of the week
+                            let days_from_monday = dt.weekday().num_days_from_monday() as i64;
+                            let monday = dt - chrono::Duration::days(days_from_monday);
+                            monday.with_hour(0)
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "day" => {
+                            dt.with_hour(0)
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "hour" => {
+                            dt.with_minute(0)
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "minute" => {
+                            dt.with_second(0)
+                        }
+                        "second" => Some(dt),
+                        _ => Some(dt),
+                    };
+                    
+                    match truncated {
+                        Some(t) => Ok(t.format("%Y-%m-%d %H:%M:%S").to_string()),
+                        None => Ok(ts), // Return original if truncation fails
+                    }
+                }
+                Err(_) => Ok(ts), // Return original if parsing fails
+            }
+        })?;
+
         // format_type - formats type OID to type name
         conn.create_scalar_function("format_type", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let type_oid: i64 = ctx.get(0)?;

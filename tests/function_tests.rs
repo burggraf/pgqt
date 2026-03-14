@@ -456,3 +456,45 @@ fn test_builtin_split_part_transpilation() {
     let result = transpile(input);
     assert!(result.contains("split_part"), "Transpiled SQL should contain split_part function");
 }
+
+#[test]
+fn test_builtin_date_trunc_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+    
+    // Test year truncation: date_trunc('year', '2024-03-15 10:30:45') => '2024-01-01 00:00:00'
+    let result: String = conn.query_row("SELECT date_trunc('year', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-01-01 00:00:00");
+    
+    // Test month truncation: date_trunc('month', '2024-03-15 10:30:45') => '2024-03-01 00:00:00'
+    let result: String = conn.query_row("SELECT date_trunc('month', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-01 00:00:00");
+    
+    // Test day truncation: date_trunc('day', '2024-03-15 10:30:45') => '2024-03-15 00:00:00'
+    let result: String = conn.query_row("SELECT date_trunc('day', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 00:00:00");
+    
+    // Test hour truncation: date_trunc('hour', '2024-03-15 10:30:45') => '2024-03-15 10:00:00'
+    let result: String = conn.query_row("SELECT date_trunc('hour', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 10:00:00");
+    
+    // Test quarter truncation: Q2 starts in April
+    let result: String = conn.query_row("SELECT date_trunc('quarter', '2024-05-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-04-01 00:00:00");
+    
+    // Test week truncation (should return Monday)
+    let result: String = conn.query_row("SELECT date_trunc('week', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    // March 15, 2024 is a Friday, so week should start on Monday March 11
+    assert!(result.starts_with("2024-03-11"), "Expected Monday of that week, got {}", result);
+}
+
+#[test]
+fn test_builtin_date_trunc_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT date_trunc('month', created_at) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("date_trunc"), "Transpiled SQL should contain date_trunc function");
+}
