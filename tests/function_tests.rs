@@ -359,7 +359,8 @@ fn test_builtin_repeat_function() {
     use pgqt::handler::SqliteHandler;
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     let functions = Arc::new(dashmap::DashMap::new());
-    SqliteHandler::register_builtin_functions(&conn, functions).unwrap();
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
     
     let mut stmt = conn.prepare("SELECT repeat('ab', 3)").unwrap();
     let result: String = stmt.query_row([], |row| row.get(0)).unwrap();
@@ -380,4 +381,37 @@ fn test_builtin_repeat_function_transpilation() {
     let input = "INSERT INTO t (b) VALUES (repeat('x', 5))";
     let result = transpile(input);
     assert!(result.to_lowercase().contains("repeat('x', 5)"));
+}
+
+#[test]
+fn test_builtin_power_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+    
+    // Test basic power: 2^3 = 8
+    let result: f64 = conn.query_row("SELECT power(2.0, 3.0)", [], |row| row.get(0)).unwrap();
+    assert!((result - 8.0).abs() < 0.0001, "Expected 8.0, got {}", result);
+    
+    // Test power of 0: 5^0 = 1
+    let result: f64 = conn.query_row("SELECT power(5.0, 0.0)", [], |row| row.get(0)).unwrap();
+    assert!((result - 1.0).abs() < 0.0001, "Expected 1.0, got {}", result);
+    
+    // Test negative exponent: 2^-1 = 0.5
+    let result: f64 = conn.query_row("SELECT power(2.0, -1.0)", [], |row| row.get(0)).unwrap();
+    assert!((result - 0.5).abs() < 0.0001, "Expected 0.5, got {}", result);
+    
+    // Test fractional exponent: 4^0.5 = 2
+    let result: f64 = conn.query_row("SELECT power(4.0, 0.5)", [], |row| row.get(0)).unwrap();
+    assert!((result - 2.0).abs() < 0.0001, "Expected 2.0, got {}", result);
+}
+
+#[test]
+fn test_builtin_power_function_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT power(base, exp) FROM t";
+    let result = transpile(input);
+    assert!(result.contains("power"), "Transpiled SQL should contain power function");
 }
