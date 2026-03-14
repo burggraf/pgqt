@@ -1010,6 +1010,85 @@ $$;
 
 For complete documentation, see [docs/FUNCTIONS.md](./docs/FUNCTIONS.md).
 
+### Built-in Functions
+
+**`pgqt`** provides additional PostgreSQL-compatible built-in functions:
+
+#### Mathematical Functions
+
+- `power(a, b)` - Raises a to the power of b (a^b)
+  ```sql
+  SELECT power(2, 3);  -- Returns 8.0
+  SELECT power(4, 0.5);  -- Returns 2.0 (square root)
+  ```
+
+#### String Functions
+
+- `split_part(string, delimiter, index)` - Split string by delimiter and return nth part
+  ```sql
+  SELECT split_part('abc~def~ghi', '~', 2);  -- Returns 'def'
+  SELECT split_part('abc~def~ghi', '~', -1);  -- Returns 'ghi' (last part)
+  SELECT split_part('abc~def', '~', 5);  -- Returns '' (out of range)
+  ```
+
+#### Date/Time Functions
+
+- `date_trunc(field, timestamp)` - Truncate timestamp to specified precision
+  ```sql
+  SELECT date_trunc('year', '2024-03-15 10:30:45');   -- Returns '2024-01-01 00:00:00'
+  SELECT date_trunc('month', '2024-03-15 10:30:45');  -- Returns '2024-03-01 00:00:00'
+  SELECT date_trunc('day', '2024-03-15 10:30:45');    -- Returns '2024-03-15 00:00:00'
+  SELECT date_trunc('hour', '2024-03-15 10:30:45');   -- Returns '2024-03-15 10:00:00'
+  ```
+  
+  Supported fields: `millennium`, `century`, `decade`, `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, `second`
+
+#### Regular Expression Functions
+
+- `regexp_replace(string, pattern, replacement [, flags])` - Replace pattern matches
+  ```sql
+  SELECT regexp_replace('foobarbaz', 'b..', 'X');        -- Returns 'fooXbaz' (first match)
+  SELECT regexp_replace('aaabbaa', 'b', 'X', 'g');       -- Returns 'aaaXXaa' (all matches)
+  SELECT regexp_replace('FooBar', 'bar', 'baz', 'i');    -- Returns 'Foobaz' (case-insensitive)
+  ```
+
+- `regexp_substr(string, pattern [, start [, flags]])` - Extract substring matching pattern
+  ```sql
+  SELECT regexp_substr('foobarbaz', 'b..');              -- Returns 'bar'
+  SELECT regexp_substr('foobarbaz', 'b..', 4);           -- Returns 'bar' (start at position 4)
+  ```
+
+- `regexp_instr(string, pattern [, start [, occurrence [, flags]]])` - Find position of pattern match
+  ```sql
+  SELECT regexp_instr('foobarbaz', 'bar');               -- Returns 4 (1-indexed)
+  SELECT regexp_instr('ababab', 'ab', 1, 3);             -- Returns 5 (3rd occurrence)
+  ```
+
+- `regexp_match(string, pattern [, flags])` - Return array of captured groups
+  ```sql
+  SELECT regexp_match('foobarbequebaz', '(bar)(beque)'); -- Returns '{bar,beque}'
+  ```
+
+- `regexp_split_to_array(string, pattern [, flags])` - Split string by pattern
+  ```sql
+  SELECT regexp_split_to_array('hello world test', '\s+'); -- Returns '{hello,world,test}'
+  ```
+
+  **Flags:**
+  - `g` - Global (replace all matches for regexp_replace)
+  - `i` - Case-insensitive matching
+  - `m` - Multiline mode
+  - `s` - Dot matches newline
+  - `x` - Extended syntax (ignore whitespace)
+
+#### Aggregate Functions
+
+- `array_agg(value)` - Collect values into an array
+  ```sql
+  SELECT array_agg(x) FROM (VALUES (1), (2), (3)) AS t(x);  -- Returns '{1,2,3}'
+  SELECT array_agg(name) FROM users GROUP BY department;     -- Returns arrays per group
+  ```
+
 ### Vector Search (pgvector Compatible)
 
 **`pgqt`** provides PostgreSQL pgvector-compatible vector search for similarity searches on embeddings:
@@ -1156,6 +1235,10 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 - [x] Row-Level Security (RLS) emulation
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
 - [x] **Trigger Support** - PostgreSQL-compatible BEFORE/AFTER triggers using PL/pgSQL
+- [x] **Enum Type Support** - `CREATE TYPE ... AS ENUM` support
+- [x] **Session Configuration** - `SET` and `set_config` support
+- [x] **Improved LATERAL Joins** - Table-valued functions in `LATERAL` joins
+- [x] **COMMENT ON Storage** - Metadata persistence for comments
 
 ### Phase 4 (In Progress)
 

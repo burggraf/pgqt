@@ -279,7 +279,9 @@ SELECT '[1,10)' && '[5,15)';
 | Module     | File(s)                                    | Description                                    |
 | ---------- | ------------------------------------------ | ---------------------------------------------- |
 | Array      | `src/array.rs`                             | PostgreSQL array functions and operators       |
+| Array Agg  | `src/array_agg.rs`                         | array_agg aggregate function                   |
 | Range      | `src/range.rs`                             | PostgreSQL range types and operators           |
+| Regex      | `src/regex_funcs.rs`                       | Regular expression functions                   |
 | Vector     | `src/vector.rs`                            | pgvector-compatible vector operations          |
 | FTS        | `src/fts.rs`                               | Full-text search (to_tsvector, to_tsquery)     |
 | RLS        | `src/rls.rs`, `src/rls_inject.rs`          | Row-Level Security                             |
