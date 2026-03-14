@@ -361,6 +361,9 @@ fn test_transpile_insert_padding_with_default() {
                 None
             }
         }
+        fn get_enum_labels(&self, _type_name: &str) -> Option<Vec<String>> {
+            None
+        }
     }
 
     let mut ctx = TranspileContext::new();
@@ -381,6 +384,43 @@ fn test_transpile_insert_padding_with_default() {
     assert!(result.sql.contains("(a, b, c)"));
     assert!(result.sql.to_lowercase().contains("select null as a, 7 as b, 5 as c") || 
             result.sql.to_lowercase().contains("values (null, 7, 5)"));
+}
+
+#[test]
+fn test_transpile_create_enum() {
+    use pgqt::transpiler::{transpile_with_context, TranspileContext};
+    let mut ctx = TranspileContext::new();
+    let input = "CREATE TYPE status AS ENUM ('open', 'closed')";
+    let result = transpile_with_context(input, &mut ctx);
+    assert!(result.sql.contains("__pg_create_enum('status', 'open', 0)"));
+    assert!(result.sql.contains("__pg_create_enum('status', 'closed', 1)"));
+}
+
+#[test]
+fn test_transpile_enum_column_check() {
+    use pgqt::transpiler::{transpile_with_context, TranspileContext};
+    use pgqt::transpiler::metadata::{ColumnInfo, MetadataProvider};
+
+    struct EnumMetadataProvider;
+    impl MetadataProvider for EnumMetadataProvider {
+        fn get_table_columns(&self, _t: &str) -> Option<Vec<ColumnInfo>> { None }
+        fn get_column_default(&self, _t: &str, _c: &str) -> Option<String> { None }
+        fn get_enum_labels(&self, type_name: &str) -> Option<Vec<String>> {
+            if type_name == "STATUS" {
+                Some(vec!["open".to_string(), "closed".to_string()])
+            } else {
+                None
+            }
+        }
+    }
+
+    let mut ctx = TranspileContext::new();
+    ctx.set_metadata_provider(std::sync::Arc::new(EnumMetadataProvider));
+    
+    let input = "CREATE TABLE tasks (id int, task_status status)";
+    let result = transpile_with_context(input, &mut ctx);
+    println!("DEBUG: Enum column SQL: {}", result.sql);
+    assert!(result.sql.to_lowercase().contains("check (task_status in ('open', 'closed'))"));
 }
 
 #[test]
@@ -627,7 +667,6 @@ fn test_debug_indirection_target() {
 
 #[test]
 fn test_debug_indirection_target_v2() {
-    use pg_query::protobuf::node::Node as NodeEnum;
     let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
     match pg_query::parse(input) {
         Ok(result) => {
@@ -675,7 +714,6 @@ fn test_debug_indirection_res_target() {
 
 #[test]
 fn test_debug_indirection_res_target_v2() {
-    use pg_query::protobuf::node::Node as NodeEnum;
     let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
     match pg_query::parse(input) {
         Ok(result) => {
@@ -688,7 +726,6 @@ fn test_debug_indirection_res_target_v2() {
 
 #[test]
 fn test_debug_indirection_res_target_v3() {
-    use pg_query::protobuf::node::Node as NodeEnum;
     let input = "SELECT (SELECT ARRAY[1,2,3])[1]";
     match pg_query::parse(input) {
         Ok(result) => {

@@ -14,7 +14,7 @@ fn test_pg_class_columns() {
     let conn = setup_test_db();
     
     // Check if critical columns exist in pg_class
-    let mut stmt = conn.prepare("SELECT * FROM pg_class LIMIT 0").unwrap();
+    let stmt = conn.prepare("SELECT * FROM pg_class LIMIT 0").unwrap();
     let column_names = stmt.column_names();
     
     assert!(column_names.contains(&"reltoastrelid"));
@@ -31,7 +31,7 @@ fn test_pg_attribute_columns() {
     let conn = setup_test_db();
     
     // Check if critical columns exist in pg_attribute
-    let mut stmt = conn.prepare("SELECT * FROM pg_attribute LIMIT 0").unwrap();
+    let stmt = conn.prepare("SELECT * FROM pg_attribute LIMIT 0").unwrap();
     let column_names = stmt.column_names();
     
     assert!(column_names.contains(&"attrelid"));
@@ -46,7 +46,7 @@ fn test_pg_proc_columns() {
     let conn = setup_test_db();
     
     // Check if critical columns exist in pg_proc
-    let mut stmt = conn.prepare("SELECT * FROM pg_proc LIMIT 0").unwrap();
+    let stmt = conn.prepare("SELECT * FROM pg_proc LIMIT 0").unwrap();
     let column_names = stmt.column_names();
     
     assert!(column_names.contains(&"proname"));
@@ -59,7 +59,7 @@ fn test_pg_trigger_columns() {
     let conn = setup_test_db();
     
     // Check if critical columns exist in pg_trigger
-    let mut stmt = conn.prepare("SELECT * FROM pg_trigger LIMIT 0").unwrap();
+    let stmt = conn.prepare("SELECT * FROM pg_trigger LIMIT 0").unwrap();
     let column_names = stmt.column_names();
     
     assert!(column_names.contains(&"tgname"));

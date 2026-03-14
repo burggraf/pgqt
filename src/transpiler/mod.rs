@@ -667,7 +667,7 @@ VALUES
     fn test_lateral_subquery_error() {
         let result = transpile_with_metadata("SELECT * FROM (SELECT 1 as x) a, LATERAL (SELECT a.x + 1 as y) b");
         assert!(!result.errors.is_empty(), "Should have errors for lateral subquery");
-        assert!(result.errors[0].contains("LATERAL joins for subqueries are not supported"), "Error message should be correct: {}", result.errors[0]);
+        assert!(result.errors[0].contains("LATERAL subqueries are not yet supported"), "Error message should be correct: {}", result.errors[0]);
     }
 
     #[test]

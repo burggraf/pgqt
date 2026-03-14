@@ -667,11 +667,11 @@ pub fn extract_table_and_operation(sql: &str) -> Option<(String, OperationType)>
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use crate::catalog::init_catalog;
 
+    #[allow(dead_code)]
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        init_catalog(&conn).unwrap();
+        crate::catalog::init_catalog(&conn).unwrap();
         conn
     }
 

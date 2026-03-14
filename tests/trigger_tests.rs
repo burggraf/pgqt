@@ -134,7 +134,7 @@ fn test_parse_create_trigger_with_args() {
 fn test_parse_drop_trigger() {
     let sql = "DROP TRIGGER IF EXISTS old_trigger ON users";
     
-    let result = parse_drop_trigger(sql);
+    let _result = parse_drop_trigger(sql);
     // Note: This may fail until full DROP TRIGGER parsing is implemented
     // The function exists as a stub for now
 }

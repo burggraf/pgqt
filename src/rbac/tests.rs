@@ -1,20 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::handler::{SqliteHandler, HandlerUtils, SessionContext, TransactionStatus};
+    use crate::handler::{SqliteHandler, HandlerUtils, SessionContext};
     use crate::transpiler::OperationType;
-    use crate::schema::SearchPath;
 
     fn setup_handler() -> SqliteHandler {
         let handler = SqliteHandler::new(":memory:").expect("Failed to create handler");
         
         // Ensure session 0 exists
-        handler.sessions.insert(0, SessionContext {
-            authenticated_user: "postgres".to_string(),
-            current_user: "postgres".to_string(),
-            search_path: SearchPath::default(),
-            transaction_status: TransactionStatus::Idle,
-            savepoints: Vec::new(),
-        });
+        handler.sessions.insert(0, SessionContext::new("postgres".to_string()));
         
         handler
     }

@@ -29,6 +29,7 @@ fn cleanup_db(path: &str) {
 }
 
 /// Helper function to wait for a port to become available
+#[allow(dead_code)]
 fn wait_for_port(host: &str, port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {

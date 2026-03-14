@@ -84,7 +84,6 @@ pub(crate) fn reconstruct_column_def(col_def: &ColumnDef, ctx: &mut TranspileCon
     let col_name = col_def.colname.clone();
     let original_type = extract_original_type(&col_def.type_name);
 
-    // Check for pseudo-type "unknown" which should cause an error
     if original_type.to_uppercase() == "UNKNOWN" {
         ctx.add_error(format!("column \"{}\" has pseudo-type unknown", col_name));
         return (format!("{} text /* unknown type */", col_name.to_lowercase()), None);
@@ -93,7 +92,21 @@ pub(crate) fn reconstruct_column_def(col_def: &ColumnDef, ctx: &mut TranspileCon
     let sqlite_type = rewrite_type_for_sqlite(&original_type);
 
     // Extract constraints
-    let constraints = extract_constraints(&col_def.constraints, ctx);
+    let mut constraints = extract_constraints(&col_def.constraints, ctx);
+    
+    // Check if original_type is an enum and inject CHECK constraint
+    if !original_type.is_empty() {
+        if let Some(labels) = ctx.get_enum_labels(&original_type) {
+            let label_list = labels.iter().map(|l| format!("'{}'", l)).collect::<Vec<_>>().join(", ");
+            let check_constraint = format!("CHECK ({} IN ({}))", col_name.to_lowercase(), label_list);
+            if constraints.is_empty() {
+                constraints = check_constraint;
+            } else {
+                constraints = format!("{} {}", constraints, check_constraint);
+            }
+        }
+    }
+
     let constraints_str = if constraints.is_empty() {
         None
     } else {
@@ -927,7 +940,18 @@ pub(crate) fn reconstruct_create_enum_stmt(stmt: &CreateEnumStmt, _ctx: &mut Tra
     }).collect();
 
     let full_name = names.join(".");
-    format!("-- CREATE TYPE {} AS ENUM (ignored)", full_name)
+    let mut labels = Vec::new();
+    for (i, val) in stmt.vals.iter().enumerate() {
+        if let Some(NodeEnum::String(ref s)) = val.node {
+            labels.push(format!("SELECT __pg_create_enum('{}', '{}', {})", full_name, s.sval, i as f64));
+        }
+    }
+    
+    if labels.is_empty() {
+        format!("-- CREATE TYPE {} AS ENUM ()", full_name)
+    } else {
+        labels.join("; ")
+    }
 }
 
 /// Parse a CREATE TRIGGER statement and return trigger metadata

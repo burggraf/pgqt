@@ -200,7 +200,7 @@ pub(crate) fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileCon
 /// Reconstruct a RangeSubselect node (subquery in FROM clause)
 pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut TranspileContext) -> String {
     if range_subselect.lateral {
-        ctx.errors.push("LATERAL joins for subqueries are not supported in SQLite. Consider using window functions or CTEs.".to_string());
+        ctx.add_error("LATERAL subqueries are not yet supported in SQLite; try a window function or CTE.".to_string());
     }
 
     let alias_name = range_subselect

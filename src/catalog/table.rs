@@ -403,3 +403,161 @@ pub fn populate_pg_constraint(conn: &Connection) -> Result<()> {
     
     Ok(())
 }
+
+/// Store enum value in the shadow catalog
+pub fn store_enum_value(conn: &Connection, type_name: &str, label: &str, sort_order: f64) -> Result<()> {
+    // 1. Get or create the enum type OID in __pg_type__
+    let type_oid: i64 = match conn.query_row(
+        "SELECT oid FROM __pg_type__ WHERE typname = ?1",
+        [type_name],
+        |row| row.get(0)
+    ) {
+        Ok(oid) => oid,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            let next_oid: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(oid), 10000) + 1 FROM __pg_type__",
+                [],
+                |row| row.get(0)
+            )?;
+            conn.execute(
+                "INSERT INTO __pg_type__ (oid, typname, typlen, typbyval, typtype, typcategory)
+                 VALUES (?1, ?2, 4, true, 'e', 'E')",
+                (next_oid, type_name),
+            )?;
+            next_oid
+        },
+        Err(e) => return Err(e.into()),
+    };
+
+    // 2. Insert the enum label into __pg_enum__
+    conn.execute(
+        "INSERT OR REPLACE INTO __pg_enum__ (enumtypid, enumsortorder, enumlabel)
+         VALUES (?1, ?2, ?3)",
+        (type_oid, sort_order, label),
+    )
+    .context("Failed to store enum value")?;
+
+    Ok(())
+}
+
+/// Get all labels for an enum type
+pub fn get_enum_values(conn: &Connection, type_name: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT e.enumlabel 
+         FROM __pg_enum__ e
+         JOIN __pg_type__ t ON e.enumtypid = t.oid
+         WHERE t.typname = ?1
+         ORDER BY e.enumsortorder"
+    )?;
+    
+    let rows = stmt.query_map([type_name], |row| row.get(0))?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
+/// Check if a type is a known enum
+pub fn is_enum_type(conn: &Connection, type_name: &str) -> Result<bool> {
+    let count: i64 = match conn.query_row(
+        "SELECT COUNT(*) FROM __pg_type__ WHERE typname = ?1 AND typtype = 'e'",
+        [type_name],
+        |row| row.get(0)
+    ) {
+        Ok(c) => c,
+        Err(_) => 0,
+    };
+    Ok(count > 0)
+}
+
+/// Resolve the OID of an object given its name and type
+pub fn resolve_object_oid(conn: &Connection, obj_type: &str, obj_name: &str) -> Result<(i64, i64, i32)> {
+    let obj_type_upper = obj_type.to_uppercase();
+    
+    // classoids: 
+    // pg_class (tables, indexes, views): 1259
+    // pg_proc (functions): 1255
+    // pg_type (types): 1247
+    // pg_namespace (schemas): 2615
+    // pg_attribute (columns): 1249
+    
+    match obj_type_upper.as_str() {
+        "TABLE" | "VIEW" | "INDEX" | "SEQUENCE" | "FOREIGN TABLE" => {
+            let oid: i64 = conn.query_row(
+                "SELECT oid FROM pg_class WHERE relname = ?1",
+                [obj_name],
+                |row| row.get(0)
+            )?;
+            Ok((oid, 1259, 0))
+        },
+        "FUNCTION" | "PROCEDURE" => {
+            let oid: i64 = conn.query_row(
+                "SELECT oid FROM pg_proc WHERE proname = ?1",
+                [obj_name],
+                |row| row.get(0)
+            )?;
+            Ok((oid, 1255, 0))
+        },
+        "TYPE" | "DOMAIN" => {
+            let oid: i64 = conn.query_row(
+                "SELECT oid FROM pg_type WHERE typname = ?1",
+                [obj_name],
+                |row| row.get(0)
+            )?;
+            Ok((oid, 1247, 0))
+        },
+        "SCHEMA" => {
+            let oid: i64 = conn.query_row(
+                "SELECT oid FROM pg_namespace WHERE nspname = ?1",
+                [obj_name],
+                |row| row.get(0)
+            )?;
+            Ok((oid, 2615, 0))
+        },
+        "COLUMN" => {
+            // obj_name should be "table.column"
+            let parts: Vec<&str> = obj_name.split('.').collect();
+            if parts.len() != 2 {
+                return Err(anyhow::anyhow!("COLUMN name must be 'table.column'"));
+            }
+            let table_name = parts[0];
+            let col_name = parts[1];
+            
+            let table_oid: i64 = conn.query_row(
+                "SELECT oid FROM pg_class WHERE relname = ?1",
+                [table_name],
+                |row| row.get(0)
+            )?;
+            
+            let attnum: i32 = conn.query_row(
+                "SELECT attnum FROM pg_attribute WHERE attrelid = ?1 AND attname = ?2",
+                (table_oid, col_name),
+                |row| row.get(0)
+            )?;
+            
+            Ok((table_oid, 1259, attnum))
+        },
+        _ => Err(anyhow::anyhow!("Unsupported object type for comment: {}", obj_type)),
+    }
+}
+
+/// Store a comment in the shadow catalog
+pub fn store_comment(conn: &Connection, obj_type: &str, obj_name: &str, comment: &str) -> Result<()> {
+    eprintln!("PGQT_DEBUG: store_comment type={} name={} comment={}", obj_type, obj_name, comment);
+    match resolve_object_oid(conn, obj_type, obj_name) {
+        Ok((objoid, classoid, objsubid)) => {
+            eprintln!("PGQT_DEBUG: Resolved to oid={} class={} sub={}", objoid, classoid, objsubid);
+            conn.execute(
+                "INSERT OR REPLACE INTO __pg_description__ (objoid, classoid, objsubid, description)
+                 VALUES (?1, ?2, ?3, ?4)",
+                (objoid, classoid, objsubid, comment),
+            )?;
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("Warning: Could not resolve object for comment: {} {}. Error: {}", obj_type, obj_name, e);
+            Ok(())
+        }
+    }
+}

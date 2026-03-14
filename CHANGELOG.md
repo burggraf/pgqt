@@ -2,7 +2,26 @@
 
 All notable changes to PGQT will be documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-03-14
+
+### Added
+- **Enum Type Support**: `CREATE TYPE ... AS ENUM` transpilation to SQLite `TEXT` with `CHECK` constraints.
+- **Session Configuration**: Support for `SET` and `set_config()` with per-session persistence.
+- **Improved LATERAL Joins**: Explicit support for table-valued functions in `LATERAL` joins and graceful errors for unsupported subquery `LATERAL` joins.
+- **COMMENT ON Storage**: Real persistence for `COMMENT ON` metadata in the `__pg_description__` shadow table.
+- **System Catalog Polish**: 
+  - `pg_enum` system view.
+  - Formatted `relacl`, `attacl`, and `nspacl` in catalog views.
+  - Better `pg_proc.proargtypes` population using OIDs.
+  - Support for `obj_description` and `pg_get_function_arguments` stubs.
+
+### Fixed
+- Fixed build warnings across the codebase.
+- Improved `SessionContext` management with thread-local client tracking.
+
+### Documentation
+- Created `docs/ENUMS.md` and `docs/SETTINGS.md`.
+- Updated feature list in `README.md`.
 
 ### Added
 - **Trigger Support**: Full support for `BEFORE`/`AFTER` triggers on `INSERT`, `UPDATE`, and `DELETE`.

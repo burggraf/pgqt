@@ -14,7 +14,7 @@ use dashmap::DashMap;
 use futures::stream;
 
 use crate::catalog::FunctionMetadata;
-use crate::schema::{SchemaManager, SearchPath};
+use crate::schema::SchemaManager;
 use crate::handler::SessionContext;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
 use pgwire::api::Type;
@@ -33,13 +33,7 @@ pub trait HandlerUtils {
     #[allow(dead_code)]
     fn check_function_privilege(&self, func_name: &str) -> Result<bool> {
         let session = self.sessions().get(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
-                transaction_status: crate::handler::TransactionStatus::Idle,
-                savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get(&0).unwrap()
         });
         let current_user = session.current_user.clone();
@@ -102,11 +96,7 @@ pub trait HandlerUtils {
     fn check_permissions(&self, referenced_tables: &[String], operation_type: crate::transpiler::OperationType, sql: &str) -> Result<bool> {
         // Get current user from session
         let session = self.sessions().get(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get(&0).unwrap()
         });
         let current_user = session.current_user.clone();
@@ -457,11 +447,7 @@ pub trait HandlerUtils {
 
         // Update session context
         let mut session = self.sessions().get_mut(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get_mut(&0).unwrap()
         });
         session.search_path = search_path;
@@ -484,13 +470,7 @@ pub trait HandlerUtils {
         };
 
         let mut session = self.sessions().get_mut(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(),
-                transaction_status: crate::handler::TransactionStatus::Idle,
-                savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get_mut(&0).unwrap()
         });
 
@@ -545,11 +525,7 @@ pub trait HandlerUtils {
     /// Handle SHOW search_path statement
     fn handle_show_search_path(&self) -> Result<Vec<Response>> {
         let session = self.sessions().get(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get(&0).unwrap()
         });
 
@@ -816,11 +792,7 @@ pub trait HandlerUtils {
     /// Get the current search_path value
     fn get_search_path_value(&self) -> String {
         let session = self.sessions().get(&0).unwrap_or_else(|| {
-            self.sessions().insert(0, SessionContext {
-                authenticated_user: "postgres".to_string(),
-                current_user: "postgres".to_string(),
-                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-            });
+            self.sessions().insert(0, SessionContext::new("postgres".to_string()));
             self.sessions().get(&0).unwrap()
         });
 
@@ -863,11 +835,7 @@ pub trait HandlerUtils {
             "database" | "current_database" => "postgres".to_string(),
             "user" | "current_user" | "session_user" => {
                 let session = self.sessions().get(&0).unwrap_or_else(|| {
-                    self.sessions().insert(0, SessionContext {
-                        authenticated_user: "postgres".to_string(),
-                        current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-                    });
+                    self.sessions().insert(0, SessionContext::new("postgres".to_string()));
                     self.sessions().get(&0).unwrap()
                 });
                 session.current_user.clone()

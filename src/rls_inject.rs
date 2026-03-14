@@ -231,7 +231,11 @@ fn transform_values_insert(
                 let values: Vec<String> = list
                     .items
                     .iter()
-                    .filter_map(|n| n.deparse().ok())
+                    .map(|n| {
+                        // Use deparse() for RLS injection to match the target dialect (Postgres AST -> SQL)
+                        // but handle potential errors.
+                        n.deparse().unwrap_or_else(|_| "NULL".to_string())
+                    })
                     .collect();
                 
                 if values.len() == columns.len() {

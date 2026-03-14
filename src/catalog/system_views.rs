@@ -29,11 +29,58 @@ use rusqlite::Connection;
 
 /// Initialize system catalog views to support psql commands like \dt, \d, etc.
 pub fn init_system_views(conn: &Connection) -> Result<()> {
-    
+    // Helper view for ACL codes
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS __pg_acl_codes AS
+         SELECT 'SELECT' as name, 'r' as code
+         UNION ALL SELECT 'INSERT', 'a'
+         UNION ALL SELECT 'UPDATE', 'w'
+         UNION ALL SELECT 'DELETE', 'd'
+         UNION ALL SELECT 'TRUNCATE', 'D'
+         UNION ALL SELECT 'REFERENCES', 'x'
+         UNION ALL SELECT 'TRIGGER', 't'
+         UNION ALL SELECT 'CREATE', 'C'
+         UNION ALL SELECT 'CONNECT', 'c'
+         UNION ALL SELECT 'TEMPORARY', 'T'
+         UNION ALL SELECT 'EXECUTE', 'X'
+         UNION ALL SELECT 'USAGE', 'U'
+         UNION ALL SELECT 'ALL', 'arwdDxt'",
+        [],
+    )?;
+
+    // Helper view for formatted ACLs
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS __pg_formatted_acl AS
+         SELECT 
+            object_id,
+            object_type,
+            '{' || GROUP_CONCAT(role_acl, ',') || '}' as acl
+         FROM (
+            SELECT 
+                a.object_id,
+                a.object_type,
+                COALESCE(NULLIF(r_grantee.rolname, ''), '') || '=' || 
+                GROUP_CONCAT(c.code, '') || '/' || 
+                COALESCE(r_grantor.rolname, 'postgres') as role_acl
+            FROM __pg_acl__ a
+            JOIN __pg_acl_codes c ON a.privilege = c.name
+            LEFT JOIN __pg_authid__ r_grantee ON a.grantee_id = r_grantee.oid
+            LEFT JOIN __pg_authid__ r_grantor ON a.grantor_id = r_grantor.oid
+            GROUP BY a.object_id, a.object_type, a.grantee_id, a.grantor_id
+         )
+         GROUP BY object_id, object_type",
+        [],
+    )?;
+
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_namespace AS
-         SELECT oid, nspname, nspowner, nspacl
-         FROM __pg_namespace__",
+         SELECT 
+            n.oid, 
+            n.nspname, 
+            n.nspowner, 
+            COALESCE(a.acl, n.nspacl) as nspacl
+         FROM __pg_namespace__ n
+         LEFT JOIN __pg_formatted_acl a ON a.object_id = n.oid AND a.object_type = 'schema'",
         [],
     )?;
 
@@ -86,12 +133,13 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             0 as relrewrite,
             0 as relfrozenxid,
             0 as relminmxid,
-            NULL as relacl,
+            a.acl as relacl,
             NULL as reloptions,
             NULL as relpartbound
          FROM sqlite_master sm
          LEFT JOIN __pg_relation_meta__ rm ON rm.relname = sm.name
          LEFT JOIN __pg_rls_enabled__ re ON re.relname = sm.name
+         LEFT JOIN __pg_formatted_acl a ON a.object_id = sm.rowid AND a.object_type = 'relation'
          WHERE sm.name NOT LIKE 'sqlite_%' 
            AND sm.name NOT LIKE '__pg_%'
            AND sm.type IN ('table', 'view', 'index')",
@@ -116,13 +164,16 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_attribute AS
          SELECT
-            attrelid, attname, atttypid, attstattarget, attlen,
-            attnum, attndims, attcacheoff, atttypmod, attbyval,
-            attstorage, attalign, attnotnull, atthasdef, atthasmissing,
-            attidentity, attgenerated, attisdropped, attislocal,
-            0 as attcmprmode, attinhcount, attcollation, '' as attcompression, attacl, attoptions, attfdwoptions,
-            NULL as attinitdefval, attmissingval
-         FROM __pg_attribute__",
+            a.attrelid, a.attname, a.atttypid, a.attstattarget, a.attlen,
+            a.attnum, a.attndims, a.attcacheoff, a.atttypmod, a.attbyval,
+            a.attstorage, a.attalign, a.attnotnull, a.atthasdef, a.atthasmissing,
+            a.attidentity, a.attgenerated, a.attisdropped, a.attislocal,
+            0 as attcmprmode, a.attinhcount, a.attcollation, '' as attcompression, 
+            acl.acl as attacl, a.attoptions, a.attfdwoptions,
+            NULL as attinitdefval, a.attmissingval
+         FROM __pg_attribute__ a
+         LEFT JOIN __pg_formatted_acl acl ON acl.object_id = a.attrelid AND acl.object_type = 'column' -- Simplified, PG uses attnum too
+         ",
         [],
     )?;
 
@@ -182,6 +233,18 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
              objsubid,
              description
          FROM __pg_description__",
+        [],
+    )?;
+
+    // pg_enum view
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS pg_enum AS
+         SELECT 
+             oid,
+             enumtypid,
+             enumsortorder,
+             enumlabel
+         FROM __pg_enum__",
         [],
     )?;
 
@@ -292,7 +355,9 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             CASE f.volatility WHEN 'IMMUTABLE' THEN 'i' WHEN 'STABLE' THEN 's' ELSE 'v' END as provolatile,
             (SELECT COUNT(*) FROM json_each(f.arg_types)) as pronargs, 0 as pronargdefaults,
             COALESCE((SELECT oid FROM __pg_type__ WHERE typname = f.return_type), 25) as prorettype,
-            f.arg_types as proargtypes, NULL as proallargtypes, f.arg_modes as proargmodes,
+            (SELECT GROUP_CONCAT(COALESCE((SELECT oid FROM __pg_type__ WHERE typname = arg.value), 0), ' ') 
+             FROM json_each(f.arg_types) arg) as proargtypes,
+            NULL as proallargtypes, f.arg_modes as proargmodes,
             f.arg_names as proargnames, NULL as proargdefaults, NULL as protrftypes,
             f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl,
             CASE 

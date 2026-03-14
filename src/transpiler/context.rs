@@ -185,6 +185,12 @@ impl TranspileContext {
         self.column_types.get(index).and_then(|t| t.as_ref())
     }
 
+    /// Check if a type is an enum and return its values
+    pub fn get_enum_labels(&self, type_name: &str) -> Option<Vec<String>> {
+        self.metadata_provider.as_ref()
+            .and_then(|p| p.get_enum_labels(type_name))
+    }
+
     /// Clear all column types
     #[allow(dead_code)]
     pub fn clear_column_types(&mut self) {

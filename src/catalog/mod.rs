@@ -43,6 +43,8 @@ pub use table::{
 };
 #[allow(unused_imports)]
 pub use table::{store_column_metadata, get_table_metadata, get_column_metadata, delete_table_metadata, get_table_columns_with_defaults, extract_default_from_constraints};
+pub use table::{store_enum_value, get_enum_values, is_enum_type};
+pub use table::store_comment;
 pub use function::{store_function, get_function, drop_function};
 #[allow(unused_imports)]
 pub use trigger::{store_trigger, get_trigger, drop_trigger, get_triggers_for_table, calc_table_oid};

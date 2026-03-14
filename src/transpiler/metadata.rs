@@ -46,6 +46,9 @@ pub trait MetadataProvider: Send + Sync {
                     .and_then(|c| c.type_oid)
             })
     }
+
+    /// Check if a type is an enum and return its values
+    fn get_enum_labels(&self, type_name: &str) -> Option<Vec<String>>;
 }
 
 /// A no-op metadata provider that returns no information
@@ -60,6 +63,10 @@ impl MetadataProvider for NoOpMetadataProvider {
     }
 
     fn get_column_default(&self, _table_name: &str, _column_name: &str) -> Option<String> {
+        None
+    }
+
+    fn get_enum_labels(&self, _type_name: &str) -> Option<Vec<String>> {
         None
     }
 }

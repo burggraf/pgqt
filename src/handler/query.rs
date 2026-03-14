@@ -14,7 +14,6 @@ use futures::stream;
 
 use crate::debug;
 use crate::catalog::{store_table_metadata, store_relation_metadata};
-use crate::schema::SearchPath;
 use crate::handler::SessionContext;
 use crate::handler::utils::HandlerUtils;
 #[allow(unused_imports)]
@@ -32,21 +31,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
     /// Execute a SQL query with optional parameters and return the results
     /// Uses per-session connection identified by client_id
     fn execute_query_params(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
-        // Set the current user from the session for current_user() function
+        // Set context for the current thread
+        crate::handler::set_current_client_id(client_id);
         if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
 
-        // Check transaction error state before executing
+        // Check context before executing
         {
             let session = self.sessions().get(&client_id).unwrap_or_else(|| {
-                self.sessions().insert(client_id, SessionContext {
-                    authenticated_user: "postgres".to_string(),
-                    current_user: "postgres".to_string(),
-                    search_path: SearchPath::default(),
-                    transaction_status: crate::handler::TransactionStatus::Idle,
-                    savepoints: Vec::new(),
-                });
+                self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
                 self.sessions().get(&client_id).unwrap()
             });
 
@@ -81,6 +75,50 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         if !transpile_result.errors.is_empty() {
             return Err(anyhow!("{}", transpile_result.errors.join("; ")));
+        }
+
+        let transpiled = &transpile_result.sql;
+        let upper_transpiled = transpiled.trim().to_uppercase();
+
+        // Handle internal functions AFTER transpilation
+        if upper_transpiled.starts_with("SELECT __PG_CREATE_ENUM") {
+             let conn = self.get_session_connection(client_id)?;
+             let conn_guard = conn.lock().unwrap();
+             if let Some(start) = transpiled.find('(') {
+                 if let Some(end) = transpiled.rfind(')') {
+                     let args_str = &transpiled[start+1..end];
+                     let args: Vec<String> = args_str.split(',')
+                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
+                         .collect();
+                     if args.len() == 3 {
+                         let type_name = &args[0];
+                         let label = &args[1];
+                         let sort_order: f64 = args[2].parse().unwrap_or(0.0);
+                         crate::catalog::store_enum_value(&conn_guard, type_name, label, sort_order)?;
+                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                     }
+                 }
+             }
+        }
+
+        if upper_transpiled.starts_with("SELECT __PG_COMMENT_ON") {
+             let conn = self.get_session_connection(client_id)?;
+             let conn_guard = conn.lock().unwrap();
+             if let Some(start) = transpiled.find('(') {
+                 if let Some(end) = transpiled.rfind(')') {
+                     let args_str = &transpiled[start+1..end];
+                     let args: Vec<String> = args_str.split(',')
+                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
+                         .collect();
+                     if args.len() == 3 {
+                         let obj_type = &args[0];
+                         let obj_name = &args[1];
+                         let comment = &args[2];
+                         crate::catalog::store_comment(&conn_guard, obj_type, obj_name, comment)?;
+                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                     }
+                 }
+             }
         }
 
         // Check permissions before executing
@@ -208,7 +246,8 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a SQL query and return the results
     fn execute_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
-        // Set the current user from the session for current_user() function
+        // Set context for the current thread
+        crate::handler::set_current_client_id(client_id);
         if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
@@ -261,18 +300,54 @@ pub trait QueryExecution: HandlerUtils + Clone {
         debug!("Transpiled: {}", transpiled);
         let upper_sql = transpiled.trim().to_uppercase();
 
+        // Handle internal functions AFTER transpilation
+        if upper_sql.starts_with("SELECT __PG_CREATE_ENUM") {
+             let conn = self.get_session_connection(client_id)?;
+             let conn_guard = conn.lock().unwrap();
+             if let Some(start) = transpiled.find('(') {
+                 if let Some(end) = transpiled.rfind(')') {
+                     let args_str = &transpiled[start+1..end];
+                     // TODO: Better parsing of CSV with potential quotes
+                     let args: Vec<String> = args_str.split(',')
+                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
+                         .collect();
+                     if args.len() == 3 {
+                         let type_name = &args[0];
+                         let label = &args[1];
+                         let sort_order: f64 = args[2].parse().unwrap_or(0.0);
+                         crate::catalog::store_enum_value(&conn_guard, type_name, label, sort_order)?;
+                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                     }
+                 }
+             }
+        }
+
+        if upper_sql.starts_with("SELECT __PG_COMMENT_ON") {
+             let conn = self.get_session_connection(client_id)?;
+             let conn_guard = conn.lock().unwrap();
+             if let Some(start) = transpiled.find('(') {
+                 if let Some(end) = transpiled.rfind(')') {
+                     let args_str = &transpiled[start+1..end];
+                     let args: Vec<String> = args_str.split(',')
+                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
+                         .collect();
+                     if args.len() == 3 {
+                         let obj_type = &args[0];
+                         let obj_name = &args[1];
+                         let comment = &args[2];
+                         crate::catalog::store_comment(&conn_guard, obj_type, obj_name, comment)?;
+                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                     }
+                 }
+             }
+        }
+
         // Handle transaction control statements
         if crate::handler::transaction::is_transaction_control(sql) {
             // Get or create session for client 0 (legacy single-client mode during transition)
             let mut session_clone = {
                 let session_ref = self.sessions().get(&client_id).unwrap_or_else(|| {
-                    self.sessions().insert(client_id, SessionContext {
-                        authenticated_user: "postgres".to_string(),
-                        current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(),
-                        transaction_status: crate::handler::TransactionStatus::Idle,
-                        savepoints: Vec::new(),
-                    });
+                    self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
                     self.sessions().get(&client_id).unwrap()
                 });
                 session_ref.clone()
@@ -300,13 +375,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         // Before executing anything else, check transaction error state
         {
             let session = self.sessions().get(&client_id).unwrap_or_else(|| {
-                self.sessions().insert(client_id, SessionContext {
-                    authenticated_user: "postgres".to_string(),
-                    current_user: "postgres".to_string(),
-                    search_path: SearchPath::default(),
-                    transaction_status: crate::handler::TransactionStatus::Idle,
-                    savepoints: Vec::new(),
-                });
+                self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
                 self.sessions().get(&client_id).unwrap()
             });
 
@@ -399,11 +468,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
                 // Store ownership (use current user as owner)
                 let session = self.sessions().get(&client_id).unwrap_or_else(|| {
-                    self.sessions().insert(client_id, SessionContext {
-                        authenticated_user: "postgres".to_string(),
-                        current_user: "postgres".to_string(),
-                        search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-                    });
+                    self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
                     self.sessions().get(&client_id).unwrap()
                 });
                 // Find owner OID from __pg_authid__

@@ -347,12 +347,12 @@ fn decode_tgtype(tgtype: i64) -> (TriggerTiming, Vec<TriggerEvent>, RowOrStateme
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::{init_catalog, TriggerTiming, TriggerEvent, RowOrStatement};
+    use crate::catalog::{TriggerTiming, TriggerEvent, RowOrStatement};
     use rusqlite::Connection;
 
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        init_catalog(&conn).unwrap();
+        crate::catalog::init_catalog(&conn).unwrap();
         conn
     }
 
@@ -382,8 +382,8 @@ mod tests {
         let metadata = create_test_trigger_metadata("test_trigger", 12345);
 
         // Store trigger
-        let oid = store_trigger(&conn, &metadata).unwrap();
-        assert!(oid > 0);
+        let _oid = store_trigger(&conn, &metadata).unwrap();
+        assert!(_oid > 0);
 
         // Retrieve trigger
         let retrieved = get_trigger(&conn, "test_trigger", 12345).unwrap();
@@ -494,7 +494,7 @@ mod tests {
         let mut metadata = create_test_trigger_metadata("args_test", 400);
         metadata.args = vec!["arg1".to_string(), "arg2".to_string()];
 
-        let oid = store_trigger(&conn, &metadata).unwrap();
+        let _oid = store_trigger(&conn, &metadata).unwrap();
         
         let retrieved = get_trigger(&conn, "args_test", 400).unwrap().unwrap();
         assert_eq!(retrieved.args.len(), 2);
