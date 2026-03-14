@@ -33,6 +33,58 @@ fn is_integer_expression(expr: &str) -> bool {
     false
 }
 
+/// Check if a SQL expression is a datetime function or value
+fn is_datetime_expression(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    lower.contains("now()") || 
+    lower.contains("datetime") ||
+    lower.contains("current_timestamp") ||
+    lower.contains("current_date") ||
+    lower.contains("current_time")
+}
+
+/// Check if a SQL expression is an interval value
+fn is_interval_expression(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    // Check for cast to text that contains interval-like values
+    if lower.contains("cast(") && lower.contains("as text") {
+        // Extract the inner value
+        if let Some(start) = lower.find('(') {
+            if let Some(end) = lower.find("as text") {
+                let inner = &lower[start+1..end].trim();
+                // Check for interval patterns like '1 day', '2 hours', etc.
+                return inner.contains("day") || 
+                       inner.contains("hour") || 
+                       inner.contains("minute") ||
+                       inner.contains("second") ||
+                       inner.contains("month") ||
+                       inner.contains("year") ||
+                       inner.contains("week");
+            }
+        }
+    }
+    false
+}
+
+/// Extract interval value from a cast expression
+fn extract_interval_value(expr: &str) -> Option<String> {
+    let lower = expr.to_lowercase();
+    if lower.contains("cast(") && lower.contains("as text") {
+        if let Some(start) = expr.find('(') {
+            if let Some(end) = expr.find("as text") {
+                let inner = expr[start+1..end].trim();
+                // Remove quotes if present
+                if inner.starts_with('\'') && inner.contains('\'') {
+                    if let Some(quote_end) = inner[1..].find('\'') {
+                        return Some(inner[1..=quote_end].to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Reconstruct an AExpr node (operators)
 pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> String {
     // Check if operands are array expressions before reconstructing
@@ -213,8 +265,27 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 format!("{} || {}", lexpr_sql, rexpr_sql)
             }
         }
-        // JSONB key removal
+        // JSONB key removal (only if not datetime - interval)
         "-" => {
+            // First check if this is datetime - interval
+            if is_datetime_expression(&lexpr_sql) && is_interval_expression(&rexpr_sql) {
+                // Transform: datetime - interval -> datetime(datetime, '-interval_value')
+                if let Some(interval_val) = extract_interval_value(&rexpr_sql) {
+                    // If lexpr is already a datetime() call, use it directly
+                    if lexpr_sql.starts_with("datetime(") {
+                        // Extract the inner part
+                        if let Some(inner_start) = lexpr_sql.find('(') {
+                            if let Some(inner_end) = lexpr_sql.rfind(')') {
+                                let inner = &lexpr_sql[inner_start+1..inner_end];
+                                return format!("datetime({}, '-{}')", inner, interval_val);
+                            }
+                        }
+                    }
+                    return format!("datetime({}, '-{}')", lexpr_sql, interval_val);
+                }
+            }
+            
+            // Otherwise handle as JSON removal or regular subtraction
             let rexpr_trimmed = rexpr_sql.trim();
             if rexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("[") {
                 let array_str = rexpr_trimmed.trim_matches(|c| c == '\'');
@@ -242,6 +313,29 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         "<=>" => format!("vector_cosine_distance({}, {})", lexpr_sql, rexpr_sql),
         "<#>" => format!("vector_inner_product({}, {})", lexpr_sql, rexpr_sql),
         "<+>" => format!("vector_l1_distance({}, {})", lexpr_sql, rexpr_sql),
+        // Datetime + Interval operations
+        "+" => {
+            if is_datetime_expression(&lexpr_sql) && is_interval_expression(&rexpr_sql) {
+                // Transform: datetime + interval -> datetime(datetime, '+interval_value')
+                if let Some(interval_val) = extract_interval_value(&rexpr_sql) {
+                    // If lexpr is already a datetime() call, use it directly
+                    if lexpr_sql.starts_with("datetime(") {
+                        // Extract the inner part
+                        if let Some(inner_start) = lexpr_sql.find('(') {
+                            if let Some(inner_end) = lexpr_sql.rfind(')') {
+                                let inner = &lexpr_sql[inner_start+1..inner_end];
+                                return format!("datetime({}, '+{}')", inner, interval_val);
+                            }
+                        }
+                    }
+                    format!("datetime({}, '+{}')", lexpr_sql, interval_val)
+                } else {
+                    format!("{} + {}", lexpr_sql, rexpr_sql)
+                }
+            } else {
+                format!("{} + {}", lexpr_sql, rexpr_sql)
+            }
+        }
         _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
     }
 }

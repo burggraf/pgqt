@@ -904,3 +904,40 @@ fn test_update_row_constructor() {
     let result = transpile(sql);
     assert!(result.contains("set a = 1, b = 2"), "Should expand row constructor: {}", result);
 }
+
+#[test]
+fn test_interval_literal() {
+    let test_cases = vec![
+        ("SELECT INTERVAL '1 day'", "1 day"),
+        ("SELECT INTERVAL '1 hour'", "1 hour"),
+        ("SELECT INTERVAL '1 day 2 hours'", "1 day 2 hours"),
+        ("SELECT INTERVAL '1 year 2 months 3 days'", "1 year 2 months 3 days"),
+    ];
+    
+    for (sql, _expected) in test_cases {
+        let result = transpile(sql);
+        assert!(!result.contains("no such column"), 
+            "INTERVAL treated as column in: {}", result);
+        // Interval should be stored as text
+        assert!(result.contains("cast") && result.contains("text"),
+            "INTERVAL should be cast to TEXT: {}", result);
+    }
+}
+
+#[test]
+fn test_interval_arithmetic() {
+    let sql = "SELECT now() + INTERVAL '1 day'";
+    let result = transpile(sql);
+    // Should use SQLite datetime function with modifier
+    assert!(result.contains("datetime"), 
+        "Should use datetime() for interval arithmetic: {}", result);
+}
+
+#[test]
+fn test_interval_subtraction() {
+    let sql = "SELECT now() - INTERVAL '1 hour'";
+    let result = transpile(sql);
+    // Should use SQLite datetime function with negative modifier
+    assert!(result.contains("datetime"),
+        "Should use datetime() for interval subtraction: {}", result);
+}
