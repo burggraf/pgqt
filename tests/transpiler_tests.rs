@@ -941,3 +941,42 @@ fn test_interval_subtraction() {
     assert!(result.contains("datetime"),
         "Should use datetime() for interval subtraction: {}", result);
 }
+
+#[test]
+fn test_chr_function() {
+    let sql = "SELECT chr(65)";
+    let result = transpile(sql);
+    // Should contain chr function call
+    assert!(result.contains("chr"), "Should contain chr function: {}", result);
+}
+
+#[test]
+fn test_lpad_rpad_functions() {
+    let test_cases = vec![
+        "SELECT lpad('hi', 5)",
+        "SELECT lpad('hi', 5, 'x')",
+        "SELECT rpad('hi', 5)",
+        "SELECT rpad('hi', 5, 'x')",
+    ];
+    
+    for sql in test_cases {
+        let result = transpile(sql);
+        // Should contain the function name
+        assert!(result.contains("lpad") || result.contains("rpad"), 
+            "Failed: {}", sql);
+    }
+}
+
+#[test]
+fn test_translate_function() {
+    let sql = "SELECT translate('hello', 'l', 'L')";
+    let result = transpile(sql);
+    assert!(result.contains("translate"), "Should contain translate: {}", result);
+}
+
+#[test]
+fn test_format_function() {
+    let sql = "SELECT format('Hello %s', 'World')";
+    let result = transpile(sql);
+    assert!(result.contains("format"), "Should contain format: {}", result);
+}

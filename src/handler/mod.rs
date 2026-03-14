@@ -1185,6 +1185,135 @@ impl SqliteHandler {
             Ok(result)
         })?;
 
+        // chr(code) - Convert ASCII/Unicode code to character
+        // PostgreSQL: chr(65) => 'A', chr(945) => 'α'
+        conn.create_scalar_function("chr", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let code: i32 = ctx.get(0)?;
+            match std::char::from_u32(code as u32) {
+                Some(c) => Ok(c.to_string()),
+                None => Ok(String::new()),
+            }
+        })?;
+
+        // lpad(string, length [, fill]) - Left pad string to specified length
+        // PostgreSQL: lpad('hi', 5) => '   hi', lpad('hi', 5, 'x') => 'xxxhi'
+        conn.create_scalar_function("lpad", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let string: String = ctx.get(0)?;
+            let length: i64 = ctx.get(1)?;
+            let fill: String = if ctx.len() > 2 {
+                ctx.get(2)?
+            } else {
+                " ".to_string()
+            };
+            
+            let str_len = string.chars().count() as i64;
+            if str_len >= length {
+                // Truncate if longer
+                Ok(string.chars().take(length as usize).collect())
+            } else {
+                let pad_len = (length - str_len) as usize;
+                let fill_chars: Vec<char> = fill.chars().collect();
+                let mut result = String::new();
+                
+                // Build padding
+                for i in 0..pad_len {
+                    result.push(fill_chars[i % fill_chars.len()]);
+                }
+                result.push_str(&string);
+                Ok(result)
+            }
+        })?;
+
+        // rpad(string, length [, fill]) - Right pad string to specified length
+        // PostgreSQL: rpad('hi', 5) => 'hi   ', rpad('hi', 5, 'x') => 'hixxx'
+        conn.create_scalar_function("rpad", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let string: String = ctx.get(0)?;
+            let length: i64 = ctx.get(1)?;
+            let fill: String = if ctx.len() > 2 {
+                ctx.get(2)?
+            } else {
+                " ".to_string()
+            };
+            
+            let str_len = string.chars().count() as i64;
+            if str_len >= length {
+                // Truncate if longer
+                Ok(string.chars().take(length as usize).collect())
+            } else {
+                let pad_len = (length - str_len) as usize;
+                let fill_chars: Vec<char> = fill.chars().collect();
+                let mut result = string;
+                
+                // Build padding
+                for i in 0..pad_len {
+                    result.push(fill_chars[i % fill_chars.len()]);
+                }
+                Ok(result)
+            }
+        })?;
+
+        // translate(string, from_chars, to_chars) - Replace characters
+        // PostgreSQL: translate('hello', 'l', 'L') => 'heLLo', translate('12345', '143', 'ax') => 'a2x5'
+        conn.create_scalar_function("translate", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let string: String = ctx.get(0)?;
+            let from: String = ctx.get(1)?;
+            let to: String = ctx.get(2)?;
+            
+            let mut result = String::new();
+            for ch in string.chars() {
+                if let Some(pos) = from.find(ch) {
+                    // Character found in 'from', replace with corresponding 'to' char
+                    if let Some(replacement) = to.chars().nth(pos) {
+                        result.push(replacement);
+                    }
+                    // If no corresponding char in 'to', character is dropped
+                } else {
+                    // Character not in 'from', keep it
+                    result.push(ch);
+                }
+            }
+            Ok(result)
+        })?;
+
+        // format(format_string, ...) - Simple string formatting with %s placeholder
+        // PostgreSQL: format('Hello %s', 'World') => 'Hello World'
+        // Supports: %s (string), %% (literal %)
+        conn.create_scalar_function("format", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            if ctx.len() < 1 {
+                return Ok(String::new());
+            }
+            
+            let format_str: String = ctx.get(0)?;
+            let mut result = format_str;
+            let mut arg_idx = 1;
+            
+            // Simple placeholder replacement
+            while let Some(pos) = result.find('%') {
+                if pos + 1 >= result.len() {
+                    break;
+                }
+                
+                let placeholder = &result[pos..pos+2];
+                let replacement = match placeholder {
+                    "%s" => {
+                        if arg_idx < ctx.len() {
+                            let arg: String = ctx.get(arg_idx)?;
+                            arg_idx += 1;
+                            arg
+                        } else {
+                            "%s".to_string()
+                        }
+                    }
+                    "%%" => "%".to_string(),
+                    _ => break, // Unknown placeholder, stop processing
+                };
+                
+                result.replace_range(pos..pos+2, &replacement);
+            }
+            
+            Ok(result)
+        })?;
+
         Ok(())
     }
 
