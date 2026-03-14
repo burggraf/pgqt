@@ -1390,6 +1390,92 @@ impl SqliteHandler {
             }
         })?;
 
+        // pg_input_is_valid(value, type) - Check if value is valid for the specified type
+        // Returns 1 (true) or 0 (false)
+        conn.create_scalar_function("pg_input_is_valid", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let value: String = ctx.get(0)?;
+            let type_name: String = ctx.get(1)?;
+            
+            let valid = match type_name.to_lowercase().as_str() {
+                "varchar" | "character varying" => {
+                    // Extract length if specified (e.g., varchar(4))
+                    if let Some(start) = type_name.find('(') {
+                        if let Some(end) = type_name.find(')') {
+                            if let Ok(max_len) = type_name[start+1..end].parse::<usize>() {
+                                value.len() <= max_len
+                            } else {
+                                true
+                            }
+                        } else {
+                            true
+                        }
+                    } else {
+                        true
+                    }
+                }
+                "int" | "integer" | "bigint" | "smallint" => {
+                    value.parse::<i64>().is_ok()
+                }
+                "numeric" | "decimal" | "real" | "double" => {
+                    value.parse::<f64>().is_ok()
+                }
+                "uuid" => {
+                    use uuid::Uuid;
+                    Uuid::parse_str(&value).is_ok()
+                }
+                _ => true, // Unknown types are considered valid
+            };
+            
+            Ok(if valid { 1i64 } else { 0i64 })
+        })?;
+
+        // pg_input_error_info(value, type) - Returns error information for invalid values
+        // Returns error message string or empty string if valid
+        conn.create_scalar_function("pg_input_error_info", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let value: String = ctx.get(0)?;
+            let type_name: String = ctx.get(1)?;
+            
+            let error_msg = match type_name.to_lowercase().as_str() {
+                "varchar" | "character varying" => {
+                    if let Some(start) = type_name.find('(') {
+                        if let Some(end) = type_name.find(')') {
+                            if let Ok(max_len) = type_name[start+1..end].parse::<usize>() {
+                                if value.len() > max_len {
+                                    Some(format!("value too long for type {} ({})", type_name, max_len))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "int" | "integer" => {
+                    if value.parse::<i64>().is_err() {
+                        Some(format!("invalid input syntax for type integer: \"{}\"", value))
+                    } else {
+                        None
+                    }
+                }
+                "uuid" => {
+                    use uuid::Uuid;
+                    if Uuid::parse_str(&value).is_err() {
+                        Some(format!("invalid input syntax for type uuid: \"{}\"", value))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            
+            Ok(error_msg.unwrap_or_default())
+        })?;
+
         Ok(())
     }
 

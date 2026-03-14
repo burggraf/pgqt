@@ -1068,3 +1068,23 @@ fn test_timestamp_functions() {
         assert!(!result.is_empty(), "Failed: {}", sql);
     }
 }
+
+#[test]
+fn test_pg_input_is_valid() {
+    let test_cases = vec![
+        "SELECT pg_input_is_valid('abcd', 'varchar(4)')",
+        "SELECT pg_input_is_valid('abcde', 'varchar(4)')",
+    ];
+    
+    for sql in test_cases {
+        let result = transpile(sql);
+        assert!(!result.is_empty(), "Failed: {}", sql);
+    }
+}
+
+#[test]
+fn test_pg_input_error_info() {
+    let sql = "SELECT pg_input_error_info('abcde', 'varchar(4)')";
+    let result = transpile(sql);
+    assert!(!result.is_empty());
+}
