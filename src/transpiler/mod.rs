@@ -238,16 +238,38 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 column_types: Vec::new(),
                 }
             }
-            NodeEnum::VariableShowStmt(ref show_stmt) => TranspileResult {
-                sql: format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name),
-                create_table_metadata: None, 
-                copy_metadata: None,
-                referenced_tables: Vec::new(),
-                operation_type: OperationType::SELECT,
-                errors: Vec::new(),
-                column_aliases: Vec::new(),
-                column_types: Vec::new(),
-            },
+            NodeEnum::VariableShowStmt(ref show_stmt) => {
+                let name = show_stmt.name.to_lowercase();
+                let sql = if name == "all" {
+                    // SHOW ALL returns all settings
+                    r#"select 'search_path' as name, '"$user", public' as setting
+                        union all select 'server_version', '15.0'
+                        union all select 'server_version_num', '150000'
+                        union all select 'timezone', 'UTC'
+                        union all select 'TimeZone', 'UTC'
+                        union all select 'transaction_isolation', 'read committed'
+                        union all select 'transaction_isolation_level', 'read committed'
+                        union all select 'default_transaction_read_only', 'off'
+                        union all select 'statement_timeout', '0'
+                        union all select 'client_encoding', 'UTF8'
+                        union all select 'application_name', ''
+                        union all select 'DateStyle', 'ISO, MDY'
+                        union all select 'datestyle', 'ISO, MDY'
+                        union all select 'standard_conforming_strings', 'on'"#.to_string()
+                } else {
+                    format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name)
+                };
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None,
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::SELECT,
+                    errors: Vec::new(),
+                    column_aliases: Vec::new(),
+                    column_types: Vec::new(),
+                }
+            }
             NodeEnum::CreateRoleStmt(ref create_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_create_role_stmt(create_role_stmt, ctx),
                 create_table_metadata: None, 

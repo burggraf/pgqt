@@ -618,6 +618,15 @@ impl SqliteHandler {
                 "server_version" => Ok("15.0".to_string()),
                 "standard_conforming_strings" => Ok("on".to_string()),
                 "client_encoding" => Ok("UTF8".to_string()),
+                "timezone" => Ok("UTC".to_string()),
+                "TimeZone" => Ok("UTC".to_string()),
+                "transaction_isolation" => Ok("read committed".to_string()),
+                "transaction_isolation_level" => Ok("read committed".to_string()),
+                "default_transaction_read_only" => Ok("off".to_string()),
+                "statement_timeout" => Ok("0".to_string()),
+                "application_name" => Ok("".to_string()),
+                "DateStyle" => Ok("ISO, MDY".to_string()),
+                "datestyle" => Ok("ISO, MDY".to_string()),
                 _ => Ok("".to_string()),
             }
         })?;

@@ -1029,3 +1029,28 @@ fn test_explain_with_options() {
         assert!(result.contains("explain"), "Failed: {}", sql);
     }
 }
+
+#[test]
+fn test_show_commands() {
+    let test_cases = vec![
+        "SHOW timezone",
+        "SHOW transaction_isolation_level",
+        "SHOW default_transaction_read_only",
+        "SHOW statement_timeout",
+        "SHOW client_encoding",
+        "SHOW application_name",
+        "SHOW DateStyle",
+    ];
+    
+    for sql in test_cases {
+        let result = transpile(sql);
+        assert!(!result.is_empty(), "Failed: {}", sql);
+    }
+}
+
+#[test]
+fn test_show_all() {
+    let sql = "SHOW ALL";
+    let result = transpile(sql);
+    assert!(!result.is_empty());
+}
