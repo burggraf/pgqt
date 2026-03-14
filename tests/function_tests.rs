@@ -498,3 +498,60 @@ fn test_builtin_date_trunc_transpilation() {
     let result = transpile(input);
     assert!(result.contains("date_trunc"), "Transpiled SQL should contain date_trunc function");
 }
+
+#[test]
+fn test_builtin_date_part_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+    
+    // Test year extraction
+    let result: f64 = conn.query_row("SELECT date_part('year', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 2024.0).abs() < 0.1, "Expected 2024, got {}", result);
+    
+    // Test month extraction
+    let result: f64 = conn.query_row("SELECT date_part('month', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 3.0).abs() < 0.1, "Expected 3, got {}", result);
+    
+    // Test day extraction
+    let result: f64 = conn.query_row("SELECT date_part('day', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 15.0).abs() < 0.1, "Expected 15, got {}", result);
+    
+    // Test hour extraction
+    let result: f64 = conn.query_row("SELECT date_part('hour', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 10.0).abs() < 0.1, "Expected 10, got {}", result);
+    
+    // Test minute extraction
+    let result: f64 = conn.query_row("SELECT date_part('minute', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 30.0).abs() < 0.1, "Expected 30, got {}", result);
+    
+    // Test second extraction (with fractional seconds)
+    let result: f64 = conn.query_row("SELECT date_part('second', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 45.0).abs() < 0.1, "Expected 45, got {}", result);
+    
+    // Test quarter extraction
+    let result: f64 = conn.query_row("SELECT date_part('quarter', '2024-05-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    assert!((result - 2.0).abs() < 0.1, "Expected 2 (Q2), got {}", result);
+    
+    // Test day of week (dow) - 0 = Sunday
+    let result: f64 = conn.query_row("SELECT date_part('dow', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    // March 15, 2024 is a Friday, so dow = 5
+    assert!((result - 5.0).abs() < 0.1, "Expected 5 (Friday), got {}", result);
+    
+    // Test day of year (doy)
+    let result: f64 = conn.query_row("SELECT date_part('doy', '2024-03-15 10:30:45')", [], |row| row.get(0)).unwrap();
+    // March 15 is day 75 in a non-leap year (Jan 31 + Feb 29 + Mar 15 = 75 in 2024 leap year)
+    // Actually 2024 is a leap year, so Feb has 29 days
+    // Jan 31 + Feb 29 + Mar 15 = 31 + 29 + 15 = 75
+    assert!((result - 75.0).abs() < 0.1, "Expected 75, got {}", result);
+}
+
+#[test]
+fn test_builtin_date_part_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT date_part('year', created_at) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("date_part"), "Transpiled SQL should contain date_part function");
+}

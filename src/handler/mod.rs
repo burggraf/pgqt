@@ -411,6 +411,57 @@ impl SqliteHandler {
             }
         })?;
 
+        // date_part(field, source) - extract field from timestamp as double precision
+        // PostgreSQL: date_part('year', '2024-03-15 10:30:45'::timestamp) => 2024
+        // Supported fields: year, month, day, hour, minute, second, quarter, week, dow, doy, epoch, etc.
+        conn.create_scalar_function("date_part", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+            
+            let field: String = ctx.get::<String>(0)?.to_lowercase();
+            let source: String = ctx.get(1)?;
+            
+            // Parse the timestamp
+            let dt = source.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&source, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                NaiveDateTime::parse_from_str(&source, "%Y-%m-%d")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+            
+            match dt {
+                Ok(dt) => {
+                    let result = match field.as_str() {
+                        "year" | "years" => dt.year() as f64,
+                        "month" | "months" => dt.month() as f64,
+                        "day" | "days" => dt.day() as f64,
+                        "hour" | "hours" => dt.hour() as f64,
+                        "minute" | "minutes" => dt.minute() as f64,
+                        "second" | "seconds" => dt.second() as f64 + dt.timestamp_subsec_millis() as f64 / 1000.0,
+                        "millisecond" | "milliseconds" => dt.timestamp_subsec_millis() as f64,
+                        "microsecond" | "microseconds" => (dt.timestamp_subsec_micros() % 1000) as f64,
+                        "quarter" | "quarters" => ((dt.month() - 1) / 3 + 1) as f64,
+                        "week" | "weeks" => dt.iso_week().week() as f64,
+                        "dow" | "dayofweek" => dt.weekday().num_days_from_sunday() as f64, // 0 = Sunday, 6 = Saturday
+                        "isodow" => dt.weekday().number_from_monday() as f64, // 1 = Monday, 7 = Sunday
+                        "doy" | "dayofyear" => dt.ordinal() as f64,
+                        "epoch" => dt.timestamp() as f64, // Seconds since Unix epoch
+                        "decade" | "decades" => (dt.year() / 10) as f64,
+                        "century" | "centuries" => ((dt.year() - 1) / 100 + 1) as f64,
+                        "millennium" | "millennia" => ((dt.year() - 1) / 1000 + 1) as f64,
+                        "julian" => {
+                            // Julian day number
+                            let duration_since_epoch = dt.timestamp() as f64;
+                            duration_since_epoch / 86400.0 + 2440587.5
+                        }
+                        _ => 0.0, // Unknown field
+                    };
+                    Ok(result)
+                }
+                Err(_) => Ok(0.0), // Return 0 if parsing fails
+            }
+        })?;
+
         // format_type - formats type OID to type name
         conn.create_scalar_function("format_type", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let type_oid: i64 = ctx.get(0)?;
