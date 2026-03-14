@@ -930,6 +930,9 @@ impl SqliteHandler {
         // Register statistical aggregate functions
         crate::stats::register_statistical_functions(conn)?;
 
+        // Register regex functions
+        crate::regex_funcs::register_regex_functions(conn)?;
+
         // random - returns float between 0 and 1
         conn.create_scalar_function("random", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
             let r = unsafe { libc::rand() } as f64 / libc::RAND_MAX as f64;

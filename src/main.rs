@@ -58,9 +58,9 @@ mod auth;
 mod config;
 mod validation;
 mod trigger;
+mod regex_funcs;
 
 use debug::set_debug;
-use schema::SearchPath;
 use handler::{SqliteHandler, SessionContext};
 use handler::query::QueryExecution;
 use config::{AppConfig, PortConfig, find_default_config};
@@ -210,11 +210,7 @@ impl SimpleQueryHandler for SqliteHandler {
 
         // Initialize session from client metadata if not already set
         if !self.sessions.contains_key(&client_id) {
-            self.sessions.insert(client_id, SessionContext {
-                authenticated_user: user.clone(),
-                current_user: user,
-                search_path: SearchPath::default(), transaction_status: crate::handler::TransactionStatus::Idle, savepoints: Vec::new(),
-            });
+            self.sessions.insert(client_id, SessionContext::new(user));
         } else {
             // Update the existing session with current user
             if let Some(mut session) = self.sessions.get_mut(&client_id) {

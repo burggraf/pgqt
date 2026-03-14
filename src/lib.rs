@@ -36,6 +36,7 @@ pub mod geo;
 pub mod handler;
 pub mod plpgsql;
 pub mod range;
+pub mod regex_funcs;
 pub mod rls;
 pub mod rls_inject;
 pub mod schema;
