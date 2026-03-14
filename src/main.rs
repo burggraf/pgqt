@@ -59,6 +59,7 @@ mod config;
 mod validation;
 mod trigger;
 mod regex_funcs;
+mod array_agg;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};
