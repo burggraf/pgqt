@@ -1019,6 +1019,172 @@ impl SqliteHandler {
             Ok(Option::<String>::None)
         })?;
 
+        // date_bin(stride, source, origin) - bin timestamp into intervals
+        // PostgreSQL: date_bin('15 minutes', '2024-03-15 10:23:45', '2000-01-01') => '2024-03-15 10:15:00'
+        conn.create_scalar_function("date_bin", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, NaiveDateTime, Duration};
+
+            let stride: String = ctx.get(0)?;
+            let source: String = ctx.get(1)?;
+            let origin: String = ctx.get(2)?;
+
+            // Parse interval string (e.g., "15 minutes", "1 hour", "2 days")
+            let stride_parts: Vec<&str> = stride.trim().split_whitespace().collect();
+            if stride_parts.len() != 2 {
+                return Ok(source); // Return original if parsing fails
+            }
+
+            let stride_num: i64 = match stride_parts[0].parse() {
+                Ok(n) => n,
+                Err(_) => return Ok(source),
+            };
+
+            let stride_seconds = match stride_parts[1].to_lowercase().as_str() {
+                "microsecond" | "microseconds" => stride_num / 1_000_000,
+                "millisecond" | "milliseconds" => stride_num / 1000,
+                "second" | "seconds" => stride_num,
+                "minute" | "minutes" => stride_num * 60,
+                "hour" | "hours" => stride_num * 3600,
+                "day" | "days" => stride_num * 86400,
+                "week" | "weeks" => stride_num * 86400 * 7,
+                _ => return Ok(source), // Unsupported unit
+            };
+
+            if stride_seconds <= 0 {
+                return Ok(source);
+            }
+
+            // Parse timestamps
+            let source_dt = source.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&source, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                // Date-only format - treat as midnight UTC
+                chrono::NaiveDate::parse_from_str(&source, "%Y-%m-%d")
+                    .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+
+            let origin_dt = origin.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&origin, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                // Date-only format - treat as midnight UTC
+                chrono::NaiveDate::parse_from_str(&origin, "%Y-%m-%d")
+                    .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+
+            match (source_dt, origin_dt) {
+                (Ok(source_dt), Ok(origin_dt)) => {
+                    let diff = source_dt.signed_duration_since(origin_dt);
+                    let diff_seconds = diff.num_seconds();
+                    let bin_number = diff_seconds / stride_seconds;
+                    let binned = origin_dt + Duration::seconds(bin_number * stride_seconds);
+                    Ok(binned.format("%Y-%m-%d %H:%M:%S").to_string())
+                }
+                _ => Ok(source), // Return original if parsing fails
+            }
+        })?;
+
+        // to_date(text, format) - convert string to date
+        // PostgreSQL: to_date('2024-03-15', 'YYYY-MM-DD') => '2024-03-15'
+        conn.create_scalar_function("to_date", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::NaiveDate;
+
+            let text: String = ctx.get(0)?;
+            let format: String = ctx.get(1)?;
+
+            // Map PostgreSQL format patterns to chrono format
+            let chrono_format = format
+                .replace("YYYY", "%Y")
+                .replace("YY", "%y")
+                .replace("MM", "%m")
+                .replace("DD", "%d")
+                .replace("HH24", "%H")
+                .replace("HH12", "%I")
+                .replace("MI", "%M")
+                .replace("SS", "%S")
+                .replace("Mon", "%b")
+                .replace("Month", "%B");
+
+            match NaiveDate::parse_from_str(&text, &chrono_format) {
+                Ok(date) => Ok(date.format("%Y-%m-%d").to_string()),
+                Err(_) => Ok(String::new()), // Return empty on parse failure
+            }
+        })?;
+
+        // reverse(string) - reverse a string
+        // PostgreSQL: reverse('abcde') => 'edcba'
+        conn.create_scalar_function("reverse", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let s: String = ctx.get(0)?;
+            Ok(s.chars().rev().collect::<String>())
+        })?;
+
+        // left(string, n) - get first n characters (or all but last |n| if n is negative)
+        // PostgreSQL: left('hello', 2) => 'he', left('hello', -2) => 'hel'
+        conn.create_scalar_function("left", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let s: String = ctx.get(0)?;
+            let n: i64 = ctx.get(1)?;
+
+            let chars: Vec<char> = s.chars().collect();
+            let len = chars.len() as i64;
+
+            let result: String = if n >= 0 {
+                // First n characters
+                let end = n.min(len) as usize;
+                chars[..end].iter().collect::<String>()
+            } else {
+                // All but last |n| characters
+                let end = (len + n).max(0) as usize;
+                chars[..end].iter().collect::<String>()
+            };
+
+            Ok(result)
+        })?;
+
+        // right(string, n) - get last n characters (or all but first |n| if n is negative)
+        // PostgreSQL: right('hello', 2) => 'lo', right('hello', -2) => 'llo'
+        conn.create_scalar_function("right", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let s: String = ctx.get(0)?;
+            let n: i64 = ctx.get(1)?;
+
+            let chars: Vec<char> = s.chars().collect();
+            let len = chars.len() as i64;
+
+            let result: String = if n >= 0 {
+                // Last n characters
+                let start = (len - n.min(len)).max(0) as usize;
+                chars[start..].iter().collect::<String>()
+            } else {
+                // All but first |n| characters
+                let start = (-n).min(len) as usize;
+                chars[start..].iter().collect::<String>()
+            };
+
+            Ok(result)
+        })?;
+
+        // concat(...) - concatenate all arguments, treating NULL as empty string
+        // PostgreSQL: concat('a', 'b', 'c') => 'abc', concat('a', NULL, 'c') => 'ac'
+        conn.create_scalar_function("concat", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let mut result = String::new();
+
+            for i in 0..ctx.len() {
+                // Try to get as string, skip if NULL
+                if let Ok(s) = ctx.get::<String>(i) {
+                    result.push_str(&s);
+                } else if let Ok(n) = ctx.get::<i64>(i) {
+                    result.push_str(&n.to_string());
+                } else if let Ok(n) = ctx.get::<f64>(i) {
+                    result.push_str(&n.to_string());
+                }
+                // NULL values are silently skipped
+            }
+
+            Ok(result)
+        })?;
+
         Ok(())
     }
 

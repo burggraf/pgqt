@@ -555,3 +555,185 @@ fn test_builtin_date_part_transpilation() {
     let result = transpile(input);
     assert!(result.contains("date_part"), "Transpiled SQL should contain date_part function");
 }
+
+#[test]
+fn test_builtin_date_bin_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+
+    // Test 15-minute bins
+    let result: String = conn.query_row("SELECT date_bin('15 minutes', '2024-03-15 10:23:45', '2000-01-01')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 10:15:00");
+
+    // Test 1-hour bins
+    let result: String = conn.query_row("SELECT date_bin('1 hour', '2024-03-15 10:23:45', '2000-01-01')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 10:00:00");
+
+    // Test 1-day bins
+    let result: String = conn.query_row("SELECT date_bin('1 day', '2024-03-15 10:23:45', '2000-01-01')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 00:00:00");
+
+    // Test with date-only format
+    let result: String = conn.query_row("SELECT date_bin('1 day', '2024-03-15', '2000-01-01')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15 00:00:00");
+}
+
+#[test]
+fn test_builtin_date_bin_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT date_bin('15 minutes', created_at, '2000-01-01') FROM users";
+    let result = transpile(input);
+    assert!(result.contains("date_bin"), "Transpiled SQL should contain date_bin function");
+}
+
+#[test]
+fn test_builtin_to_date_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+
+    // Test basic YYYY-MM-DD format
+    let result: String = conn.query_row("SELECT to_date('2024-03-15', 'YYYY-MM-DD')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15");
+
+    // Test DD/MM/YYYY format
+    let result: String = conn.query_row("SELECT to_date('15/03/2024', 'DD/MM/YYYY')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15");
+
+    // Test YY format
+    let result: String = conn.query_row("SELECT to_date('24-03-15', 'YY-MM-DD')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "2024-03-15");
+}
+
+#[test]
+fn test_builtin_to_date_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT to_date(date_str, 'YYYY-MM-DD') FROM users";
+    let result = transpile(input);
+    assert!(result.contains("to_date"), "Transpiled SQL should contain to_date function");
+}
+
+#[test]
+fn test_builtin_reverse_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+
+    // Test basic reversal
+    let result: String = conn.query_row("SELECT reverse('abcde')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "edcba");
+
+    // Test with spaces
+    let result: String = conn.query_row("SELECT reverse('hello world')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "dlrow olleh");
+
+    // Test empty string
+    let result: String = conn.query_row("SELECT reverse('')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+
+    // Test single character
+    let result: String = conn.query_row("SELECT reverse('x')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "x");
+}
+
+#[test]
+fn test_builtin_reverse_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT reverse(name) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("reverse"), "Transpiled SQL should contain reverse function");
+}
+
+#[test]
+fn test_builtin_left_right_functions() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+
+    // Test left - basic case
+    let result: String = conn.query_row("SELECT left('hello', 2)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "he");
+
+    // Test right - basic case
+    let result: String = conn.query_row("SELECT right('hello', 2)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "lo");
+
+    // Test left with negative n (all but last 2)
+    let result: String = conn.query_row("SELECT left('hello', -2)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "hel");
+
+    // Test right with negative n (all but first 2)
+    let result: String = conn.query_row("SELECT right('hello', -2)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "llo");
+
+    // Test left with n > length
+    let result: String = conn.query_row("SELECT left('hello', 100)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "hello");
+
+    // Test right with n > length
+    let result: String = conn.query_row("SELECT right('hello', 100)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "hello");
+
+    // Test left with n = 0
+    let result: String = conn.query_row("SELECT left('hello', 0)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+
+    // Test right with n = 0
+    let result: String = conn.query_row("SELECT right('hello', 0)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+}
+
+#[test]
+fn test_builtin_left_right_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT left(name, 3), right(name, 3) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("left"), "Transpiled SQL should contain left function");
+    assert!(result.contains("right"), "Transpiled SQL should contain right function");
+}
+
+#[test]
+fn test_builtin_concat_function() {
+    use pgqt::handler::SqliteHandler;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let functions = Arc::new(dashmap::DashMap::new());
+    let sessions = Arc::new(dashmap::DashMap::new());
+    SqliteHandler::register_builtin_functions(&conn, functions, sessions).unwrap();
+
+    // Test basic concatenation
+    let result: String = conn.query_row("SELECT concat('a', 'b', 'c')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "abc");
+
+    // Test with spaces
+    let result: String = conn.query_row("SELECT concat('hello', ' ', 'world')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "hello world");
+
+    // Test with numbers (converted to strings)
+    let result: String = conn.query_row("SELECT concat(1, 2, 3)", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "123");
+
+    // Test empty concat
+    let result: String = conn.query_row("SELECT concat()", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "");
+
+    // Test single argument
+    let result: String = conn.query_row("SELECT concat('hello')", [], |row| row.get(0)).unwrap();
+    assert_eq!(result, "hello");
+}
+
+#[test]
+fn test_builtin_concat_transpilation() {
+    use pgqt::transpiler::transpile;
+    let input = "SELECT concat(first_name, ' ', last_name) FROM users";
+    let result = transpile(input);
+    assert!(result.contains("concat"), "Transpiled SQL should contain concat function");
+}

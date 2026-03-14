@@ -1031,6 +1031,27 @@ For complete documentation, see [docs/FUNCTIONS.md](./docs/FUNCTIONS.md).
   SELECT split_part('abc~def', '~', 5);  -- Returns '' (out of range)
   ```
 
+- `reverse(string)` - Reverse a string
+  ```sql
+  SELECT reverse('abcde');  -- Returns 'edcba'
+  SELECT reverse('hello world');  -- Returns 'dlrow olleh'
+  ```
+
+- `left(string, n)` / `right(string, n)` - Get leftmost/rightmost characters
+  ```sql
+  SELECT left('hello', 2);   -- Returns 'he' (first 2 chars)
+  SELECT right('hello', 2);  -- Returns 'lo' (last 2 chars)
+  SELECT left('hello', -2);  -- Returns 'hel' (all but last 2)
+  SELECT right('hello', -2); -- Returns 'llo' (all but first 2)
+  ```
+
+- `concat(...)` - Concatenate all arguments, NULLs are ignored
+  ```sql
+  SELECT concat('a', 'b', 'c');      -- Returns 'abc'
+  SELECT concat('hello', ' ', 'world');  -- Returns 'hello world'
+  SELECT concat(1, 2, 3);            -- Returns '123' (numbers converted)
+  ```
+
 #### Date/Time Functions
 
 - `date_trunc(field, timestamp)` - Truncate timestamp to specified precision
@@ -1054,8 +1075,25 @@ For complete documentation, see [docs/FUNCTIONS.md](./docs/FUNCTIONS.md).
   SELECT date_part('doy', '2024-03-15 10:30:45');      -- Returns 75.0 (day of year)
   SELECT date_part('epoch', '2024-03-15 10:30:45');    -- Returns seconds since Unix epoch
   ```
-  
+
   Supported fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `microsecond`, `quarter`, `week`, `dow`, `isodow`, `doy`, `epoch`, `decade`, `century`, `millennium`, `julian`
+
+- `date_bin(stride, source, origin)` - Bin timestamp into intervals
+  ```sql
+  SELECT date_bin('15 minutes', '2024-03-15 10:23:45', '2000-01-01');  -- Returns '2024-03-15 10:15:00'
+  SELECT date_bin('1 hour', '2024-03-15 10:23:45', '2000-01-01');      -- Returns '2024-03-15 10:00:00'
+  SELECT date_bin('1 day', '2024-03-15 10:23:45', '2000-01-01');       -- Returns '2024-03-15 00:00:00'
+  ```
+
+  Supported stride units: `microsecond(s)`, `millisecond(s)`, `second(s)`, `minute(s)`, `hour(s)`, `day(s)`, `week(s)`
+
+- `to_date(text, format)` - Convert string to date
+  ```sql
+  SELECT to_date('2024-03-15', 'YYYY-MM-DD');   -- Returns '2024-03-15'
+  SELECT to_date('15/03/2024', 'DD/MM/YYYY');   -- Returns '2024-03-15'
+  ```
+
+  Supported format patterns: `YYYY`, `YY`, `MM`, `DD`, `HH24`, `HH12`, `MI`, `SS`, `Mon`, `Month`
 
 #### Regular Expression Functions
 
