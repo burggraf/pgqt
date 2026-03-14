@@ -195,6 +195,9 @@ impl Registry {
         functions.register("current_timestamp", FunctionMapping::Rewrite("datetime('now')"));
         functions.register("current_date", FunctionMapping::Rewrite("date('now')"));
         functions.register("current_time", FunctionMapping::Rewrite("time('now')"));
+        functions.register("clock_timestamp", FunctionMapping::Rewrite("datetime('now')"));
+        functions.register("statement_timestamp", FunctionMapping::Rewrite("datetime('now')"));
+        functions.register("transaction_timestamp", FunctionMapping::Rewrite("datetime('now')"));
         functions.register("random", FunctionMapping::Rewrite("random()"));
         functions.register("gen_random_uuid", FunctionMapping::Rewrite("lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"));
         functions.register("uuid_generate_v4", FunctionMapping::Rewrite("lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"));

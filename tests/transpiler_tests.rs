@@ -1054,3 +1054,17 @@ fn test_show_all() {
     let result = transpile(sql);
     assert!(!result.is_empty());
 }
+
+#[test]
+fn test_timestamp_functions() {
+    let test_cases = vec![
+        "SELECT clock_timestamp()",
+        "SELECT statement_timestamp()",
+        "SELECT transaction_timestamp()",
+    ];
+    
+    for sql in test_cases {
+        let result = transpile(sql);
+        assert!(!result.is_empty(), "Failed: {}", sql);
+    }
+}
