@@ -241,21 +241,19 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             NodeEnum::VariableShowStmt(ref show_stmt) => {
                 let name = show_stmt.name.to_lowercase();
                 let sql = if name == "all" {
-                    // SHOW ALL returns all settings
-                    r#"select 'search_path' as name, '"$user", public' as setting
-                        union all select 'server_version', '15.0'
-                        union all select 'server_version_num', '150000'
-                        union all select 'timezone', 'UTC'
-                        union all select 'TimeZone', 'UTC'
-                        union all select 'transaction_isolation', 'read committed'
-                        union all select 'transaction_isolation_level', 'read committed'
-                        union all select 'default_transaction_read_only', 'off'
-                        union all select 'statement_timeout', '0'
-                        union all select 'client_encoding', 'UTF8'
-                        union all select 'application_name', ''
-                        union all select 'DateStyle', 'ISO, MDY'
-                        union all select 'datestyle', 'ISO, MDY'
-                        union all select 'standard_conforming_strings', 'on'"#.to_string()
+                    // SHOW ALL returns all settings as name/value pairs
+                    // Format matches PostgreSQL's SHOW ALL output
+                    r#"select 'search_path' as name, '"$user", public' as setting, 'Sets the schema search order for names that are not schema-qualified.' as description
+                        union all select 'server_version', '15.0', 'Shows the server version.'
+                        union all select 'server_version_num', '150000', 'Shows the server version as an integer.'
+                        union all select 'timezone', 'UTC', 'Sets the time zone for displaying and interpreting time stamps.'
+                        union all select 'transaction_isolation', 'read committed', 'Sets the current transaction isolation level.'
+                        union all select 'default_transaction_read_only', 'off', 'Sets the default read-only status of new transactions.'
+                        union all select 'statement_timeout', '0', 'Sets the maximum allowed duration of any statement.'
+                        union all select 'client_encoding', 'UTF8', 'Sets the client-side encoding (character set).'
+                        union all select 'application_name', '', 'Sets the application name to be reported in statistics and logs.'
+                        union all select 'DateStyle', 'ISO, MDY', 'Sets the display format for date and time values.'
+                        union all select 'standard_conforming_strings', 'on', 'Causes ''...'' strings to treat backslashes literally.'"#.to_string()
                 } else {
                     format!("select current_setting('{}') as {}", show_stmt.name, show_stmt.name)
                 };

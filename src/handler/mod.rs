@@ -618,6 +618,7 @@ impl SqliteHandler {
                 "server_version" => Ok("15.0".to_string()),
                 "standard_conforming_strings" => Ok("on".to_string()),
                 "client_encoding" => Ok("UTF8".to_string()),
+                "search_path" => Ok("\"$user\", public".to_string()),
                 "timezone" => Ok("UTC".to_string()),
                 "TimeZone" => Ok("UTC".to_string()),
                 "transaction_isolation" => Ok("read committed".to_string()),
