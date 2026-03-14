@@ -980,3 +980,31 @@ fn test_format_function() {
     let result = transpile(sql);
     assert!(result.contains("format"), "Should contain format: {}", result);
 }
+
+#[test]
+fn test_uuidv4_function() {
+    let sql = "SELECT uuidv4()";
+    let result = transpile(sql);
+    assert!(result.contains("uuidv4") || result.contains("gen_random_uuid"));
+}
+
+#[test]
+fn test_uuidv7_function() {
+    let sql = "SELECT uuidv7()";
+    let result = transpile(sql);
+    assert!(result.contains("uuidv7"));
+}
+
+#[test]
+fn test_uuid_extract_version() {
+    let sql = "SELECT uuid_extract_version('11111111-1111-5111-8111-111111111111')";
+    let result = transpile(sql);
+    assert!(result.contains("uuid_extract_version"));
+}
+
+#[test]
+fn test_uuid_extract_timestamp() {
+    let sql = "SELECT uuid_extract_timestamp('C232AB00-9414-11EC-B3C8-9F6BDECED846')";
+    let result = transpile(sql);
+    assert!(result.contains("uuid_extract_timestamp"));
+}

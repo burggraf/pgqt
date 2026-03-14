@@ -1314,6 +1314,73 @@ impl SqliteHandler {
             Ok(result)
         })?;
 
+        // UUID Functions
+        
+        // uuidv4() - Generate a random UUID (version 4)
+        // Alias for gen_random_uuid()
+        conn.create_scalar_function("uuidv4", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            use uuid::Uuid;
+            Ok(Uuid::new_v4().to_string())
+        })?;
+        
+        // gen_random_uuid() - Generate a random UUID (version 4)
+        conn.create_scalar_function("gen_random_uuid", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            use uuid::Uuid;
+            Ok(Uuid::new_v4().to_string())
+        })?;
+        
+        // uuidv7() - Generate a time-ordered UUID (version 7)
+        conn.create_scalar_function("uuidv7", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            use uuid::Uuid;
+            Ok(Uuid::now_v7().to_string())
+        })?;
+        
+        // uuid_extract_version(uuid) - Extract version from UUID
+        // Returns the version number (1, 4, 7, etc.)
+        conn.create_scalar_function("uuid_extract_version", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use uuid::Uuid;
+            let uuid_str: String = ctx.get(0)?;
+            match Uuid::parse_str(&uuid_str) {
+                Ok(uuid) => Ok(uuid.get_version_num() as i64),
+                Err(_) => Ok(0i64),
+            }
+        })?;
+        
+        // uuid_extract_timestamp(uuid) - Extract timestamp from v1 or v7 UUID
+        // Returns timestamp as string in ISO format
+        conn.create_scalar_function("uuid_extract_timestamp", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use uuid::Uuid;
+            use chrono::{DateTime, Utc};
+            
+            let uuid_str: String = ctx.get(0)?;
+            match Uuid::parse_str(&uuid_str) {
+                Ok(uuid) => {
+                    match uuid.get_version_num() {
+                        1 => {
+                            // UUID v1 has embedded timestamp
+                            let (secs, nanos) = uuid_to_timestamp_v1(&uuid);
+                            match DateTime::from_timestamp(secs, nanos) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S%.f").to_string()),
+                                None => Ok(String::new()),
+                            }
+                        }
+                        7 => {
+                            // UUID v7 has Unix timestamp in milliseconds
+                            let millis = uuid_to_timestamp_v7(&uuid);
+                            let secs = (millis / 1000) as i64;
+                            let nanos = ((millis % 1000) * 1_000_000) as u32;
+                            match DateTime::from_timestamp(secs, nanos) {
+                                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S%.f").to_string()),
+                                None => Ok(String::new()),
+                            }
+                        }
+                        _ => Ok(String::new()),
+                    }
+                }
+                Err(_) => Ok(String::new()),
+            }
+        })?;
+
         Ok(())
     }
 
@@ -1662,4 +1729,46 @@ impl ExtendedQueryHandler for SqliteHandler {
         
         Ok(DescribePortalResponse::new(vec![]))
     }
+}
+
+// UUID Helper Functions
+
+/// Extract timestamp from UUID v1
+/// Returns (seconds, nanoseconds) since Unix epoch
+fn uuid_to_timestamp_v1(uuid: &uuid::Uuid) -> (i64, u32) {
+    let bytes = uuid.as_bytes();
+    
+    // UUID v1 timestamp is stored in a special format
+    // bytes 0-3: low time
+    // bytes 4-5: mid time  
+    // bytes 6-7: high time (with version in top 4 bits)
+    let low = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64;
+    let mid = u16::from_le_bytes([bytes[4], bytes[5]]) as u64;
+    let high = (u16::from_le_bytes([bytes[6], bytes[7]]) & 0x0FFF) as u64;
+    
+    // Combine to get 60-bit timestamp (100-nanosecond intervals since Oct 15, 1582)
+    let timestamp_100ns = ((high as u64) << 48) | ((mid as u64) << 32) | (low as u64);
+    
+    // Convert to Unix epoch (Oct 15, 1582 to Jan 1, 1970 is 122192928000000000 100ns intervals)
+    let unix_timestamp_100ns = timestamp_100ns.saturating_sub(0x01B21DD213814000);
+    
+    // Convert to seconds and nanoseconds
+    let secs = (unix_timestamp_100ns / 10_000_000) as i64;
+    let nanos = ((unix_timestamp_100ns % 10_000_000) * 100) as u32;
+    
+    (secs, nanos)
+}
+
+/// Extract timestamp from UUID v7
+/// Returns milliseconds since Unix epoch
+fn uuid_to_timestamp_v7(uuid: &uuid::Uuid) -> u64 {
+    let bytes = uuid.as_bytes();
+    
+    // UUID v7 stores Unix timestamp in milliseconds in the first 48 bits (big-endian)
+    ((bytes[0] as u64) << 40) |
+    ((bytes[1] as u64) << 32) |
+    ((bytes[2] as u64) << 24) |
+    ((bytes[3] as u64) << 16) |
+    ((bytes[4] as u64) << 8) |
+    (bytes[5] as u64)
 }
