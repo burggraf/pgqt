@@ -1043,6 +1043,20 @@ For complete documentation, see [docs/FUNCTIONS.md](./docs/FUNCTIONS.md).
   
   Supported fields: `millennium`, `century`, `decade`, `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, `second`
 
+- `date_part(field, timestamp)` - Extract field from timestamp as double precision
+  ```sql
+  SELECT date_part('year', '2024-03-15 10:30:45');     -- Returns 2024.0
+  SELECT date_part('month', '2024-03-15 10:30:45');    -- Returns 3.0
+  SELECT date_part('day', '2024-03-15 10:30:45');      -- Returns 15.0
+  SELECT date_part('hour', '2024-03-15 10:30:45');     -- Returns 10.0
+  SELECT date_part('quarter', '2024-03-15 10:30:45');  -- Returns 1.0 (Q1)
+  SELECT date_part('dow', '2024-03-15 10:30:45');      -- Returns 5.0 (Friday)
+  SELECT date_part('doy', '2024-03-15 10:30:45');      -- Returns 75.0 (day of year)
+  SELECT date_part('epoch', '2024-03-15 10:30:45');    -- Returns seconds since Unix epoch
+  ```
+  
+  Supported fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `microsecond`, `quarter`, `week`, `dow`, `isodow`, `doy`, `epoch`, `decade`, `century`, `millennium`, `julian`
+
 #### Regular Expression Functions
 
 - `regexp_replace(string, pattern, replacement [, flags])` - Replace pattern matches
