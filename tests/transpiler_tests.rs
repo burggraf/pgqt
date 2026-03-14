@@ -1008,3 +1008,24 @@ fn test_uuid_extract_timestamp() {
     let result = transpile(sql);
     assert!(result.contains("uuid_extract_timestamp"));
 }
+
+#[test]
+fn test_explain_basic() {
+    let sql = "EXPLAIN SELECT 1";
+    let result = transpile(sql);
+    assert!(result.contains("explain"));
+}
+
+#[test]
+fn test_explain_with_options() {
+    let test_cases = vec![
+        "EXPLAIN (COSTS OFF) SELECT 1",
+        "EXPLAIN (VERBOSE, COSTS OFF) SELECT 1",
+        "EXPLAIN ANALYZE SELECT 1",
+    ];
+    
+    for sql in test_cases {
+        let result = transpile(sql);
+        assert!(result.contains("explain"), "Failed: {}", sql);
+    }
+}
