@@ -1223,6 +1223,12 @@ impl SqliteHandler {
             } else {
                 let pad_len = (length - str_len) as usize;
                 let fill_chars: Vec<char> = fill.chars().collect();
+                
+                // Handle empty fill string - just return original string
+                if fill_chars.is_empty() {
+                    return Ok(string);
+                }
+                
                 let mut result = String::new();
                 
                 // Build padding
@@ -1252,6 +1258,12 @@ impl SqliteHandler {
             } else {
                 let pad_len = (length - str_len) as usize;
                 let fill_chars: Vec<char> = fill.chars().collect();
+                
+                // Handle empty fill string - just return original string
+                if fill_chars.is_empty() {
+                    return Ok(string);
+                }
+                
                 let mut result = string;
                 
                 // Build padding
