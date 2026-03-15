@@ -290,6 +290,10 @@ impl SqliteHandler {
     /// Register built-in PostgreSQL-compatible functions with SQLite
     pub fn register_builtin_functions(conn: &Connection, _functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>, sessions: Arc<DashMap<u32, SessionContext>>) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
+
+        // Register hypothetical-set aggregate functions
+        crate::hypothetical_rank::register_hypothetical_functions(conn)?;
+
         // Register current_user function that returns the session user
         conn.create_scalar_function("pgqt_current_user", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
             Ok(get_current_user())

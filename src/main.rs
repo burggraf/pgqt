@@ -60,6 +60,7 @@ mod validation;
 mod trigger;
 mod regex_funcs;
 mod array_agg;
+mod hypothetical_rank;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};

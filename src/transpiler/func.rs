@@ -81,6 +81,36 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
 
+    // Detect hypothetical-set aggregates (rank, dense_rank, percent_rank, cume_dist)
+    if func_call.agg_within_group {
+        match func_name {
+            "rank" | "dense_rank" | "percent_rank" | "cume_dist" => {
+                if !func_call.args.is_empty() && !func_call.agg_order.is_empty() {
+                    let hyp_val = reconstruct_node(&func_call.args[0], ctx);
+                    
+                    if let Some(NodeEnum::SortBy(sort_by)) = &func_call.agg_order[0].node {
+                        if let Some(ref order_node) = sort_by.node {
+                            let order_col = reconstruct_node(order_node, ctx);
+                            
+                            let sqlite_func = match func_name {
+                                "rank" => "__pg_hypothetical_rank",
+                                "dense_rank" => "__pg_hypothetical_dense_rank",
+                                "percent_rank" => "__pg_hypothetical_percent_rank",
+                                "cume_dist" => "__pg_hypothetical_cume_dist",
+                                _ => "",
+                            };
+                            
+                            if !sqlite_func.is_empty() {
+                                return format!("{}({}, {})", sqlite_func, hyp_val, order_col);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     // Try to inline user-defined functions (SQL language) or call PL/pgSQL functions
     let functions_registry = ctx.functions.clone();
     if let Some(ref functions) = functions_registry {
