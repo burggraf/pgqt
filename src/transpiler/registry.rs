@@ -319,6 +319,28 @@ impl Registry {
             }
         }));
 
+        // JSON builder functions - map PostgreSQL json_build_object/jsonb_build_object to SQLite json_object
+        functions.register("json_build_object", FunctionMapping::Complex(|args| {
+            // Build json_object(key1, value1, key2, value2, ...)
+            format!("json_object({})", args.join(", "))
+        }));
+
+        functions.register("jsonb_build_object", FunctionMapping::Complex(|args| {
+            // jsonb_build_object maps to same json_object in SQLite
+            format!("json_object({})", args.join(", "))
+        }));
+
+        // JSON array builder functions - map PostgreSQL json_build_array/jsonb_build_array to SQLite json_array
+        functions.register("json_build_array", FunctionMapping::Complex(|args| {
+            // Build json_array(value1, value2, ...)
+            format!("json_array({})", args.join(", "))
+        }));
+
+        functions.register("jsonb_build_array", FunctionMapping::Complex(|args| {
+            // jsonb_build_array maps to same json_array in SQLite
+            format!("json_array({})", args.join(", "))
+        }));
+
         functions.register("pg_input_is_valid", FunctionMapping::Complex(|_args| {
             "1".to_string()
         }));

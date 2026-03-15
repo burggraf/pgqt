@@ -4,6 +4,55 @@
 
 **`pgqt`** provides PostgreSQL-compatible user-defined functions using `CREATE FUNCTION`, enabling you to encapsulate SQL logic and reuse it across queries.
 
+## Built-in JSON Functions
+
+The following PostgreSQL JSON builder functions are automatically transpiled to their SQLite equivalents:
+
+| PostgreSQL | SQLite Equivalent | Description |
+|------------|-------------------|-------------|
+| `json_build_object(key, val, ...)` | `json_object(key, val, ...)` | Build JSON object from variadic key-value pairs |
+| `jsonb_build_object(key, val, ...)` | `json_object(key, val, ...)` | Build JSONB object from variadic key-value pairs |
+| `json_build_array(val, ...)` | `json_array(val, ...)` | Build JSON array from variadic values |
+| `jsonb_build_array(val, ...)` | `json_array(val, ...)` | Build JSONB array from variadic values |
+
+### Examples
+
+```sql
+-- Build a JSON object
+SELECT json_build_object('name', 'John', 'age', 30);
+-- Returns: {"name": "John", "age": 30}
+
+-- Build a JSONB object (same as json_build_object in SQLite)
+SELECT jsonb_build_object('key', 'value');
+-- Returns: {"key": "value"}
+
+-- Build a JSON array
+SELECT json_build_array(1, 2, 3);
+-- Returns: [1, 2, 3]
+
+-- Build a JSON array with mixed types
+SELECT json_build_array(1, 'text', true, NULL);
+-- Returns: [1, "text", true, null]
+
+-- Nested JSON objects
+SELECT json_build_object('user', json_build_object('name', 'Jane', 'age', 25));
+-- Returns: {"user": {"name": "Jane", "age": 25}}
+
+-- Empty JSON object
+SELECT json_build_object();
+-- Returns: {}
+
+-- Empty JSON array
+SELECT json_build_array();
+-- Returns: []
+```
+
+### Notes
+
+- `jsonb_*` functions map to the same SQLite functions as their `json_*` counterparts since SQLite stores JSON as text
+- NULL values are preserved in the output JSON
+- Keys for `json_build_object` and `jsonb_build_object` must be text values
+
 ## Built-in Math Functions
 
 The following PostgreSQL math functions are automatically transpiled to their SQLite equivalents:
