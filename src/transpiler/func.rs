@@ -209,6 +209,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
             args.push(reconstruct_node(n, ctx));
         }
     }
+    
     let args_str = if func_call.agg_star {
         "*".to_string()
     } else {
@@ -219,7 +220,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
     
     // Lookup function in registry
     let mapping = ctx.registry.functions.mappings.get(func_name).or_else(|| ctx.registry.functions.mappings.get(&full_func_name));
-
+    
     let mut _original_func_name: Option<&str> = None;
     let sqlite_func = match mapping {
         Some(FunctionMapping::Simple(name)) => name.to_string(),
@@ -278,6 +279,30 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         if sqlite_func == "0" || sqlite_func == "1" {
             // Constant replacement
             return sqlite_func.to_string();
+        }
+    }
+
+    // Handle zero-argument aggregates (PostgreSQL allows these)
+    // count() returns 0, all others return NULL
+    if args.is_empty() && !func_call.agg_star {
+        // Check if this is an aggregate function (either in registry or standard SQL)
+        let is_aggregate = matches!(sqlite_func.as_str(),
+            "max" | "min" | "sum" | "avg" | "count" |
+            "stddev" | "stddev_samp" | "stddev_pop" |
+            "variance" | "var_samp" | "var_pop" |
+            "bool_and" | "bool_or"
+        ) || matches!(func_name,
+            "max" | "min" | "sum" | "avg" | "count" |
+            "stddev" | "stddev_samp" | "stddev_pop" |
+            "variance" | "var_samp" | "var_pop" |
+            "bool_and" | "bool_or"
+        );
+        
+        if is_aggregate {
+            return match func_name {
+                "count" => "0".to_string(),
+                _ => "NULL".to_string(),
+            };
         }
     }
 
