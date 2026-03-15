@@ -1347,6 +1347,105 @@ impl SqliteHandler {
 
         // UUID Functions
         
+        // like_escape(pattern, escape_char) - Escape special LIKE pattern characters
+        // PostgreSQL internal function used by ORMs like Hibernate
+        // Escapes % and _ characters in the pattern using the specified escape character
+        conn.create_scalar_function("like_escape", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let escape_char: String = ctx.get(1)?;
+            
+            if escape_char.is_empty() {
+                return Ok(pattern);
+            }
+            
+            let escape = escape_char.chars().next().unwrap_or('\\');
+            let mut result = String::new();
+            
+            for ch in pattern.chars() {
+                if ch == '%' || ch == '_' || ch == escape {
+                    result.push(escape);
+                }
+                result.push(ch);
+            }
+            
+            Ok(result)
+        })?;
+
+        // to_number(text, format) - Convert formatted string to numeric
+        // PostgreSQL: to_number('12,454.8-', '99G999D9S') => -12454.8
+        // Supports format patterns: 9, 0, ., ,, D, G, S, MI, PR, FM
+        conn.create_scalar_function("to_number", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let format: String = ctx.get(1)?;
+            
+            // Parse the format string
+            let format_upper = format.to_uppercase();
+            let is_fm = format_upper.starts_with("FM");
+            let format_clean = if is_fm { &format_upper[2..] } else { &format_upper };
+            
+            // Determine decimal point and group separator from format
+            let uses_dot_decimal = format_clean.contains('.');
+            let uses_comma_group = format_clean.contains(',');
+            let uses_d_decimal = format_clean.contains('D');
+            let uses_g_group = format_clean.contains('G');
+            
+            // Determine sign handling
+            let has_mi = format_clean.contains("MI");
+            let has_pr = format_clean.contains("PR");
+            let has_s = format_clean.contains('S');
+            
+            // Clean up the input text
+            let mut cleaned = text.trim().to_string();
+            
+            // Handle PR (angle brackets for negative)
+            let is_negative = if has_pr && cleaned.starts_with('<') && cleaned.ends_with('>') {
+                cleaned = cleaned[1..cleaned.len()-1].to_string();
+                true
+            } else if has_mi && cleaned.ends_with('-') {
+                cleaned = cleaned[..cleaned.len()-1].to_string();
+                true
+            } else if cleaned.ends_with('-') {
+                cleaned = cleaned[..cleaned.len()-1].to_string();
+                true
+            } else if cleaned.starts_with('-') {
+                cleaned = cleaned[1..].to_string();
+                true
+            } else if cleaned.starts_with('+') {
+                cleaned = cleaned[1..].to_string();
+                false
+            } else {
+                false
+            };
+            
+            // Remove currency symbols and other non-numeric prefixes
+            // Skip leading non-digit characters (except . and ,)
+            while !cleaned.is_empty() && !cleaned.chars().next().unwrap().is_ascii_digit() 
+                  && cleaned.chars().next().unwrap() != '.' && cleaned.chars().next().unwrap() != ',' {
+                cleaned.remove(0);
+            }
+            
+            // Remove group separators
+            if uses_g_group || uses_comma_group {
+                cleaned = cleaned.replace(',', "");
+            }
+            
+            // Normalize decimal point
+            if uses_d_decimal {
+                // D is locale-dependent, but we'll assume '.' for simplicity
+                // In a full implementation, this would use the current locale
+            }
+            
+            // Parse the number
+            let result: f64 = match cleaned.parse::<f64>() {
+                Ok(n) => {
+                    if is_negative { -n } else { n }
+                }
+                Err(_) => 0.0,
+            };
+            
+            Ok(result)
+        })?;
+
         // uuidv4() - Generate a random UUID (version 4)
         // Alias for gen_random_uuid()
         conn.create_scalar_function("uuidv4", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {
