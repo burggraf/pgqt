@@ -4,6 +4,42 @@
 
 **`pgqt`** provides PostgreSQL-compatible user-defined functions using `CREATE FUNCTION`, enabling you to encapsulate SQL logic and reuse it across queries.
 
+## Built-in Math Functions
+
+The following PostgreSQL math functions are automatically transpiled to their SQLite equivalents:
+
+| PostgreSQL | SQLite Equivalent | Description |
+|------------|-------------------|-------------|
+| `log(x)` | `log10(x)` | Base 10 logarithm |
+| `log(b, x)` | `log(x) / log(b)` | Logarithm with arbitrary base (change of base formula) |
+| `ln(x)` | `log(x)` | Natural logarithm (base e) |
+| `sqrt(x)` | `sqrt(x)` | Square root |
+| `exp(x)` | `exp(x)` | Exponential (e^x) |
+| `div(x, y)` | `CAST(x / y AS INTEGER)` | Integer division (truncates toward zero) |
+
+### Examples
+
+```sql
+-- Base 10 logarithm
+SELECT log(100.0);  -- Returns 2.0
+
+-- Natural logarithm
+SELECT ln(2.718281828);  -- Returns ~1.0
+
+-- Logarithm with arbitrary base
+SELECT log(2.0, 64.0);  -- Returns 6.0 (log base 2 of 64)
+
+-- Square root
+SELECT sqrt(16.0);  -- Returns 4.0
+
+-- Exponential
+SELECT exp(1.0);  -- Returns ~2.718281828
+
+-- Integer division
+SELECT div(17, 5);   -- Returns 3
+SELECT div(-17, 5);  -- Returns -3 (truncates toward zero)
+```
+
 ## Creating Functions
 
 ### Simple Scalar Function

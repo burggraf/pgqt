@@ -357,6 +357,55 @@ impl Registry {
             }
         }));
 
+        // Math functions: log, ln, sqrt, exp, div
+        functions.register("log", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                // log(x) -> log10(x) in SQLite (PostgreSQL log is base 10)
+                format!("log10({})", args[0])
+            } else if args.len() == 2 {
+                // log(base, x) -> log(x) / log(base) using change of base formula
+                // SQLite's log() is natural log, so we use change of base: log_base(x) = ln(x) / ln(base)
+                format!("(log({}) / log({}))", args[1], args[0])
+            } else {
+                format!("log({})", args.join(", "))
+            }
+        }));
+
+        functions.register("ln", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                // ln(x) -> log(x) in SQLite (SQLite's log is natural log)
+                format!("log({})", args[0])
+            } else {
+                format!("ln({})", args.join(", "))
+            }
+        }));
+
+        functions.register("sqrt", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                format!("sqrt({})", args[0])
+            } else {
+                format!("sqrt({})", args.join(", "))
+            }
+        }));
+
+        functions.register("exp", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                format!("exp({})", args[0])
+            } else {
+                format!("exp({})", args.join(", "))
+            }
+        }));
+
+        functions.register("div", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                // PostgreSQL div() truncates toward zero
+                // SQLite / operator with integers also truncates toward zero
+                format!("CAST({} / {} AS INTEGER)", args[0], args[1])
+            } else {
+                format!("div({})", args.join(", "))
+            }
+        }));
+
         Self {
             types,
             functions,
