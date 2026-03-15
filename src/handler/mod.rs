@@ -758,6 +758,47 @@ impl SqliteHandler {
             Ok(result)
         })?;
 
+        // width_bucket(operand, lower, upper, num_buckets) - assign value to histogram bucket
+        // PostgreSQL: width_bucket(5.35, 0.024, 10.06, 5) => 3
+        conn.create_scalar_function("width_bucket", 4, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let operand: f64 = ctx.get(0)?;
+            let lower: f64 = ctx.get(1)?;
+            let upper: f64 = ctx.get(2)?;
+            let num_buckets: i64 = ctx.get(3)?;
+            
+            if num_buckets <= 0 {
+                return Ok(0i64);
+            }
+            
+            // Handle edge cases
+            if operand < lower {
+                return Ok(0i64);
+            }
+            if operand >= upper {
+                return Ok(num_buckets + 1);
+            }
+            
+            // Calculate bucket
+            let range = upper - lower;
+            if range <= 0.0 {
+                return Ok(0i64);
+            }
+            
+            let bucket = ((operand - lower) / range * num_buckets as f64).floor() as i64 + 1;
+            Ok(bucket.min(num_buckets))
+        })?;
+
+        // any(array) - check if any element in array satisfies condition
+        // This is a helper function for the ANY operator
+        conn.create_scalar_function("any", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            // Parse the array and return true if it has any elements
+            match crate::array::utils::parse_array(&arr) {
+                Ok(parsed) => Ok(parsed.cardinality() > 0),
+                Err(_) => Ok(false),
+            }
+        })?;
+
         // version - returns PostgreSQL version string
         conn.create_scalar_function("version", 0, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
             Ok("PostgreSQL 15.0 (pgqt)".to_string())
