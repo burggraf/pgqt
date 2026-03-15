@@ -75,8 +75,6 @@ fn parse_datetime(ts: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 /// Helper function to parse timezone offset string into minutes
 /// Supports formats like: "+02", "-05:30", "+01:00", "UTC", "Europe/Prague"
 fn parse_timezone_offset(tz_str: &str) -> i32 {
-    use std::str::FromStr;
-    
     let tz = tz_str.trim();
     
     // Handle special cases
@@ -595,8 +593,8 @@ impl SqliteHandler {
         // to_timestamp(unix_epoch) - convert Unix epoch to timestamp
         // PostgreSQL: to_timestamp(946684800) => '2000-01-01 00:00:00+00'
         conn.create_scalar_function("to_timestamp", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            use chrono::{DateTime, Utc, NaiveDateTime};
             
+            use chrono::DateTime;
             // Handle both integer and float inputs
             let epoch: f64 = match ctx.get_raw(0) {
                 rusqlite::types::ValueRef::Integer(i) => i as f64,
@@ -640,7 +638,7 @@ impl SqliteHandler {
         // make_timestamptz(year, month, day, hour, min, sec [, timezone]) - create timestamp with time zone
         // PostgreSQL: make_timestamptz(2014, 12, 28, 6, 30, 45.887) => '2014-12-28 06:30:45.887+00'
         conn.create_scalar_function("make_timestamptz", 6, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            use chrono::{DateTime, Utc, NaiveDate, NaiveTime, NaiveDateTime, FixedOffset, TimeZone};
+            use chrono::{DateTime, NaiveDate, NaiveTime, NaiveDateTime, Utc};
             
             let year: i32 = ctx.get(0)?;
             let month: u32 = ctx.get(1)?;
@@ -666,7 +664,7 @@ impl SqliteHandler {
 
         // make_timestamptz with timezone argument (7 args)
         conn.create_scalar_function("make_timestamptz", 7, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            use chrono::{DateTime, Utc, NaiveDate, NaiveTime, NaiveDateTime, FixedOffset, TimeZone};
+            use chrono::{FixedOffset, NaiveDate, NaiveTime, NaiveDateTime, TimeZone};
             
             let year: i32 = ctx.get(0)?;
             let month: u32 = ctx.get(1)?;
@@ -699,7 +697,7 @@ impl SqliteHandler {
         // age(timestamp [, reference]) - calculate age between timestamps
         // PostgreSQL: age('2001-10-19 10:23:54', '2000-01-01') => '1 year 9 mons 18 days 10:23:54'
         conn.create_scalar_function("age", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+            use chrono::{Utc, Datelike, Timelike};
             
             let ts: String = ctx.get(0)?;
             let dt = parse_datetime(&ts).unwrap_or_else(|| Utc::now());
@@ -728,7 +726,7 @@ impl SqliteHandler {
         })?;
 
         conn.create_scalar_function("age", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
-            use chrono::{DateTime, Utc, Datelike, Timelike};
+            use chrono::{Utc, Datelike, Timelike};
             
             let ts1: String = ctx.get(0)?;
             let ts2: String = ctx.get(1)?;
@@ -1678,7 +1676,7 @@ impl SqliteHandler {
             let format_clean = if is_fm { &format_upper[2..] } else { &format_upper };
             
             // Determine decimal point and group separator from format
-            let uses_dot_decimal = format_clean.contains('.');
+            let _uses_dot_decimal = format_clean.contains('.');
             let uses_comma_group = format_clean.contains(',');
             let uses_d_decimal = format_clean.contains('D');
             let uses_g_group = format_clean.contains('G');
@@ -1686,7 +1684,7 @@ impl SqliteHandler {
             // Determine sign handling
             let has_mi = format_clean.contains("MI");
             let has_pr = format_clean.contains("PR");
-            let has_s = format_clean.contains('S');
+            let _has_s = format_clean.contains('S');
             
             // Clean up the input text
             let mut cleaned = text.trim().to_string();
@@ -1774,7 +1772,7 @@ impl SqliteHandler {
         // Returns timestamp as string in ISO format
         conn.create_scalar_function("uuid_extract_timestamp", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             use uuid::Uuid;
-            use chrono::{DateTime, Utc};
+            use chrono::DateTime;
             
             let uuid_str: String = ctx.get(0)?;
             match Uuid::parse_str(&uuid_str) {
