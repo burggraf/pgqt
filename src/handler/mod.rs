@@ -51,6 +51,93 @@ pub fn get_current_client_id() -> u32 {
     CURRENT_CLIENT_ID.with(|c| *c.borrow())
 }
 
+/// Helper function to parse a timestamp string into DateTime<Utc>
+fn parse_datetime(ts: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::{DateTime, Utc, NaiveDateTime};
+    
+    // Try various formats
+    DateTime::parse_from_rfc3339(ts).ok()
+        .map(|dt| dt.with_timezone(&Utc))
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S%.f").ok()
+                .map(|ndt| DateTime::from_naive_utc_and_offset(ndt, Utc))
+        })
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S").ok()
+                .map(|ndt| DateTime::from_naive_utc_and_offset(ndt, Utc))
+        })
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(ts, "%Y-%m-%d").ok()
+                .map(|d| DateTime::from_naive_utc_and_offset(d.and_hms_opt(0, 0, 0).unwrap(), Utc))
+        })
+}
+
+/// Helper function to parse timezone offset string into minutes
+/// Supports formats like: "+02", "-05:30", "+01:00", "UTC", "Europe/Prague"
+fn parse_timezone_offset(tz_str: &str) -> i32 {
+    use std::str::FromStr;
+    
+    let tz = tz_str.trim();
+    
+    // Handle special cases
+    if tz.eq_ignore_ascii_case("utc") || tz.eq_ignore_ascii_case("gmt") {
+        return 0;
+    }
+    
+    // Handle common timezone abbreviations (simplified)
+    let abbrev_offset = match tz.to_uppercase().as_str() {
+        "EST" => -300,  // UTC-5
+        "EDT" => -240,  // UTC-4
+        "CST" => -360,  // UTC-6
+        "CDT" => -300,  // UTC-5
+        "MST" => -420,  // UTC-7
+        "MDT" => -360,  // UTC-6
+        "PST" => -480,  // UTC-8
+        "PDT" => -420,  // UTC-7
+        "IST" => 330,   // UTC+5:30
+        "CET" => 60,    // UTC+1
+        "CEST" => 120,  // UTC+2
+        _ => i32::MAX,   // Not a recognized abbreviation
+    };
+    
+    if abbrev_offset != i32::MAX {
+        return abbrev_offset;
+    }
+    
+    // Parse offset format: +HH, -HH, +HH:MM, -HH:MM
+    if tz.starts_with('+') || tz.starts_with('-') {
+        let sign = if tz.starts_with('-') { -1 } else { 1 };
+        let rest = &tz[1..];
+        
+        // Try HH:MM format
+        if let Some(colon_pos) = rest.find(':') {
+            let hours = rest[..colon_pos].parse::<i32>().unwrap_or(0);
+            let mins = rest[colon_pos + 1..].parse::<i32>().unwrap_or(0);
+            return sign * (hours * 60 + mins);
+        }
+        
+        // Try HH format (just hours)
+        if let Ok(hours) = rest.parse::<i32>() {
+            return sign * hours * 60;
+        }
+        
+        // Try HHMM format (e.g., +0530 for IST)
+        if rest.len() >= 2 {
+            if let Ok(hours) = rest[..2].parse::<i32>() {
+                let mins = if rest.len() > 2 {
+                    rest[2..].parse::<i32>().unwrap_or(0)
+                } else {
+                    0
+                };
+                return sign * (hours * 60 + mins);
+            }
+        }
+    }
+    
+    // Default to UTC for unrecognized timezones
+    0
+}
+
 // Submodules
 pub mod errors;
 pub mod query;
@@ -503,6 +590,172 @@ impl SqliteHandler {
                 // Integer format
                 Ok(format!("{:.0}", value))
             }
+        })?;
+
+        // to_timestamp(unix_epoch) - convert Unix epoch to timestamp
+        // PostgreSQL: to_timestamp(946684800) => '2000-01-01 00:00:00+00'
+        conn.create_scalar_function("to_timestamp", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, NaiveDateTime};
+            
+            // Handle both integer and float inputs
+            let epoch: f64 = match ctx.get_raw(0) {
+                rusqlite::types::ValueRef::Integer(i) => i as f64,
+                rusqlite::types::ValueRef::Real(f) => f,
+                rusqlite::types::ValueRef::Text(t) => {
+                    let s = std::str::from_utf8(t).unwrap_or("0");
+                    s.parse().unwrap_or(0.0)
+                }
+                _ => 0.0,
+            };
+            
+            // Handle special values
+            if epoch.is_infinite() {
+                if epoch.is_sign_positive() {
+                    return Ok("infinity".to_string());
+                } else {
+                    return Ok("-infinity".to_string());
+                }
+            }
+            
+            if epoch.is_nan() {
+                return Ok("NaN".to_string());
+            }
+            
+            let secs = epoch as i64;
+            let nanos = ((epoch - secs as f64) * 1_000_000_000.0) as u32;
+            
+            match DateTime::from_timestamp(secs, nanos) {
+                Some(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()),
+                None => {
+                    // Out of range - return approximate date
+                    if epoch > 0.0 {
+                        Ok("294276-12-31 23:59:59+00".to_string())
+                    } else {
+                        Ok("4714-11-24 00:00:00+00 BC".to_string())
+                    }
+                }
+            }
+        })?;
+
+        // make_timestamptz(year, month, day, hour, min, sec [, timezone]) - create timestamp with time zone
+        // PostgreSQL: make_timestamptz(2014, 12, 28, 6, 30, 45.887) => '2014-12-28 06:30:45.887+00'
+        conn.create_scalar_function("make_timestamptz", 6, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, NaiveDate, NaiveTime, NaiveDateTime, FixedOffset, TimeZone};
+            
+            let year: i32 = ctx.get(0)?;
+            let month: u32 = ctx.get(1)?;
+            let day: u32 = ctx.get(2)?;
+            let hour: u32 = ctx.get(3)?;
+            let min: u32 = ctx.get(4)?;
+            let sec: f64 = ctx.get(5)?;
+            
+            let sec_int = sec as u32;
+            let micros = ((sec - sec_int as f64) * 1_000_000.0) as u32;
+            
+            match NaiveDate::from_ymd_opt(year, month, day)
+                .and_then(|d| NaiveTime::from_hms_micro_opt(hour, min, sec_int, micros)
+                    .map(|t| NaiveDateTime::new(d, t))) {
+                Some(naive) => {
+                    let dt: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, Utc);
+                    Ok(dt.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string())
+                }
+                None => Ok(format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}+00", 
+                    year, month, day, hour, min, sec_int, micros))
+            }
+        })?;
+
+        // make_timestamptz with timezone argument (7 args)
+        conn.create_scalar_function("make_timestamptz", 7, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, NaiveDate, NaiveTime, NaiveDateTime, FixedOffset, TimeZone};
+            
+            let year: i32 = ctx.get(0)?;
+            let month: u32 = ctx.get(1)?;
+            let day: u32 = ctx.get(2)?;
+            let hour: u32 = ctx.get(3)?;
+            let min: u32 = ctx.get(4)?;
+            let sec: f64 = ctx.get(5)?;
+            let tz_str: String = ctx.get(6)?;
+            
+            let sec_int = sec as u32;
+            let micros = ((sec - sec_int as f64) * 1_000_000.0) as u32;
+            
+            // Parse timezone offset (e.g., "+02", "-05:30", "Europe/Prague")
+            let offset_minutes = parse_timezone_offset(&tz_str);
+            let offset = FixedOffset::east_opt(offset_minutes * 60).unwrap_or(FixedOffset::east_opt(0).unwrap());
+            
+            match NaiveDate::from_ymd_opt(year, month, day)
+                .and_then(|d| NaiveTime::from_hms_micro_opt(hour, min, sec_int, micros)
+                    .map(|t| NaiveDateTime::new(d, t))) {
+                Some(naive) => {
+                    let dt = offset.from_local_datetime(&naive).single()
+                        .unwrap_or_else(|| offset.from_utc_datetime(&naive));
+                    Ok(dt.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string())
+                }
+                None => Ok(format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}+00", 
+                    year, month, day, hour, min, sec_int, micros))
+            }
+        })?;
+
+        // age(timestamp [, reference]) - calculate age between timestamps
+        // PostgreSQL: age('2001-10-19 10:23:54', '2000-01-01') => '1 year 9 mons 18 days 10:23:54'
+        conn.create_scalar_function("age", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+            
+            let ts: String = ctx.get(0)?;
+            let dt = parse_datetime(&ts).unwrap_or_else(|| Utc::now());
+            let now = Utc::now();
+            
+            let years = now.year() - dt.year();
+            let months = now.month() as i32 - dt.month() as i32;
+            let days = now.day() as i32 - dt.day() as i32;
+            let hours = now.hour() as i32 - dt.hour() as i32;
+            let mins = now.minute() as i32 - dt.minute() as i32;
+            let secs = now.second() as i32 - dt.second() as i32;
+            
+            let mut result = String::new();
+            if years != 0 {
+                result.push_str(&format!("{} year{} ", years.abs(), if years.abs() == 1 { "" } else { "s" }));
+            }
+            if months != 0 {
+                result.push_str(&format!("{} mon{} ", months.abs(), if months.abs() == 1 { "" } else { "s" }));
+            }
+            if days != 0 {
+                result.push_str(&format!("{} day{} ", days.abs(), if days.abs() == 1 { "" } else { "s" }));
+            }
+            result.push_str(&format!("{:02}:{:02}:{:02}", hours.abs(), mins.abs(), secs.abs()));
+            
+            Ok(result)
+        })?;
+
+        conn.create_scalar_function("age", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, Datelike, Timelike};
+            
+            let ts1: String = ctx.get(0)?;
+            let ts2: String = ctx.get(1)?;
+            
+            let dt1 = parse_datetime(&ts1).unwrap_or_else(|| Utc::now());
+            let dt2 = parse_datetime(&ts2).unwrap_or_else(|| Utc::now());
+            
+            let years = dt1.year() - dt2.year();
+            let months = dt1.month() as i32 - dt2.month() as i32;
+            let days = dt1.day() as i32 - dt2.day() as i32;
+            let hours = dt1.hour() as i32 - dt2.hour() as i32;
+            let mins = dt1.minute() as i32 - dt2.minute() as i32;
+            let secs = dt1.second() as i32 - dt2.second() as i32;
+            
+            let mut result = String::new();
+            if years != 0 {
+                result.push_str(&format!("{} year{} ", years.abs(), if years.abs() == 1 { "" } else { "s" }));
+            }
+            if months != 0 {
+                result.push_str(&format!("{} mon{} ", months.abs(), if months.abs() == 1 { "" } else { "s" }));
+            }
+            if days != 0 {
+                result.push_str(&format!("{} day{} ", days.abs(), if days.abs() == 1 { "" } else { "s" }));
+            }
+            result.push_str(&format!("{:02}:{:02}:{:02}", hours.abs(), mins.abs(), secs.abs()));
+            
+            Ok(result)
         })?;
 
         // version - returns PostgreSQL version string
