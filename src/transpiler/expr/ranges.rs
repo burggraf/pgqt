@@ -68,8 +68,9 @@ pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut T
                                             alias_name.as_deref().unwrap_or("generate_series").to_string()
                                         };
 
+                                        // Add LIMIT 100000 to prevent infinite loops from zero or invalid steps
                                         return Some(format!(
-                                            "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n AS \"{}\" FROM _series)",
+                                            "(WITH RECURSIVE _series(n) AS (SELECT {} UNION ALL SELECT n + {} FROM _series WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {}) LIMIT 100000) SELECT n AS \"{}\" FROM _series)",
                                             start, step, step, step, stop, step, step, stop, col_name
                                         ));
                                     }

@@ -614,8 +614,9 @@ fn reconstruct_generate_series(func_call: &FuncCall, ctx: &mut TranspileContext)
     // Generate a unique CTE name
     let cte_name = "_series";
     
+    // Add LIMIT 100000 to prevent infinite loops from zero or invalid steps
     format!(
-        "(WITH RECURSIVE {}(n) AS (SELECT {} UNION ALL SELECT n + {} FROM {} WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {})) SELECT n FROM {})",
+        "(WITH RECURSIVE {}(n) AS (SELECT {} UNION ALL SELECT n + {} FROM {} WHERE ({} > 0 AND n + {} <= {}) OR ({} < 0 AND n + {} >= {}) LIMIT 100000) SELECT n FROM {})",
         cte_name, start, step, cte_name, step, step, stop, step, step, stop, cte_name
     )
 }

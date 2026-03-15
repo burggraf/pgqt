@@ -1308,14 +1308,16 @@ impl SqliteHandler {
             let format_str: String = ctx.get(0)?;
             let mut result = format_str;
             let mut arg_idx = 1;
+            let mut search_pos = 0;
             
             // Simple placeholder replacement
-            while let Some(pos) = result.find('%') {
-                if pos + 1 >= result.len() {
+            while let Some(pos) = result[search_pos..].find('%') {
+                let abs_pos = search_pos + pos;
+                if abs_pos + 1 >= result.len() {
                     break;
                 }
                 
-                let placeholder = &result[pos..pos+2];
+                let placeholder = &result[abs_pos..abs_pos+2];
                 let replacement = match placeholder {
                     "%s" => {
                         if arg_idx < ctx.len() {
@@ -1323,14 +1325,21 @@ impl SqliteHandler {
                             arg_idx += 1;
                             arg
                         } else {
-                            "%s".to_string()
+                            // Not enough arguments - leave placeholder and move past it
+                            search_pos = abs_pos + 2;
+                            continue;
                         }
                     }
                     "%%" => "%".to_string(),
-                    _ => break, // Unknown placeholder, stop processing
+                    _ => {
+                        // Unknown placeholder, skip it
+                        search_pos = abs_pos + 2;
+                        continue;
+                    }
                 };
                 
-                result.replace_range(pos..pos+2, &replacement);
+                result.replace_range(abs_pos..abs_pos+2, &replacement);
+                search_pos = abs_pos + replacement.len();
             }
             
             Ok(result)
