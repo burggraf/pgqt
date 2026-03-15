@@ -1,5 +1,5 @@
 /target
-/*.db
+/*.db*
 *.txt
 *.log
 test_pg_lite*.db
@@ -13,3 +13,5 @@ prompts/*
 .pi/
 compatibility_results/
 postgres-compatibility-suite/test_results.json
+Northwind-Pagila-Tests/*.sql
+Northwind-Pagila-Tests/*.log
