@@ -345,6 +345,55 @@ def drop_all_tables(conn, catalog_table):
     except Exception as e:
         print(f"Warning: Cleanup failed: {e}")
 
+def init_test_tables(pg_conn):
+    """Create and populate PostgreSQL regression test tables."""
+    cur = pg_conn.cursor()
+    
+    # Read and execute table creation SQL
+    schema_file = os.path.join(os.path.dirname(__file__), "test_data", "postgres_regress_tables.sql")
+    if os.path.exists(schema_file):
+        with open(schema_file, 'r') as f:
+            schema_sql = f.read()
+        
+        # Execute each statement
+        for statement in schema_sql.split(';'):
+            stmt = statement.strip()
+            if stmt:
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    # Ignore "already exists" errors
+                    if "already exists" not in str(e).lower():
+                        print(f"Warning: {e}")
+        
+        pg_conn.commit()
+        print("Test tables created/verified in PostgreSQL")
+    
+    cur.close()
+
+def init_pgqt_tables(proxy_conn):
+    """Create test tables in PGQT."""
+    cur = proxy_conn.cursor()
+    
+    schema_file = os.path.join(os.path.dirname(__file__), "test_data", "postgres_regress_tables.sql")
+    if os.path.exists(schema_file):
+        with open(schema_file, 'r') as f:
+            schema_sql = f.read()
+        
+        for statement in schema_sql.split(';'):
+            stmt = statement.strip()
+            if stmt:
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    if "already exists" not in str(e).lower():
+                        print(f"Warning in PGQT: {e}")
+        
+        proxy_conn.commit()
+        print("PGQT test tables created/verified")
+    
+    cur.close()
+
 def run_tests(verbose: bool = False, fail_fast: bool = False) -> list[FileResult]:
     """Run all compatibility tests and return results."""
     
@@ -372,6 +421,10 @@ def run_tests(verbose: bool = False, fail_fast: bool = False) -> list[FileResult
         proxy_dsn = f"host=127.0.0.1 port={PROXY_PORT} user=postgres password=postgres dbname=postgres"
         proxy_conn = psycopg2.connect(proxy_dsn)
         proxy_conn.autocommit = True
+        
+        # Initialize test tables
+        init_test_tables(pg_conn)
+        init_pgqt_tables(proxy_conn)
         
         sql_files = get_sql_files()
         file_results = []
