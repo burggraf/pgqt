@@ -53,6 +53,43 @@ SELECT json_build_array();
 - NULL values are preserved in the output JSON
 - Keys for `json_build_object` and `jsonb_build_object` must be text values
 
+## Built-in Interval Functions
+
+The following PostgreSQL interval functions are supported:
+
+| PostgreSQL | Description | Status |
+|------------|-------------|--------|
+| `make_interval(years, months, weeks, days, hours, mins, secs)` | Construct interval from component parts | ✅ Implemented |
+| `justify_interval(interval)` | Normalize interval signs | ✅ Implemented |
+| `justify_days(interval)` | Convert excess days to months | ✅ Implemented |
+| `justify_hours(interval)` | Convert excess hours to days | ✅ Implemented |
+
+### Examples
+
+```sql
+-- Construct an interval
+SELECT make_interval(days => 1, hours => 12);  -- Returns 1 day 12 hours
+
+-- Construct interval with all parameters
+SELECT make_interval(1, 2, 0, 4, 5, 6, 0);  -- 1 year 2 months 4 days 5 hours 6 minutes
+
+-- Normalize interval
+SELECT justify_interval('1 month -30 days'::interval);  -- Returns 00:00:00
+
+-- Convert excess days to months
+SELECT justify_days('35 days'::interval);  -- Returns 1 month 5 days
+
+-- Convert excess hours to days
+SELECT justify_hours('27 hours'::interval);  -- Returns 1 day 3 hours
+```
+
+### Notes
+
+- Intervals are stored as text in PostgreSQL format
+- `make_interval()` supports both positional and named parameters
+- `justify_days()` converts 30 days to 1 month
+- `justify_hours()` converts 24 hours to 1 day
+
 ## Built-in Math Functions
 
 The following PostgreSQL math functions are automatically transpiled to their SQLite equivalents:

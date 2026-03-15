@@ -182,7 +182,7 @@ impl Registry {
             "strip", "numnode", "querytree", "ts_rewrite", "ts_lexize", "ts_debug", 
             "ts_stat", "array_to_tsvector", "jsonb_to_tsvector", "int4range", "int8range", 
             "numrange", "tsrange", "tstzrange", "daterange", "repeat", "generate_series", 
-            "regexp", "regexpi"
+            "regexp", "regexpi", "make_interval", "justify_interval", "justify_days", "justify_hours"
         ] {
             functions.register(f, FunctionMapping::Simple(*f));
         }
