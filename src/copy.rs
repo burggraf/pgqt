@@ -29,6 +29,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::handler::errors::{PgError, PgErrorCode};
 
+/// Batch size for COPY INSERT operations (performance optimization)
+const COPY_BATCH_SIZE: usize = 1000;
+
 /// COPY operation state
 #[derive(Debug, Clone, PartialEq)]
 #[derive(Default)]
@@ -418,6 +421,7 @@ impl CopyHandler {
     ) -> Result<usize> {
         let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         let mut row_count = 0;
+        let mut line_number = 0;
 
         // Parse text format: tab-delimited rows, newline-separated
         let content = String::from_utf8_lossy(data);
@@ -425,6 +429,7 @@ impl CopyHandler {
         let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
         for line in lines {
+            line_number += 1;
             let mut line = line;
             if line.ends_with('\n') {
                 line = &line[..line.len() - 1];
@@ -440,10 +445,19 @@ impl CopyHandler {
             // Split by delimiter
             let values: Vec<&str> = line.split(options.delimiter).collect();
 
+            // Validate column count
+            if !columns.is_empty() && values.len() != columns.len() {
+                return Err(anyhow!(
+                    "COPY {}: line {}, expected {} columns but got {}",
+                    table_name, line_number, columns.len(), values.len()
+                ));
+            }
+
             // Convert values, handling NULL
             let converted_values: Vec<Option<String>> = values
                 .iter()
-                .map(|v| {
+                .enumerate()
+                .map(|(col_idx, v)| {
                     if v == &options.null_string {
                         None
                     } else {
@@ -470,7 +484,12 @@ impl CopyHandler {
                 .map(|p| p as &dyn rusqlite::ToSql)
                 .collect();
 
-            stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
+            if let Err(e) = stmt.execute(rusqlite::params_from_iter(param_refs.iter())) {
+                return Err(anyhow!(
+                    "COPY {}: line {}, column {}: {}",
+                    table_name, line_number, columns.get(0).unwrap_or(&"unknown".to_string()), e
+                ));
+            }
             row_count += 1;
         }
 
@@ -493,19 +512,19 @@ impl CopyHandler {
         let lines: Vec<&str> = content.lines().collect();
 
         // Skip header if present
-        let start_idx = if options.header && !lines.is_empty() {
-            1
-        } else {
-            0
-        };
+        let start_idx = if options.header && !lines.is_empty() { 1 } else { 0 };
+        let mut line_number = start_idx;
 
         for line in &lines[start_idx..] {
+            line_number += 1;
+            
             if line.is_empty() {
                 continue;
             }
 
             // Parse CSV line
-            let values = parse_csv_line(line, options.delimiter, options.quote)?;
+            let values = parse_csv_line(line, options.delimiter, options.quote)
+                .map_err(|e| anyhow!("COPY {}: line {}: {}", table_name, line_number, e))?;
 
             // Convert values, handling NULL
             let converted_values: Vec<Option<String>> = values
