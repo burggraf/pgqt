@@ -107,7 +107,8 @@ pub fn init_catalog(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS __pg_relation_meta__ (
             relname TEXT PRIMARY KEY,
-            relowner INTEGER NOT NULL
+            relowner INTEGER NOT NULL,
+            relkind CHAR DEFAULT 'r'
         )",
         [],
     )

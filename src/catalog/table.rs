@@ -51,15 +51,16 @@ pub fn store_table_metadata(
     Ok(())
 }
 
-/// Store relation ownership metadata
+/// Store relation ownership and kind metadata
 pub fn store_relation_metadata(
     conn: &Connection,
     table_name: &str,
     owner_oid: i64,
+    relkind: char,
 ) -> Result<()> {
     conn.execute(
-        "INSERT OR REPLACE INTO __pg_relation_meta__ (relname, relowner) VALUES (?1, ?2)",
-        (table_name, owner_oid),
+        "INSERT OR REPLACE INTO __pg_relation_meta__ (relname, relowner, relkind) VALUES (?1, ?2, ?3)",
+        (table_name, owner_oid, relkind.to_string()),
     )
     .context("Failed to store relation metadata")?;
     Ok(())

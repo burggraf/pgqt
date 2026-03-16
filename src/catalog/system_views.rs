@@ -109,13 +109,27 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE tbl_name = sm.name AND type = 'index') THEN true ELSE false END as relhasindex,
             false as relisshared,
             'p' as relpersistence,
-            CASE sm.type
-                WHEN 'table' THEN 'r'
-                WHEN 'view' THEN 'v'
-                WHEN 'index' THEN 'i'
-                WHEN 'trigger' THEN 'r'
-                ELSE 'r'
-            END as relkind,
+            COALESCE(
+                CASE rm.relkind
+                    WHEN 'v' THEN 'v'
+                    WHEN 'i' THEN 'i'
+                    WHEN 'S' THEN 'S'
+                    ELSE CASE sm.type
+                        WHEN 'table' THEN 'r'
+                        WHEN 'view' THEN 'v'
+                        WHEN 'index' THEN 'i'
+                        WHEN 'trigger' THEN 'r'
+                        ELSE 'r'
+                    END
+                END,
+                CASE sm.type
+                    WHEN 'table' THEN 'r'
+                    WHEN 'view' THEN 'v'
+                    WHEN 'index' THEN 'i'
+                    WHEN 'trigger' THEN 'r'
+                    ELSE 'r'
+                END
+            ) as relkind,
             (SELECT COUNT(*) FROM __pg_attribute__ WHERE attrelid = sm.rowid) as relnatts,
             0 as relchecks,
             false as relhasrules,

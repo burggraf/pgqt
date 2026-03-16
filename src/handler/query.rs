@@ -22,11 +22,22 @@ fn robust_split(sql: &str) -> Vec<String> {
     }
 
     // Special handling for COPY ... FROM stdin
-    // If it's a COPY with inline data, don't split it here because the scanner might get confused
-    // or we might split the data lines.
-    if sql.to_uppercase().contains("COPY") && sql.to_uppercase().contains("FROM STDIN") {
-        // Return as a single block - the COPY handler should manage the transition
-        return vec![sql.to_string()];
+    // If it's a COPY with inline data, don't split it - the entire block including
+    // the data lines (until \.) should be treated as one unit.
+    let upper = sql.to_uppercase();
+    if upper.contains("COPY") && upper.contains("FROM STDIN") {
+        // Check if this looks like a COPY block with data (has tab-separated data lines)
+        // If so, return as a single block
+        if sql.contains('\t') || sql.lines().any(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && 
+            !trimmed.starts_with("--") && 
+            !trimmed.to_uppercase().starts_with("COPY") &&
+            !trimmed.starts_with('\\') &&
+            trimmed.chars().filter(|c| *c == '\t').count() > 0
+        }) {
+            return vec![sql.to_string()];
+        }
     }
 
     // Attempt to use pg_query scanner first (most robust)
@@ -41,9 +52,30 @@ fn robust_split(sql: &str) -> Vec<String> {
             let mut current = String::new();
             let mut in_quote = false;
             let mut in_double_quote = false;
+            let mut in_copy_data = false;
             let mut chars = sql.chars().peekable();
 
             while let Some(c) = chars.next() {
+                // Handle COPY data mode - don't split until we see \.
+                if in_copy_data {
+                    current.push(c);
+                    if c == '\\' && chars.peek() == Some(&'.') {
+                        current.push(chars.next().unwrap());
+                        in_copy_data = false;
+                    }
+                    continue;
+                }
+                
+                // Check for start of COPY data mode
+                if c == ';' && !in_quote && !in_double_quote {
+                    let trimmed = current.trim().to_uppercase();
+                    if trimmed.contains("COPY") && trimmed.contains("FROM STDIN") {
+                        in_copy_data = true;
+                        current.push(c);
+                        continue;
+                    }
+                }
+                
                 match c {
                     '\'' if !in_double_quote => {
                         // Handle escaped quotes ''
@@ -83,6 +115,71 @@ fn robust_split(sql: &str) -> Vec<String> {
             }
         }
     }
+}
+
+/// Extract table name from a CREATE INDEX statement
+fn extract_table_from_index_sql(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    if !upper.starts_with("CREATE") || !upper.contains("INDEX") {
+        return None;
+    }
+    
+    // Look for "ON table_name" pattern
+    if let Some(on_pos) = upper.find(" ON ") {
+        let after_on = &sql[on_pos + 4..].trim_start();
+        // Extract table name (stop at space, parenthesis, or end)
+        let table_name: String = after_on
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '(' && *c != ',')
+            .collect();
+        
+        if !table_name.is_empty() {
+            // Remove schema prefix if present
+            if let Some(dot_pos) = table_name.find('.') {
+                return Some(table_name[dot_pos + 1..].to_lowercase());
+            }
+            return Some(table_name.to_lowercase());
+        }
+    }
+    None
+}
+
+/// Extract view name from a CREATE VIEW statement
+fn extract_view_name_from_sql(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    if !upper.starts_with("CREATE") || !upper.contains("VIEW") {
+        return None;
+    }
+    
+    // Look for "CREATE VIEW view_name" or "CREATE VIEW IF NOT EXISTS view_name"
+    let after_create: &str = if let Some(pos) = upper.find("VIEW") {
+        &sql[pos + 4..]
+    } else {
+        return None;
+    };
+    
+    let trimmed = after_create.trim_start();
+    // Skip "IF NOT EXISTS" if present
+    let view_part = if trimmed.to_uppercase().starts_with("IF NOT EXISTS") {
+        trimmed[13..].trim_start()
+    } else {
+        trimmed
+    };
+    
+    // Extract view name (stop at space, parenthesis, or AS)
+    let view_name: String = view_part
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '(' && *c != ',')
+        .collect();
+    
+    if !view_name.is_empty() && view_name.to_uppercase() != "AS" {
+        // Remove schema prefix if present
+        if let Some(dot_pos) = view_name.find('.') {
+            return Some(view_name[dot_pos + 1..].to_lowercase());
+        }
+        return Some(view_name.to_lowercase());
+    }
+    None
 }
 
 /// Trait for query execution methods
@@ -188,6 +285,29 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         let original_upper = sql.trim().to_uppercase();
+
+        // Skip lines that look like COPY data (tab-separated values, not valid SQL)
+        // This handles cases where psql sends COPY data lines as separate queries
+        if !original_upper.is_empty() && 
+           !original_upper.starts_with("SELECT") && 
+           !original_upper.starts_with("INSERT") &&
+           !original_upper.starts_with("UPDATE") &&
+           !original_upper.starts_with("DELETE") &&
+           !original_upper.starts_with("CREATE") &&
+           !original_upper.starts_with("DROP") &&
+           !original_upper.starts_with("ALTER") &&
+           !original_upper.starts_with("COPY") &&
+           !original_upper.starts_with("SET") &&
+           !original_upper.starts_with("SHOW") &&
+           !original_upper.starts_with("BEGIN") &&
+           !original_upper.starts_with("COMMIT") &&
+           !original_upper.starts_with("ROLLBACK") &&
+           !original_upper.starts_with("--") &&
+           !original_upper.starts_with("\\.") &&
+           sql.contains('\t') {
+            // This looks like COPY data - skip it
+            return Ok(vec![Response::Execution(Tag::new("COPY"))]);
+        }
 
         if original_upper == "SHOW ALL" {
             return self.handle_show_all();
@@ -393,6 +513,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let trimmed_lower = sqlite_sql.trim().to_lowercase();
         let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
         let is_create_table = sqlite_sql.trim().to_uppercase().starts_with("CREATE TABLE");
+        let is_create_view = sqlite_sql.trim().to_uppercase().starts_with("CREATE VIEW");
 
         if is_create_table {
             let result = self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)?;
@@ -416,13 +537,33 @@ pub trait QueryExecution: HandlerUtils + Clone {
                     |row| row.get(0),
                 ).unwrap_or(10); 
 
-                store_relation_metadata(&conn_guard, &metadata.table_name, owner_oid)?;
+                store_relation_metadata(&conn_guard, &metadata.table_name, owner_oid, 'r')?;
 
                 crate::catalog::populate_pg_attribute(&conn_guard, &metadata.table_name)?;
                 crate::catalog::populate_pg_index(&conn_guard)?;
                 crate::catalog::populate_pg_constraint(&conn_guard)?;
             }
 
+            Ok(result)
+        } else if is_create_view {
+            // Handle CREATE VIEW - store metadata
+            let result = self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)?;
+            
+            // Extract view name from the SQL
+            if let Some(view_name) = extract_view_name_from_sql(&sqlite_sql) {
+                let session = self.sessions().get(&client_id).unwrap_or_else(|| {
+                    self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
+                    self.sessions().get(&client_id).unwrap()
+                });
+                let owner_oid: i64 = conn_guard.query_row(
+                    "SELECT oid FROM __pg_authid__ WHERE rolname = ?1",
+                    &[&session.current_user],
+                    |row| row.get(0),
+                ).unwrap_or(10);
+                
+                store_relation_metadata(&conn_guard, &view_name, owner_oid, 'v')?;
+            }
+            
             Ok(result)
         } else if is_select {
             self.execute_select_with_params(&conn_guard, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
@@ -431,6 +572,23 @@ pub trait QueryExecution: HandlerUtils + Clone {
             let trimmed = sqlite_sql.trim();
             if trimmed.is_empty() || trimmed.starts_with("--") {
                 return Ok(vec![Response::Execution(Tag::new("OK"))]);
+            }
+
+            // Check if this is CREATE INDEX on a view (not allowed in SQLite)
+            if trimmed.to_uppercase().starts_with("CREATE") && trimmed.to_uppercase().contains("INDEX") {
+                // Extract table name from index statement
+                if let Some(table_name) = extract_table_from_index_sql(&trimmed) {
+                    // Check catalog for view status
+                    if let Ok(relkind) = conn_guard.query_row::<String, _, _>(
+                        "SELECT relkind FROM __pg_relation_meta__ WHERE relname = ?1",
+                        [&table_name],
+                        |row| row.get(0)
+                    ) {
+                        if relkind == "v" {
+                            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                        }
+                    }
+                }
             }
 
             match transpile_result.operation_type {
