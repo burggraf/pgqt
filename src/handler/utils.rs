@@ -319,6 +319,7 @@ pub trait HandlerUtils {
     }
 
     /// Handle CREATE SCHEMA statement
+    #[allow(dead_code)]
     fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response>> {
         let conn = self.conn().lock().unwrap();
         self.handle_create_schema_with_conn(sql, &conn)
@@ -369,6 +370,7 @@ pub trait HandlerUtils {
     }
 
     /// Handle DROP SCHEMA statement
+    #[allow(dead_code)]
     fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response>> {
         let conn = self.conn().lock().unwrap();
         self.handle_drop_schema_with_conn(sql, &conn)
@@ -866,6 +868,7 @@ pub trait HandlerUtils {
     }
 
     /// Handle CREATE FUNCTION statement
+    #[allow(dead_code)]
     fn handle_create_function(&self, sql: &str) -> Result<Vec<Response>> {
         let conn = self.conn().lock().unwrap();
         self.handle_create_function_with_conn(sql, &conn)
@@ -978,6 +981,7 @@ pub trait HandlerUtils {
 
     /// Try to execute a simple function call like SELECT func(arg1, arg2)
     /// Returns Ok(response) if it was a simple function call, Err if not
+    #[allow(dead_code)]
     fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
         let conn = self.conn().lock().unwrap();
         self.try_execute_simple_function_call_with_conn(sql, &conn)
@@ -1014,6 +1018,7 @@ pub trait HandlerUtils {
     }
 
     /// Execute a function call
+    #[allow(dead_code)]
     fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str) -> Result<Vec<Response>> {
         let conn = self.conn().lock().unwrap();
         self.execute_function_call_with_conn(func_call, _original_sql, &conn)
