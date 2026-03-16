@@ -476,11 +476,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return self.handle_explain(original_sql);
         }
 
+        // Get session connection early for all operations that need it
+        let conn = self.get_session_connection(client_id)?;
+        let conn_guard = conn.lock().unwrap();
+
         if upper_orig.starts_with("CREATE FUNCTION") || upper_orig.starts_with("CREATE OR REPLACE FUNCTION") {
-            return self.handle_create_function(original_sql);
+            return self.handle_create_function_with_conn(original_sql, &conn_guard);
         }
 
-        match self.try_execute_simple_function_call(original_sql) {
+        // Try to execute as a simple function call
+        match self.try_execute_simple_function_call_with_conn(original_sql, &conn_guard) {
             Ok(result) => {
                 return Ok(result);
             }
@@ -493,9 +498,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         let sqlite_sql = self.apply_rls_to_query(client_id, transpiled.to_string(), transpile_result.operation_type, &transpile_result.referenced_tables);
-
-        let conn = self.get_session_connection(client_id)?;
-        let conn_guard = conn.lock().unwrap();
 
         let trimmed_lower = sqlite_sql.trim().to_lowercase();
         let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");

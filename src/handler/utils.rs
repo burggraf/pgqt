@@ -867,15 +867,20 @@ pub trait HandlerUtils {
 
     /// Handle CREATE FUNCTION statement
     fn handle_create_function(&self, sql: &str) -> Result<Vec<Response>> {
+        let conn = self.conn().lock().unwrap();
+        self.handle_create_function_with_conn(sql, &conn)
+    }
+
+    /// Handle CREATE FUNCTION statement with a provided connection
+    fn handle_create_function_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
         // Parse CREATE FUNCTION
         let metadata = crate::transpiler::parse_create_function(sql)?;
 
         // Store in catalog
-        let conn = self.conn().lock().unwrap();
-        crate::catalog::store_function(&conn, &metadata)?;
+        crate::catalog::store_function(conn, &metadata)?;
 
         // Also register as a SQLite custom function for runtime interception
-        self.register_sqlite_function(&conn, &metadata)?;
+        self.register_sqlite_function(conn, &metadata)?;
 
         Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
     }
@@ -973,8 +978,13 @@ pub trait HandlerUtils {
     /// Try to execute a simple function call like SELECT func(arg1, arg2)
     /// Returns Ok(response) if it was a simple function call, Err if not
     fn try_execute_simple_function_call(&self, sql: &str) -> Result<Vec<Response>> {
-        use pg_query::protobuf::node::Node as NodeEnum;
+        let conn = self.conn().lock().unwrap();
+        self.try_execute_simple_function_call_with_conn(sql, &conn)
+    }
 
+    /// Try to execute a simple function call with a provided connection
+    fn try_execute_simple_function_call_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
 
         // Parse the SQL
         let result = pg_query::parse(sql)?;
@@ -989,7 +999,7 @@ pub trait HandlerUtils {
                             if let Some(ref val_node) = target.val {
                                 if let Some(NodeEnum::FuncCall(ref func_call)) = &val_node.node {
                                     // This is a simple function call! Execute it.
-                                    return self.execute_function_call(func_call, sql);
+                                    return self.execute_function_call_with_conn(func_call, sql, conn);
                                 }
                             }
                         }
@@ -1004,9 +1014,14 @@ pub trait HandlerUtils {
 
     /// Execute a function call
     fn execute_function_call(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str) -> Result<Vec<Response>> {
+        let conn = self.conn().lock().unwrap();
+        self.execute_function_call_with_conn(func_call, _original_sql, &conn)
+    }
+
+    /// Execute a function call with a provided connection
+    fn execute_function_call_with_conn(&self, func_call: &pg_query::protobuf::FuncCall, _original_sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
-
 
         // Extract function name
         let func_name = func_call
@@ -1024,9 +1039,8 @@ pub trait HandlerUtils {
             .ok_or_else(|| anyhow!("Could not extract function name"))?;
 
 
-        // Get connection and look up function
-        let conn = self.conn().lock().unwrap();
-        let metadata = crate::catalog::get_function(&conn, &func_name, None)?
+        // Look up function
+        let metadata = crate::catalog::get_function(conn, &func_name, None)?
             .ok_or_else(|| anyhow!("Function {} not found", func_name))?;
 
 
