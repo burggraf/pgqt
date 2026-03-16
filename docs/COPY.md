@@ -76,3 +76,17 @@ psql -h localhost -c "COPY my_table TO STDOUT" > data.txt
 ```bash
 psql -h localhost -c "COPY (SELECT name, email FROM users WHERE active = true) TO STDOUT WITH (FORMAT CSV, HEADER)" > active_users.csv
 ```
+
+## Limitations
+
+### Binary Format - COPY TO
+The current `COPY TO` implementation for binary format writes data as text strings rather than true PostgreSQL binary encoding. This means:
+
+- ✅ **PGQT COPY TO → PGQT COPY FROM**: Works correctly (flexible parsing handles both formats)
+- ❌ **PGQT COPY TO → PostgreSQL COPY FROM**: Will fail (PostgreSQL expects true binary encoding)
+- ✅ **PostgreSQL COPY TO → PGQT COPY FROM**: Works correctly (we handle true binary format)
+
+For full PostgreSQL compatibility with binary format exports, use CSV or TEXT formats.
+
+### Array Types
+Array types are not currently supported in binary format. Arrays in binary format require complex parsing of dimension information and element types that is not yet implemented. Arrays work correctly in TEXT and CSV formats using PostgreSQL array literal syntax (e.g., `'{1,2,3}'`).
