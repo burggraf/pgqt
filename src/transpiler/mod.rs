@@ -110,7 +110,10 @@ pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> Transpil
                 column_types: Vec::new(),
             }
         }
-        Err(_) => {
+        Err(e) => {
+            // Add the error to context so the handler can see it
+            ctx.add_error(e.to_string());
+            
             // Fallback: basic normalization
             TranspileResult {
                 sql: sql.to_lowercase().replace("now()", "datetime('now')"),
@@ -163,6 +166,26 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             NodeEnum::CreateEnumStmt(ref create_enum_stmt) => TranspileResult {
                 sql: ddl::reconstruct_create_enum_stmt(create_enum_stmt, ctx),
                 create_table_metadata: None, 
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+                column_aliases: Vec::new(),
+                column_types: Vec::new(),
+            },
+            NodeEnum::CreateDomainStmt(_) => TranspileResult {
+                sql: "-- CREATE DOMAIN ignored".to_string(),
+                create_table_metadata: None,
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+                column_aliases: Vec::new(),
+                column_types: Vec::new(),
+            },
+            NodeEnum::CreateSeqStmt(_) => TranspileResult {
+                sql: "-- CREATE SEQUENCE ignored".to_string(),
+                create_table_metadata: None,
                 copy_metadata: None,
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
@@ -393,6 +416,33 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     copy_metadata: None,
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                column_aliases: Vec::new(),
+                column_types: Vec::new(),
+                }
+            }
+            NodeEnum::CreateTableAsStmt(ref create_table_as_stmt) => {
+                // Handle CREATE TABLE AS and CREATE MATERIALIZED VIEW
+                let sql = ddl::reconstruct_create_table_as_stmt(create_table_as_stmt, ctx);
+                TranspileResult {
+                    sql,
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: ctx.referenced_tables.clone(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                column_aliases: Vec::new(),
+                column_types: Vec::new(),
+                }
+            }
+            NodeEnum::RefreshMatViewStmt(ref stmt) => {
+                let name = stmt.relation.as_ref().map(|r| r.relname.clone()).unwrap_or_default();
+                TranspileResult {
+                    sql: format!("-- REFRESH MATERIALIZED VIEW {}", name),
+                    create_table_metadata: None, 
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::OTHER,
                     errors: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),

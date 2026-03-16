@@ -542,67 +542,60 @@ pub fn extract_update_expressions(
     Ok(exprs)
 }
 
+/// Convert a rusqlite Row to a HashMap of column names and values
+pub fn row_to_map(row: &rusqlite::Row) -> Result<HashMap<String, Value>> {
+    let mut result = HashMap::new();
+    let column_count = row.as_ref().column_count();
+    for i in 0..column_count {
+        let name = row.as_ref().column_name(i)?.to_string();
+        let value: Value = row.get(i)?;
+        result.insert(name, value);
+    }
+    Ok(result)
+}
+
 /// Fetch the row that was just inserted
-///
-/// Uses SQLite's last_insert_rowid() to find the inserted row.
 pub fn fetch_inserted_row(
     conn: &Connection,
     table_name: &str,
 ) -> Result<HashMap<String, Value>> {
-    // Get the primary key columns
-    let pk_columns = get_primary_key_columns(conn, table_name)?;
+    // Try to get by rowid first as it's most reliable in SQLite
+    let sql = format!("SELECT * FROM {} WHERE rowid = last_insert_rowid()", table_name);
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        return row_to_map(row);
+    }
     
+    // Fallback to PK
+    let pk_columns = get_primary_key_columns(conn, table_name)?;
     if pk_columns.is_empty() {
-        // No primary key - try to use rowid
-        let sql = format!(
-            "SELECT * FROM {} WHERE rowid = last_insert_rowid()",
-            table_name
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        
-        let column_count = stmt.column_count();
-        let column_names: Vec<String> = (0..column_count)
-            .map(|i| stmt.column_name(i).unwrap_or("").to_string())
-            .collect();
-        
-        let mut rows = stmt.query([])?;
-        
-        if let Some(row) = rows.next()? {
-            let mut result = HashMap::new();
-            for (i, col_name) in column_names.iter().enumerate() {
-                let value: Value = row.get(i)?;
-                result.insert(col_name.clone(), value);
-            }
-            return Ok(result);
-        }
-    } else {
-        // Use the primary key with last_insert_rowid
-        // This assumes the primary key is an INTEGER and uses AUTOINCREMENT
-        let pk = &pk_columns[0];
-        let sql = format!(
-            "SELECT * FROM {} WHERE {} = last_insert_rowid()",
-            table_name, pk
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        
-        let column_count = stmt.column_count();
-        let column_names: Vec<String> = (0..column_count)
-            .map(|i| stmt.column_name(i).unwrap_or("").to_string())
-            .collect();
-        
-        let mut rows = stmt.query([])?;
-        
-        if let Some(row) = rows.next()? {
-            let mut result = HashMap::new();
-            for (i, col_name) in column_names.iter().enumerate() {
-                let value: Value = row.get(i)?;
-                result.insert(col_name.clone(), value);
-            }
-            return Ok(result);
-        }
+        return Err(anyhow!("Could not fetch inserted row for {}", table_name));
+    }
+    
+    let pk = &pk_columns[0];
+    let sql = format!("SELECT * FROM {} WHERE {} = last_insert_rowid()", table_name, pk);
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        return row_to_map(row);
     }
     
     Err(anyhow!("Could not fetch inserted row"))
+}
+
+/// Extract OLD row data from a DML statement (if possible)
+pub fn extract_old_row_from_dml_simple(
+    _sql: &str,
+) -> Option<HashMap<String, Value>> {
+    None // Placeholder
+}
+
+/// Extract inserted row values from an INSERT statement
+pub fn extract_inserted_row(
+    _sql: &str,
+) -> Option<HashMap<String, Value>> {
+    None // Placeholder
 }
 
 #[cfg(test)]

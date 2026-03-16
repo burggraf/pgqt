@@ -71,7 +71,12 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         .filter_map(|n| {
             if let Some(ref inner) = n.node {
                 if let NodeEnum::String(s) = inner {
-                    return Some(s.sval.to_lowercase());
+                    let name = s.sval.to_lowercase();
+                    // Strip "public" schema prefix for SQLite compatibility
+                    if name == "public" {
+                        return None;
+                    }
+                    return Some(name);
                 }
             }
             None

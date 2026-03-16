@@ -13,7 +13,7 @@ pub struct ColumnTypeInfo {
 }
 
 /// Result of transpiling a SQL statement
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TranspileResult {
     pub sql: String,
     pub create_table_metadata: Option<CreateTableMetadata>,
@@ -39,7 +39,7 @@ pub enum OperationType {
 }
 
 /// Metadata extracted from a CREATE TABLE statement
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CreateTableMetadata {
     pub table_name: String,
     pub columns: Vec<ColumnTypeInfo>,

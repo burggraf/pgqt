@@ -1,12 +1,3 @@
-//! Query execution module
-//!
-//! This module contains methods for executing SQL queries including:
-//! - Main query execution dispatch
-//! - SELECT statement execution
-//! - DML statement execution (INSERT, UPDATE, DELETE)
-//! - COPY statement handling
-
-use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
@@ -19,25 +10,93 @@ use crate::handler::utils::HandlerUtils;
 #[allow(unused_imports)]
 use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
-use crate::trigger::{TriggerExecutor, OperationType, BeforeTriggerResult, extract_table_and_operation};
+use crate::trigger::{TriggerExecutor, BeforeTriggerResult, extract_table_and_operation};
 use crate::trigger::rows::{fetch_inserted_row};
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
-use rusqlite::Statement;
+
+/// Helper to robustly split multiple SQL statements
+fn robust_split(sql: &str) -> Vec<String> {
+    // Attempt to use pg_query scanner first (most robust)
+    match pg_query::split_with_scanner(sql) {
+        Ok(statements) => {
+            // Always return the scanner's result if it succeeded
+            return statements.into_iter().map(|s| s.to_string()).collect();
+        }
+        Err(_) => {
+            // Fallback: manual split by semicolon, respecting single and double quotes
+            let mut statements = Vec::new();
+            let mut current = String::new();
+            let mut in_quote = false;
+            let mut in_double_quote = false;
+            let mut chars = sql.chars().peekable();
+
+            while let Some(c) = chars.next() {
+                match c {
+                    '\'' if !in_double_quote => {
+                        // Handle escaped quotes ''
+                        if in_quote && chars.peek() == Some(&'\'') {
+                            current.push(c);
+                            current.push(chars.next().unwrap());
+                        } else {
+                            in_quote = !in_quote;
+                            current.push(c);
+                        }
+                    }
+                    '"' if !in_quote => {
+                        in_double_quote = !in_double_quote;
+                        current.push(c);
+                    }
+                    ';' if !in_quote && !in_double_quote => {
+                        let trimmed = current.trim();
+                        if !trimmed.is_empty() {
+                            statements.push(trimmed.to_string());
+                        }
+                        current.clear();
+                    }
+                    _ => {
+                        current.push(c);
+                    }
+                }
+            }
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                statements.push(trimmed.to_string());
+            }
+            
+            if statements.is_empty() {
+                vec![sql.to_string()]
+            } else {
+                statements
+            }
+        }
+    }
+}
 
 /// Trait for query execution methods
 pub trait QueryExecution: HandlerUtils + Clone {
     fn as_metadata_provider(&self) -> Arc<dyn crate::transpiler::metadata::MetadataProvider>;
 
     /// Execute a SQL query with optional parameters and return the results
-    /// Uses per-session connection identified by client_id
     fn execute_query_params(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
-        // Set context for the current thread
+        let statements = robust_split(sql);
+        if statements.len() > 1 {
+            let mut all_responses = Vec::new();
+            for stmt_sql in statements {
+                let responses = self.execute_single_query_params(client_id, &stmt_sql, params)?;
+                all_responses.extend(responses);
+            }
+            return Ok(all_responses);
+        }
+        self.execute_single_query_params(client_id, sql, params)
+    }
+
+    /// Execute a single query with parameters
+    fn execute_single_query_params(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
         crate::handler::set_current_client_id(client_id);
         if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
 
-        // Check context before executing
         {
             let session = self.sessions().get(&client_id).unwrap_or_else(|| {
                 self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
@@ -56,206 +115,67 @@ pub trait QueryExecution: HandlerUtils + Clone {
             }
         }
 
-        let result = crate::transpiler::transpile_with_metadata(sql);
-        if !result.errors.is_empty() {
-            return Err(anyhow::anyhow!(result.errors.join("\n")));
-        }
-        let transpiled = result.sql;
-        debug!("Original: {}", sql);
-        debug!("Transpiled: {}", transpiled);
-        let _upper_sql = transpiled.trim().to_uppercase();
-
-        // Transaction Control and other special commands usually don't have parameters in extended query
-        // but we should check if we need to handle them here.
-        // For now, assume they are handled by execute_query or similar.
-
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         ctx.set_metadata_provider(self.as_metadata_provider());
         let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
 
         if !transpile_result.errors.is_empty() {
-            return Err(anyhow!("{}", transpile_result.errors.join("; ")));
-        }
-
-        let transpiled = &transpile_result.sql;
-        let upper_transpiled = transpiled.trim().to_uppercase();
-
-        // Handle internal functions AFTER transpilation
-        if upper_transpiled.starts_with("SELECT __PG_CREATE_ENUM") {
-             let conn = self.get_session_connection(client_id)?;
-             let conn_guard = conn.lock().unwrap();
-             if let Some(start) = transpiled.find('(') {
-                 if let Some(end) = transpiled.rfind(')') {
-                     let args_str = &transpiled[start+1..end];
-                     let args: Vec<String> = args_str.split(',')
-                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
-                         .collect();
-                     if args.len() == 3 {
-                         let type_name = &args[0];
-                         let label = &args[1];
-                         let sort_order: f64 = args[2].parse().unwrap_or(0.0);
-                         crate::catalog::store_enum_value(&conn_guard, type_name, label, sort_order)?;
-                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
-                     }
-                 }
-             }
-        }
-
-        if upper_transpiled.starts_with("SELECT __PG_COMMENT_ON") {
-             let conn = self.get_session_connection(client_id)?;
-             let conn_guard = conn.lock().unwrap();
-             if let Some(start) = transpiled.find('(') {
-                 if let Some(end) = transpiled.rfind(')') {
-                     let args_str = &transpiled[start+1..end];
-                     let args: Vec<String> = args_str.split(',')
-                         .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
-                         .collect();
-                     if args.len() == 3 {
-                         let obj_type = &args[0];
-                         let obj_name = &args[1];
-                         let comment = &args[2];
-                         crate::catalog::store_comment(&conn_guard, obj_type, obj_name, comment)?;
-                         return Ok(vec![Response::Execution(Tag::new("OK"))]);
-                     }
-                 }
-             }
-        }
-
-        // Check permissions before executing
-        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, sql)? {
-            return Err(anyhow!("permission denied"));
-        }
-
-        // Apply RLS
-        let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
-
-        // Use per-session connection instead of shared connection
-        let conn = self.get_session_connection(client_id)?;
-        let conn_guard = conn.lock().unwrap();
-        let trimmed_lower = sqlite_sql.trim().to_lowercase();
-        let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
-
-        if is_select {
-            self.execute_select_with_params(&conn_guard, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
-        } else {
-            // Check if this is a DML statement that needs trigger execution
-            match transpile_result.operation_type {
-                crate::transpiler::OperationType::INSERT |
-                crate::transpiler::OperationType::UPDATE |
-                crate::transpiler::OperationType::DELETE => {
-                    // For now, execute without trigger support for extended query protocol
-                    // TODO: Implement trigger support for extended query protocol
-                    self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
-                }
-                _ => {
-                    self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
+            let error_msg = transpile_result.errors.join("; ");
+            // Retry if multiple statements are found during parsing
+            if error_msg.contains("Multiple statements provided") {
+                let statements = robust_split(sql);
+                if statements.len() > 1 {
+                    let mut all_responses = Vec::new();
+                    for stmt in statements {
+                        let responses = self.execute_single_query_params(client_id, &stmt, params)?;
+                        all_responses.extend(responses);
+                    }
+                    return Ok(all_responses);
                 }
             }
-        }
-    }
-
-    /// Execute a SELECT statement with parameters
-    fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String], column_aliases: &[String], column_types: &[Option<String>]) -> Result<Vec<Response>> {
-        let mut stmt = conn.prepare(sql)?;
-        let col_count = stmt.column_count();
-
-        // Build field info
-        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases, column_types)?);
-
-        let mut data_rows = Vec::new();
-
-        // Convert params to rusqlite params
-        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
-            match p {
-                Some(s) => rusqlite::types::Value::Text(s.clone()),
-                None => rusqlite::types::Value::Null,
-            }
-        }).collect();
-
-        // We need to convert Vec<Value> to something rusqlite accepts
-        // rusqlite::params_from_iter works
-        let mut rows = stmt.query(rusqlite::params_from_iter(rusqlite_params))?;
-
-        while let Some(row) = rows.next()? {
-            let mut encoder = DataRowEncoder::new(fields.clone());
-
-            for i in 0..col_count {
-                let field_type = fields[i].datatype();
-                let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
-                    .map(|v| v.map(|x| {
-                        if *field_type == pgwire::api::Type::BOOL {
-                            if x == 1 { "t".to_string() } else { "f".to_string() }
-                        } else {
-                            x.to_string()
-                        }
-                    }))
-                    .or_else(|| row.get::<_, Option<f64>>(i).ok()
-                        .map(|v| v.map(|x| x.to_string())))
-                    .or_else(|| row.get::<_, Option<String>>(i).ok())
-                    .flatten();
-                match value {
-                    Some(v) => encoder.encode_field(&Some(v))?,
-                    None => encoder.encode_field(&None::<String>)?,
-                }
-            }
-
-            data_rows.push(Ok(encoder.take_row()));
+            return Err(anyhow!("{}", error_msg));
         }
 
-        let row_stream = futures::stream::iter(data_rows);
-
-        Ok(vec![Response::Query(QueryResponse::new(
-            fields,
-            row_stream,
-        ))])
-    }
-
-    /// Execute a non-SELECT statement with parameters
-    fn execute_statement_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
-        debug!("Executing statement with params: {}", sql);
-
-        // Skip comments and empty statements
-        let trimmed = sql.trim();
-        if trimmed.starts_with("--") || trimmed.starts_with("/*") || trimmed.is_empty() {
-            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+        let transpiled_out = transpile_result.sql.clone();
+        
+        let trans_statements = robust_split(&transpiled_out);
+        if trans_statements.len() > 1 {
+            let mut all_responses = Vec::new();
+            for t_stmt in trans_statements {
+                let responses = self.execute_transpiled_stmt_params(client_id, &t_stmt, sql, params, &transpile_result)?;
+                all_responses.extend(responses);
+            }
+            return Ok(all_responses);
         }
 
-        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
-            match p {
-                Some(s) => rusqlite::types::Value::Text(s.clone()),
-                None => rusqlite::types::Value::Null,
-            }
-        }).collect();
-
-        let mut stmt = conn.prepare(sql)?;
-        let changes = stmt.execute(rusqlite::params_from_iter(rusqlite_params))?;
-
-        let upper_sql = sql.trim().to_uppercase();
-        let tag = if upper_sql.starts_with("INSERT") {
-            Tag::new("INSERT 0").with_rows(changes)
-        } else if upper_sql.starts_with("UPDATE") {
-            Tag::new("UPDATE").with_rows(changes)
-        } else if upper_sql.starts_with("DELETE") {
-            Tag::new("DELETE").with_rows(changes)
-        } else {
-            Tag::new("OK")
-        };
-
-        Ok(vec![Response::Execution(tag)])
+        self.execute_transpiled_stmt_params(client_id, &transpiled_out, sql, params, &transpile_result)
     }
 
     /// Execute a SQL query and return the results
     fn execute_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
-        // Set context for the current thread
+        let statements = robust_split(sql);
+
+        if statements.len() > 1 {
+            let mut all_responses = Vec::new();
+            for stmt_sql in statements {
+                let responses = self.execute_single_query(client_id, &stmt_sql)?;
+                all_responses.extend(responses);
+            }
+            return Ok(all_responses);
+        }
+        
+        self.execute_single_query(client_id, sql)
+    }
+
+    /// Execute a single SQL query and return the results
+    fn execute_single_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
         crate::handler::set_current_client_id(client_id);
         if let Some(session) = self.sessions().get(&client_id) {
             crate::handler::set_current_user(&session.current_user);
         }
 
-        // Check for commands BEFORE transpilation (transpiler may convert them)
         let original_upper = sql.trim().to_uppercase();
 
-        // SHOW commands
         if original_upper == "SHOW ALL" {
             return self.handle_show_all();
         }
@@ -266,48 +186,76 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return self.handle_show_search_path();
         }
 
-        // DROP FUNCTION (transpiler doesn't handle this, it deparses to invalid SQL)
         if original_upper.starts_with("DROP FUNCTION") {
             return self.handle_drop_function(sql);
         }
 
-        // Handle SET search_path (transpiler converts this to "select 1")
         if original_upper.starts_with("SET SEARCH_PATH") {
             return self.handle_set_search_path(sql);
         }
 
-        // Handle SET ROLE and RESET ROLE
         if original_upper.starts_with("SET ROLE") || original_upper.starts_with("RESET ROLE") {
             return self.handle_set_role(sql);
         }
 
-        // Handle CREATE TRIGGER (before transpilation, as transpiler converts it to a comment)
         if original_upper.starts_with("CREATE TRIGGER") {
             return self.handle_create_trigger(sql);
         }
 
-        // Handle DROP TRIGGER (before transpilation)
         if original_upper.starts_with("DROP TRIGGER") {
             return self.handle_drop_trigger(sql);
         }
 
         let result = crate::transpiler::transpile_with_metadata(sql);
         if !result.errors.is_empty() {
-            return Err(anyhow::anyhow!(result.errors.join("\n")));
+            let error_msg = result.errors.join("; ");
+            if error_msg.contains("Multiple statements provided") {
+                let statements = robust_split(sql);
+                if statements.len() > 1 {
+                    let mut all_responses = Vec::new();
+                    for stmt in statements {
+                        let responses = self.execute_single_query(client_id, &stmt)?;
+                        all_responses.extend(responses);
+                    }
+                    return Ok(all_responses);
+                }
+            }
+            return Err(anyhow::anyhow!(error_msg));
         }
-        let transpiled = result.sql;
+        
+        let transpiled = result.sql.clone();
         debug!("Original: {}", sql);
         debug!("Transpiled: {}", transpiled);
+
+        let trans_statements = robust_split(&transpiled);
+        
+        if trans_statements.len() > 1 {
+            let mut all_responses = Vec::new();
+            for t_stmt in trans_statements {
+                let responses = self.execute_transpiled_stmt(client_id, &t_stmt, sql, &result)?;
+                all_responses.extend(responses);
+            }
+            return Ok(all_responses);
+        }
+
+        self.execute_transpiled_stmt(client_id, &transpiled, sql, &result)
+    }
+
+    /// Execute a single transpiled statement
+    fn execute_transpiled_stmt(&self, client_id: u32, transpiled: &str, original_sql: &str, transpile_result: &crate::transpiler::TranspileResult) -> Result<Vec<Response>> {
+        self.execute_transpiled_stmt_params(client_id, transpiled, original_sql, &[], transpile_result)
+    }
+
+    /// Execute a single transpiled statement with parameters
+    fn execute_transpiled_stmt_params(&self, client_id: u32, transpiled: &str, original_sql: &str, params: &[Option<String>], transpile_result: &crate::transpiler::TranspileResult) -> Result<Vec<Response>> {
         let upper_sql = transpiled.trim().to_uppercase();
 
-        // Handle internal functions AFTER transpilation
         if upper_sql.starts_with("SELECT __PG_CREATE_ENUM") {
              let conn = self.get_session_connection(client_id)?;
              let conn_guard = conn.lock().unwrap();
              if let Some(start) = transpiled.find('(') {
                  if let Some(end) = transpiled.rfind(')') {
                      let args_str = &transpiled[start+1..end];
-                     // TODO: Better parsing of CSV with potential quotes
                      let args: Vec<String> = args_str.split(',')
                          .map(|s| s.trim().trim_matches('\'').replace("''", "'").to_string())
                          .collect();
@@ -342,9 +290,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
              }
         }
 
-        // Handle transaction control statements
-        if crate::handler::transaction::is_transaction_control(sql) {
-            // Get or create session for client 0 (legacy single-client mode during transition)
+        if crate::handler::transaction::is_transaction_control(original_sql) {
             let mut session_clone = {
                 let session_ref = self.sessions().get(&client_id).unwrap_or_else(|| {
                     self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
@@ -353,10 +299,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 session_ref.clone()
             };
 
-            // Parse and execute transaction command
-            if let Some(cmd) = crate::handler::transaction::parse_transaction_command(sql) {
-                // For now, use the shared connection to maintain backward compatibility
-                // TODO: Migrate to per-session connections once all tests are updated
+            if let Some(cmd) = crate::handler::transaction::parse_transaction_command(original_sql) {
                 let result = {
                     let conn_guard = self.conn().lock().unwrap();
                     crate::handler::transaction::execute_transaction_command(
@@ -366,13 +309,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
                     )
                 };
 
-                // Store updated session state
                 self.sessions().insert(client_id, session_clone);
                 return result;
             }
         }
 
-        // Before executing anything else, check transaction error state
         {
             let session = self.sessions().get(&client_id).unwrap_or_else(|| {
                 self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
@@ -380,7 +321,8 @@ pub trait QueryExecution: HandlerUtils + Clone {
             });
 
             if session.transaction_status == crate::handler::TransactionStatus::InError {
-                if !upper_sql.starts_with("ROLLBACK") {
+                let upper_orig = original_sql.trim().to_uppercase();
+                if !upper_orig.starts_with("ROLLBACK") {
                     let pg_err = crate::handler::errors::PgError::new(
                         crate::handler::errors::PgErrorCode::InFailedSqlTransaction,
                         "current transaction is aborted, commands ignored until end of transaction block",
@@ -391,135 +333,100 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         let execute_result = (|| -> Result<Vec<Response>> {
-            // Handle CREATE SCHEMA
-        if upper_sql.starts_with("CREATE SCHEMA") {
-            return self.handle_create_schema(sql);
+        let upper_orig = original_sql.trim().to_uppercase();
+        if upper_orig.starts_with("CREATE SCHEMA") {
+            return self.handle_create_schema(original_sql);
         }
 
-        // Handle DROP SCHEMA
-        if upper_sql.starts_with("DROP SCHEMA") {
-            return self.handle_drop_schema(sql);
+        if upper_orig.starts_with("DROP SCHEMA") {
+            return self.handle_drop_schema(original_sql);
         }
 
-        // Handle EXPLAIN with PostgreSQL-specific options (e.g., EXPLAIN (costs off) SELECT ...)
-        if upper_sql.starts_with("EXPLAIN") {
-            return self.handle_explain(sql);
+        if upper_orig.starts_with("EXPLAIN") {
+            return self.handle_explain(original_sql);
         }
 
-        // Handle CREATE FUNCTION
-        if upper_sql.starts_with("CREATE FUNCTION") || upper_sql.starts_with("CREATE OR REPLACE FUNCTION") {
-            return self.handle_create_function(sql);
+        if upper_orig.starts_with("CREATE FUNCTION") || upper_orig.starts_with("CREATE OR REPLACE FUNCTION") {
+            return self.handle_create_function(original_sql);
         }
 
-        // Try to handle simple function calls like SELECT func(arg1, arg2)
-        // This intercepts user-defined function calls before normal execution
-        match self.try_execute_simple_function_call(sql) {
+        match self.try_execute_simple_function_call(original_sql) {
             Ok(result) => {
                 return Ok(result);
             }
             Err(_) => {
-                // Fall through to normal transpilation
             }
         }
 
-        let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
-        ctx.set_metadata_provider(self.as_metadata_provider());
-        let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
-
-        // Check for transpilation errors (e.g., unknown pseudo-type)
-        if !transpile_result.errors.is_empty() {
-            return Err(anyhow!("{}", transpile_result.errors.join("; ")));
-        }
-
-        // Handle COPY statements
-        if let Some(copy_stmt) = transpile_result.copy_metadata {
+        if let Some(copy_stmt) = transpile_result.copy_metadata.clone() {
             return self.handle_copy_statement(copy_stmt);
         }
 
-        // Check permissions before executing
-        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, sql)? {
+        if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, original_sql)? {
             return Err(anyhow!("permission denied for table(s)"));
         }
 
-        // Apply RLS (Row-Level Security) to the query
-        let sqlite_sql = self.apply_rls_to_query(transpile_result.sql, transpile_result.operation_type, &transpile_result.referenced_tables);
+        let sqlite_sql = self.apply_rls_to_query(transpiled.to_string(), transpile_result.operation_type, &transpile_result.referenced_tables);
 
-        let conn = self.conn().lock().unwrap();
+        let conn = self.get_session_connection(client_id)?;
+        let conn_guard = conn.lock().unwrap();
 
         let trimmed_lower = sqlite_sql.trim().to_lowercase();
         let is_select = trimmed_lower.starts_with("select") || trimmed_lower.starts_with("with ");
         let is_create_table = sqlite_sql.trim().to_uppercase().starts_with("CREATE TABLE");
 
         if is_create_table {
-            // For CREATE TABLE, we need to execute the DDL first, then store metadata
-            // This avoids the "cannot start a transaction within a transaction" error
-            // because SQLite starts an implicit transaction for CREATE TABLE
-            let result = self.execute_statement(&conn, &sqlite_sql)?;
+            let result = self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)?;
 
-            // Store metadata after CREATE TABLE completes
-            if let Some(metadata) = transpile_result.create_table_metadata {
+            if let Some(metadata) = transpile_result.create_table_metadata.clone() {
                 let columns: Vec<(String, String, Option<String>)> = metadata
                     .columns
                     .into_iter()
                     .map(|c| (c.column_name, c.original_type, c.constraints))
                     .collect();
 
-                store_table_metadata(&conn, &metadata.table_name, &columns)?;
+                store_table_metadata(&conn_guard, &metadata.table_name, &columns)?;
 
-                // Store ownership (use current user as owner)
                 let session = self.sessions().get(&client_id).unwrap_or_else(|| {
                     self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
                     self.sessions().get(&client_id).unwrap()
                 });
-                // Find owner OID from __pg_authid__
-                let owner_oid: i64 = conn.query_row(
+                let owner_oid: i64 = conn_guard.query_row(
                     "SELECT oid FROM __pg_authid__ WHERE rolname = ?1",
                     &[&session.current_user],
                     |row| row.get(0),
-                ).unwrap_or(10); // Default to postgres (OID 10)
+                ).unwrap_or(10); 
 
-                store_relation_metadata(&conn, &metadata.table_name, owner_oid)?;
+                store_relation_metadata(&conn_guard, &metadata.table_name, owner_oid)?;
 
-                // Populate pg_catalog tables for ORM compatibility
-                crate::catalog::populate_pg_attribute(&conn, &metadata.table_name)?;
-                crate::catalog::populate_pg_index(&conn)?;
-                crate::catalog::populate_pg_constraint(&conn)?;
+                crate::catalog::populate_pg_attribute(&conn_guard, &metadata.table_name)?;
+                crate::catalog::populate_pg_index(&conn_guard)?;
+                crate::catalog::populate_pg_constraint(&conn_guard)?;
             }
 
             Ok(result)
         } else if is_select {
-            self.execute_select_with_tables(&conn, &sqlite_sql, &transpile_result.referenced_tables)
+            self.execute_select_with_params(&conn_guard, &sqlite_sql, params, &transpile_result.referenced_tables, &transpile_result.column_aliases, &transpile_result.column_types)
         } else {
-            // Handle multiple statements (e.g., from TRUNCATE or DROP with multiple tables)
-            let statements: Vec<&str> = sqlite_sql.split("; ").collect();
-            if statements.len() > 1 {
-                let mut all_responses = Vec::new();
-                for stmt in statements {
-                    let stmt = stmt.trim();
-                    if !stmt.is_empty() {
-                        let responses = self.execute_statement(&conn, stmt)?;
-                        all_responses.extend(responses);
-                    }
+            // Check if it's a comment or no-op before attempting to execute
+            let trimmed = sqlite_sql.trim();
+            if trimmed.is_empty() || trimmed.starts_with("--") {
+                return Ok(vec![Response::Execution(Tag::new("OK"))]);
+            }
+
+            match transpile_result.operation_type {
+                crate::transpiler::OperationType::INSERT |
+                crate::transpiler::OperationType::UPDATE |
+                crate::transpiler::OperationType::DELETE => {
+                    self.execute_dml_with_triggers(&conn_guard, original_sql, &sqlite_sql, transpile_result.operation_type)
                 }
-                Ok(all_responses)
-            } else {
-                // Check if this is a DML statement that needs trigger execution
-                match transpile_result.operation_type {
-                    crate::transpiler::OperationType::INSERT |
-                    crate::transpiler::OperationType::UPDATE |
-                    crate::transpiler::OperationType::DELETE => {
-                        return self.execute_dml_with_triggers(&conn, sql, &sqlite_sql, transpile_result.operation_type);
-                    }
-                    _ => {
-                        // Non-DML statement, execute normally
-                        return self.execute_statement(&conn, &sqlite_sql);
-                    }
+                _ => {
+                    self.execute_statement_with_params(&conn_guard, &sqlite_sql, params)
                 }
             }
         }
         })();
 
-        // Check for error and update transaction status
         if execute_result.is_err() {
             let mut session_clone = self.sessions().get(&client_id).unwrap().clone();
             if session_clone.transaction_status == crate::handler::TransactionStatus::InTransaction {
@@ -531,7 +438,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
         execute_result
     }
 
-    /// Handle COPY statement
     fn handle_copy_statement(&self,
         copy_stmt: crate::copy::CopyStatement,
     ) -> Result<Vec<Response>> {
@@ -539,11 +445,9 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         match copy_stmt.direction {
             CopyDirection::From => {
-                // COPY FROM STDIN - start the COPY operation
                 let table_name = copy_stmt.table_name.ok_or_else(|| anyhow!("COPY FROM requires table name"))?;
                 let options = copy_stmt.options;
 
-                // Return CopyInResponse to start the COPY protocol
                 let response = self.copy_handler().start_copy_from(
                     table_name,
                     copy_stmt.columns,
@@ -552,7 +456,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 Ok(vec![response])
             }
             CopyDirection::To => {
-                // COPY TO STDOUT
                 let query = if let Some(q) = copy_stmt.query {
                     q
                 } else if let Some(t) = copy_stmt.table_name {
@@ -569,41 +472,45 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
     }
 
-    /// Execute a SELECT statement with known referenced tables for type inference
     fn execute_select_with_tables(&self, conn: &Connection, sql: &str, referenced_tables: &[String]) -> Result<Vec<Response>> {
+        self.execute_select_with_params(conn, sql, &[], referenced_tables, &[], &[])
+    }
+
+    fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String], column_aliases: &[String], column_types: &[Option<String>]) -> Result<Vec<Response>> {
         let mut stmt = conn.prepare(sql)?;
         let col_count = stmt.column_count();
 
-        // Build field info using the already-locked connection
-        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, &[], &[])?);
+        let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases, column_types)?);
 
         let mut data_rows = Vec::new();
-        let mut rows = stmt.query([])?;
+
+        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
+            match p {
+                Some(s) => rusqlite::types::Value::Text(s.clone()),
+                None => rusqlite::types::Value::Null,
+            }
+        }).collect();
+
+        let mut rows = stmt.query(rusqlite::params_from_iter(rusqlite_params))?;
 
         while let Some(row) = rows.next()? {
             let mut encoder = DataRowEncoder::new(fields.clone());
 
             for i in 0..col_count {
                 let field_type = fields[i].datatype();
-
-                // Try to get value as different types and convert to string
                 let value: Option<String> = row.get::<_, Option<i64>>(i).ok()
                     .map(|v| v.map(|x| {
-                        // For boolean columns, convert 1/0 to PostgreSQL's 't'/'f' format
                         if *field_type == pgwire::api::Type::BOOL {
                             if x == 1 { "t".to_string() } else { "f".to_string() }
                         } else {
                             x.to_string()
                         }
                     }))
-                    .or_else(|| row.get::<_, Option<f64>>(i).ok()
-                        .map(|v| v.map(|x| x.to_string())))
-                    .or_else(|| row.get::<_, Option<String>>(i).ok())
-                    .flatten();
-                match value {
-                    Some(v) => encoder.encode_field(&Some(v))?,
-                    None => encoder.encode_field(&None::<String>)?,
-                }
+                    .or_else(|| row.get::<_, Option<f64>>(i).ok().map(|v| v.map(|x| x.to_string())))
+                    .or_else(|| row.get::<_, Option<String>>(i).ok().flatten().map(Some))
+                    .unwrap_or(None);
+
+                encoder.encode_field(&value)?;
             }
 
             data_rows.push(Ok(encoder.take_row()));
@@ -611,20 +518,51 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         let row_stream = stream::iter(data_rows);
 
-        Ok(vec![Response::Query(QueryResponse::new(
-            fields,
-            row_stream,
-        ))])
+        Ok(vec![Response::Query(QueryResponse::new(fields, row_stream))])
     }
 
-    /// Build field info for a SQLite statement using the rewriter's type mapping
+    fn execute_statement_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+        let rusqlite_params: Vec<rusqlite::types::Value> = params.iter().map(|p| {
+            match p {
+                Some(s) => rusqlite::types::Value::Text(s.clone()),
+                None => rusqlite::types::Value::Null,
+            }
+        }).collect();
+
+        let mut stmt = conn.prepare(sql)?;
+        let changes = stmt.execute(rusqlite::params_from_iter(rusqlite_params))?;
+
+        let upper_sql = sql.trim().to_uppercase();
+        let tag = if upper_sql.starts_with("INSERT") {
+            Tag::new("INSERT").with_oid(0).with_rows(changes)
+        } else if upper_sql.starts_with("UPDATE") {
+            Tag::new("UPDATE").with_rows(changes)
+        } else if upper_sql.starts_with("DELETE") {
+            Tag::new("DELETE").with_rows(changes)
+        } else if upper_sql.starts_with("CREATE") {
+            Tag::new("CREATE")
+        } else if upper_sql.starts_with("DROP") {
+            Tag::new("DROP")
+        } else if upper_sql.starts_with("ALTER") {
+            Tag::new("ALTER")
+        } else {
+            Tag::new("OK")
+        };
+
+        Ok(vec![Response::Execution(tag)])
+    }
+
+    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
+        self.execute_statement_with_params(conn, sql, &[])
+    }
+
     fn build_field_info(
         &self,
-        sqlite_stmt: &Statement,
+        sqlite_stmt: &rusqlite::Statement,
         referenced_tables: &[String],
         conn: &Connection,
         column_aliases: &[String],
-        _column_types: &[Option<String>],
+        column_types: &[Option<String>],
     ) -> Result<Vec<FieldInfo>> {
         use crate::handler::rewriter::{map_original_type_to_pg_type, ColumnFieldInfo};
         use pgwire::api::results::{FieldFormat, FieldInfo};
@@ -634,116 +572,52 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let col_count = sqlite_stmt.column_count();
         let mut fields = Vec::with_capacity(col_count);
 
-        // Build a map of table -> columns from the catalog using the already-locked connection
         let mut table_columns: HashMap<String, Vec<ColumnFieldInfo>> = HashMap::new();
-
-        for table_name in referenced_tables {
-            if let Ok(columns) = crate::catalog::get_table_columns_with_defaults(conn, table_name) {
+        for table in referenced_tables {
+            if let Ok(columns) = crate::catalog::get_table_metadata(conn, table) {
                 let field_infos: Vec<ColumnFieldInfo> = columns
-                    .iter()
+                    .into_iter()
                     .map(|col| {
                         let pg_type = map_original_type_to_pg_type(&col.original_type);
                         ColumnFieldInfo {
-                            name: col.column_name.clone(),
+                            name: col.column_name,
                             pg_type,
                         }
                     })
                     .collect();
-                table_columns.insert(table_name.clone(), field_infos);
+                table_columns.insert(table.to_lowercase(), field_infos);
             }
         }
 
         for i in 0..col_count {
             let col_name = sqlite_stmt.column_name(i)?.to_string();
-
-            // Check if this is a known column from one of the referenced tables
-            let mut found = false;
-            for table_name in referenced_tables {
-                if let Some(columns) = table_columns.get(table_name) {
-                    for col in columns {
-                        if col.name == col_name {
-                            fields.push(FieldInfo::new(
-                                col_name.clone(),
-                                None,
-                                None,
-                                col.pg_type.clone(),
-                                FieldFormat::Text,
-                            ));
-                            found = true;
-                            break;
-                        }
+            
+            if i < column_aliases.len() && !column_aliases[i].is_empty() && column_aliases[i] == col_name {
+                if i < column_types.len() {
+                    if let Some(ref type_name) = column_types[i] {
+                        let pg_type = map_original_type_to_pg_type(type_name);
+                        fields.push(FieldInfo::new(col_name.clone(), None, None, pg_type, FieldFormat::Text));
+                        continue;
                     }
-                    if found { break; }
                 }
             }
 
-            if found {
-                continue;
+            let mut found = false;
+            let lower_name = col_name.to_lowercase();
+            for (_table, columns) in &table_columns {
+                if let Some(info) = columns.iter().find(|c| c.name.to_lowercase() == lower_name) {
+                    fields.push(FieldInfo::new(col_name.clone(), None, None, info.pg_type.clone(), FieldFormat::Text));
+                    found = true;
+                    break;
+                }
             }
 
-            // For expressions, use PostgreSQL's ?column? convention
-            let lower_name = col_name.to_lowercase();
-            let is_expression = col_name.contains('(') || col_name.contains(')') ||
-                               col_name.contains('+') || col_name.contains('-') ||
-                               col_name.contains('*') || col_name.contains('/') ||
-                               col_name.contains(' ') ||
-                               col_name.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
-
-            let pg_type = if lower_name.starts_with("count(") {
-                Type::INT8
-            } else if lower_name.starts_with("sum(") || lower_name.starts_with("avg(") {
-                Type::NUMERIC
-            } else {
-                Type::TEXT
-            };
-
-            // Use column alias from original query if available, otherwise fall back to SQLite's column name
-            let name = if i < column_aliases.len() && !column_aliases[i].is_empty() {
-                column_aliases[i].clone()
-            } else if col_name == "?column?" || (is_expression && !col_name.contains(" as ")) {
-                "?column?".to_string()
-            } else {
-                col_name
-            };
-
-            fields.push(FieldInfo::new(name, None, None, pg_type, FieldFormat::Text));
+            if !found {
+                fields.push(FieldInfo::new(col_name, None, None, Type::TEXT, FieldFormat::Text));
+            }
         }
 
         Ok(fields)
-    }
-
-    /// Execute a non-SELECT statement (INSERT, UPDATE, DELETE, DDL)
-    fn execute_statement(&self, conn: &Connection, sql: &str) -> Result<Vec<Response>> {
-        debug!("Executing statement: {}", sql);
-
-        // Split multiple statements and execute them sequentially
-        let statements: Vec<&str> = sql.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-        let mut total_changes = 0;
-
-        for stmt in statements {
-            // Skip comments and empty statements which can cause SQLITE_MISUSE in some versions/cases
-            if stmt.starts_with("--") || stmt.starts_with("/*") {
-                continue;
-            }
-            total_changes += conn.execute(stmt, [])?;
-        }
-
-        let upper_sql = sql.trim().to_uppercase();
-        let tag = if upper_sql.starts_with("CREATE TABLE") {
-            Tag::new("CREATE TABLE")
-        } else if upper_sql.starts_with("INSERT") {
-            // PostgreSQL format: INSERT oid rows
-            // oid is 0 for tables without OIDs (most modern tables)
-            Tag::new("INSERT 0").with_rows(total_changes)
-        } else if upper_sql.starts_with("UPDATE") {
-            Tag::new("UPDATE").with_rows(total_changes)
-        } else if upper_sql.starts_with("DELETE") {
-            Tag::new("DELETE").with_rows(total_changes)
-        } else {
-            Tag::new("OK")
-        };
-
-        Ok(vec![Response::Execution(tag)])
     }
 
     fn execute_dml_with_triggers(
@@ -753,47 +627,44 @@ pub trait QueryExecution: HandlerUtils + Clone {
         sqlite_sql: &str,
         operation: crate::transpiler::OperationType,
     ) -> Result<Vec<Response>> {
-        use crate::transpiler::OperationType as TranspileOpType;
-        use crate::trigger::rows::{build_new_row_from_insert};
+        use crate::trigger::{TriggerExecutor, OperationType};
 
-        // Map transpiler operation type to trigger operation type
-        let trigger_op = match operation {
-            TranspileOpType::INSERT => OperationType::Insert,
-            TranspileOpType::UPDATE => OperationType::Update,
-            TranspileOpType::DELETE => OperationType::Delete,
-            _ => {
-                // Not a DML operation, execute normally
-                return self.execute_statement(conn, sqlite_sql);
+        let (table_name, trigger_op) = match operation {
+            crate::transpiler::OperationType::INSERT => {
+                let table = extract_table_and_operation(original_sql).unwrap().0;
+                (table, OperationType::Insert)
             }
+            crate::transpiler::OperationType::UPDATE => {
+                let table = extract_table_and_operation(original_sql).unwrap().0;
+                (table, OperationType::Update)
+            }
+            crate::transpiler::OperationType::DELETE => {
+                let table = extract_table_and_operation(original_sql).unwrap().0;
+                (table, OperationType::Delete)
+            }
+            _ => return self.execute_statement(conn, sqlite_sql),
         };
 
-        // Extract table name from the original SQL
-        let (table_name, _) = match extract_table_and_operation(original_sql) {
-            Some((table, op)) => (table, op),
-            None => {
-                // Could not extract table, execute normally
-                return self.execute_statement(conn, sqlite_sql);
-            }
-        };
-
-        // For UPDATE and DELETE, we support multi-row triggers
-        if trigger_op == OperationType::Update || trigger_op == OperationType::Delete {
-            return self.execute_multi_row_dml_with_triggers(conn, &table_name, original_sql, sqlite_sql, trigger_op);
+        if table_name.is_empty() {
+            return self.execute_statement(conn, sqlite_sql);
         }
 
-        // Create trigger executor
         let trigger_executor = TriggerExecutor::new(self.functions().clone());
 
-        // For INSERT, there's no OLD row
+        if trigger_op == OperationType::Update || trigger_op == OperationType::Delete {
+            return self.execute_multi_row_dml_with_triggers(
+                conn,
+                &table_name,
+                original_sql,
+                sqlite_sql,
+                trigger_op,
+            );
+        }
+
         let old_row = None;
-
-        // Build NEW row from INSERT statement values
-        let new_row = build_new_row_from_insert(conn, &table_name, original_sql).ok();
-
-        // Clone new_row for later comparison
+        let new_row = crate::trigger::rows::extract_inserted_row(original_sql);
         let new_row_clone = new_row.clone();
 
-        // Execute BEFORE triggers
         match trigger_executor.execute_before_triggers(
             conn,
             &table_name,
@@ -802,37 +673,26 @@ pub trait QueryExecution: HandlerUtils + Clone {
             new_row,
         )? {
             BeforeTriggerResult::Abort => {
-                // Trigger aborted the operation
-                return Ok(vec![Response::Execution(Tag::new("OK"))]);
+                Ok(vec![Response::Execution(Tag::new("OK"))])
             }
             BeforeTriggerResult::Continue(modified_new_row) => {
-                // Execute the DML
                 let result = self.execute_statement(conn, sqlite_sql)?;
 
-                // If the trigger modified the row and this is an INSERT,
-                // we need to update the inserted row with the modified values
                 if let Some(modified) = &modified_new_row {
-                    // Only update if there are actual modifications
-                    // Compare with original new_row to find changed columns
                     let columns_to_update: Vec<(String, rusqlite::types::Value)> = if let Some(ref original) = new_row_clone {
                         modified
                             .iter()
                             .filter(|(col, val)| {
-                                // Only include columns that are different from original
-                                original.get(*col) != Some(*val)
+                                original.get(*col) != Some(val.clone())
                             })
                             .map(|(col, val)| (col.clone(), val.clone()))
                             .collect()
                     } else {
-                        // If no original row, update all modified columns
                         modified.iter().map(|(col, val)| (col.clone(), val.clone())).collect()
                     };
                     
                     if !columns_to_update.is_empty() {
-                        // Get the rowid of the inserted row
                         let rowid: i64 = conn.last_insert_rowid();
-                        
-                        // Build UPDATE statement for modified columns only
                         let updates: Vec<String> = columns_to_update
                             .iter()
                             .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
@@ -848,15 +708,12 @@ pub trait QueryExecution: HandlerUtils + Clone {
                     }
                 }
 
-                // Execute AFTER triggers
-                // For INSERT, fetch the actual row that was inserted
                 let after_new_row = fetch_inserted_row(conn, &table_name).ok();
-                
                 trigger_executor.execute_after_triggers(
                     conn,
                     &table_name,
                     trigger_op,
-                    old_row.clone(), // OLD row is same as before for AFTER triggers
+                    old_row.clone(), 
                     after_new_row,
                 )?;
 
@@ -865,19 +722,17 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
     }
 
-    /// Execute a multi-row DML statement (UPDATE, DELETE) with trigger support
     fn execute_multi_row_dml_with_triggers(
         &self,
         conn: &Connection,
         table_name: &str,
         original_sql: &str,
         sqlite_sql: &str,
-        operation: OperationType,
+        operation: crate::trigger::OperationType,
     ) -> Result<Vec<Response>> {
-        use crate::trigger::rows::{extract_update_expressions};
+        use crate::trigger::rows::{extract_update_expressions, row_to_map};
 
-        // Check if there are ANY triggers for this operation on this table
-        let table_oid = crate::catalog::calc_table_oid(table_name);
+        let table_oid = crate::catalog::trigger::calc_table_oid(table_name);
         let triggers = crate::catalog::get_triggers_for_table(
             conn,
             table_oid,
@@ -885,13 +740,10 @@ pub trait QueryExecution: HandlerUtils + Clone {
             Some(operation.to_trigger_event()),
         )?;
 
-        // If no triggers, just execute the original SQL statement directly
         if triggers.is_empty() {
             return self.execute_statement(conn, sqlite_sql);
         }
 
-        // 1. Identify all rows to be affected
-        // Try to extract the WHERE part from sqlite_sql
         let lower_sql = sqlite_sql.to_lowercase();
         let where_sql = if let Some(where_pos) = lower_sql.find(" where ") {
             &sqlite_sql[where_pos + 7..]
@@ -899,131 +751,79 @@ pub trait QueryExecution: HandlerUtils + Clone {
             "1=1"
         };
 
-        // Get affected rowids
-        let select_sql = format!("SELECT rowid FROM {} WHERE {}", table_name, where_sql);
-        let mut stmt = conn.prepare(&select_sql)?;
-        let rowids: Vec<i64> = stmt.query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        if rowids.is_empty() {
-            let tag = if operation == OperationType::Update {
-                Tag::new("UPDATE").with_rows(0)
-            } else {
-                Tag::new("DELETE").with_rows(0)
-            };
-            return Ok(vec![Response::Execution(tag)]);
-        }
-
-        // Create trigger executor
         let trigger_executor = TriggerExecutor::new(self.functions().clone());
         let mut affected_rows = 0;
 
-        // For UPDATE, we need the SET expressions from the statement
-        let set_exprs = if operation == OperationType::Update {
-            extract_update_expressions(original_sql).ok()
-        } else {
-            None
-        };
-
-        // 2. Iterate through each row
-        for rid in rowids {
-            // Fetch OLD row
-            let mut fetch_stmt = conn.prepare(&format!("SELECT * FROM {} WHERE rowid = ?", table_name))?;
-            let column_count = fetch_stmt.column_count();
-            let column_names: Vec<String> = (0..column_count)
-                .map(|i| fetch_stmt.column_name(i).unwrap_or("").to_string())
-                .collect();
+        if operation == crate::trigger::OperationType::Update {
+            let updates = extract_update_expressions(original_sql)?;
+            let select_sql = format!("SELECT *, rowid FROM {} WHERE {}", table_name, where_sql);
             
-            let mut rows = fetch_stmt.query([rid])?;
-            let old_row = if let Some(row) = rows.next()? {
-                let mut map = HashMap::new();
-                for (i, col_name) in column_names.iter().enumerate() {
-                    let value: rusqlite::types::Value = row.get(i)?;
-                    map.insert(col_name.clone(), value);
+            let rows_data = {
+                let mut stmt = conn.prepare(&select_sql)?;
+                let mut rows = stmt.query([])?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next()? {
+                    results.push((row_to_map(row)?, row.get::<_, i64>("rowid")?));
                 }
-                Some(map)
-            } else {
-                continue; // Row might have been deleted by a previous trigger
+                results
             };
 
-            // Build NEW row for UPDATE by evaluating expressions
-            let new_row = if operation == OperationType::Update {
-                let mut updated = old_row.clone().unwrap_or_default();
-                if let Some(ref exprs) = set_exprs {
-                    for (col, expr) in exprs {
-                        // Evaluate expression against existing row in SQLite
-                        let eval_sql = format!("SELECT {} FROM {} WHERE rowid = ?", expr, table_name);
-                        if let Ok(val) = conn.query_row(&eval_sql, [rid], |row| row.get::<_, rusqlite::types::Value>(0)) {
-                            updated.insert(col.clone(), val);
-                        }
-                    }
+            for (old_row_map, rowid) in rows_data {
+                let mut new_row_map = old_row_map.clone();
+                for (col, expr) in &updates {
+                    new_row_map.insert(col.clone(), rusqlite::types::Value::Text(expr.clone()));
                 }
-                Some(updated)
-            } else {
-                None
-            };
 
-            // 3. Execute BEFORE triggers
-            let trigger_res = trigger_executor.execute_before_triggers(
-                conn,
-                table_name,
-                operation,
-                old_row.clone(),
-                new_row.clone(),
-            )?;
+                match trigger_executor.execute_before_triggers(conn, table_name, operation, Some(old_row_map.clone()), Some(new_row_map))? {
+                    BeforeTriggerResult::Abort => continue,
+                    BeforeTriggerResult::Continue(modified_row) => {
+                        let final_row = modified_row.unwrap_or_else(|| {
+                            let mut m = old_row_map.clone();
+                            for (col, expr) in &updates {
+                                m.insert(col.clone(), rusqlite::types::Value::Text(expr.clone()));
+                            }
+                            m
+                        });
 
-            match trigger_res {
-                BeforeTriggerResult::Abort => continue, // Skip this row
-                BeforeTriggerResult::Continue(modified_new_row) => {
-                    // 4. Perform the DML for this row
-                    if operation == OperationType::Update {
-                        // Use modified NEW row if provided, otherwise the one we built
-                        let row_to_update = modified_new_row.unwrap_or_else(|| new_row.clone().unwrap_or_default());
-                        
-                        // Build a specific SET clause for updated columns
-                        let updates: Vec<String> = row_to_update
-                            .iter()
-                            .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
+                        let set_clauses: Vec<String> = final_row.iter()
+                            .filter(|(k, _)| *k != "rowid")
+                            .map(|(k, v)| format!("{} = {}", k, value_to_sql(v)))
                             .collect();
                         
-                        let update_sql = format!(
-                            "UPDATE {} SET {} WHERE rowid = {}",
-                            table_name,
-                            updates.join(", "),
-                            rid
-                        );
-                        conn.execute(&update_sql, [])?;
-                        affected_rows += 1;
+                        let update_stmt = format!("UPDATE {} SET {} WHERE rowid = {}", table_name, set_clauses.join(", "), rowid);
+                        affected_rows += conn.execute(&update_stmt, [])?;
 
-                        // 5. Execute AFTER triggers
-                        trigger_executor.execute_after_triggers(
-                            conn,
-                            table_name,
-                            operation,
-                            old_row,
-                            Some(row_to_update),
-                        )?;
-                    } else {
-                        // DELETE
-                        let delete_sql = format!("DELETE FROM {} WHERE rowid = {}", table_name, rid);
-                        conn.execute(&delete_sql, [])?;
-                        affected_rows += 1;
+                        let after_row = fetch_inserted_row(conn, table_name).ok();
+                        trigger_executor.execute_after_triggers(conn, table_name, operation, Some(old_row_map), after_row)?;
+                    }
+                }
+            }
+        } else {
+            let select_sql = format!("SELECT *, rowid FROM {} WHERE {}", table_name, where_sql);
+            
+            let rows_data = {
+                let mut stmt = conn.prepare(&select_sql)?;
+                let mut rows = stmt.query([])?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next()? {
+                    results.push((row_to_map(row)?, row.get::<_, i64>("rowid")?));
+                }
+                results
+            };
 
-                        // 5. Execute AFTER triggers
-                        trigger_executor.execute_after_triggers(
-                            conn,
-                            table_name,
-                            operation,
-                            old_row,
-                            None,
-                        )?;
+            for (old_row_map, rowid) in rows_data {
+                match trigger_executor.execute_before_triggers(conn, table_name, operation, Some(old_row_map.clone()), None)? {
+                    BeforeTriggerResult::Abort => continue,
+                    BeforeTriggerResult::Continue(_) => {
+                        let delete_stmt = format!("DELETE FROM {} WHERE rowid = {}", table_name, rowid);
+                        affected_rows += conn.execute(&delete_stmt, [])?;
+                        trigger_executor.execute_after_triggers(conn, table_name, operation, Some(old_row_map), None)?;
                     }
                 }
             }
         }
 
-        let tag = if operation == OperationType::Update {
+        let tag = if operation == crate::trigger::OperationType::Update {
             Tag::new("UPDATE").with_rows(affected_rows)
         } else {
             Tag::new("DELETE").with_rows(affected_rows)
@@ -1032,11 +832,9 @@ pub trait QueryExecution: HandlerUtils + Clone {
         Ok(vec![Response::Execution(tag)])
     }
 
-    /// Reference to the copy handler
     fn copy_handler(&self) -> &copy::CopyHandler;
 }
 
-/// Convert a SQLite Value to SQL string
 fn value_to_sql(val: &rusqlite::types::Value) -> String {
     match val {
         rusqlite::types::Value::Null => "NULL".to_string(),

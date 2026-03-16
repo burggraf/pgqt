@@ -7,11 +7,31 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt,
-    IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt, CreateTrigStmt
+    IndexStmt, CopyStmt, ViewStmt, DefineStmt, CreateEnumStmt, CreateTrigStmt,
+    CreateTableAsStmt
 };
 use super::context::{TranspileContext, TranspileResult, OperationType, CreateTableMetadata, ColumnTypeInfo};
 use crate::transpiler::reconstruct_node;
 use pg_query::protobuf::TypeName;
+
+/// Check if an expression is a nextval() function call
+fn is_nextval_call(node: &Node) -> bool {
+    if let Some(ref inner) = node.node {
+        if let NodeEnum::FuncCall(ref func_call) = inner {
+            // Check if the function name is "nextval"
+            for func_name_node in &func_call.funcname {
+                if let Some(ref name_inner) = func_name_node.node {
+                    if let NodeEnum::String(ref s) = name_inner {
+                        if s.sval.to_lowercase() == "nextval" {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
 
 pub(crate) fn reconstruct_create_stmt_with_metadata(stmt: &CreateStmt, ctx: &mut TranspileContext) -> TranspileResult {
     let table_name = stmt
@@ -362,6 +382,12 @@ pub(crate) fn reconstruct_constraint(constraint: &Constraint, ctx: &mut Transpil
         pg_query::protobuf::ConstrType::ConstrNull => Some("NULL".to_string()),
         pg_query::protobuf::ConstrType::ConstrDefault => {
             if let Some(ref expr) = constraint.raw_expr {
+                // Check if this is a nextval() call - SQLite doesn't support non-constant defaults
+                if is_nextval_call(expr) {
+                    // Skip the DEFAULT clause for nextval() - rely on INTEGER PRIMARY KEY AUTOINCREMENT
+                    return None;
+                }
+                
                 let expr_sql = reconstruct_node(expr, ctx);
                 // SQLite requires parentheses around function calls in DEFAULT
                 // Check if the expression contains parentheses (indicating a function call)
@@ -903,6 +929,42 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
         }).collect();
         if !cols.is_empty() {
             parts.push(format!("({})", cols.join(", ")));
+        }
+    }
+
+    parts.push("as".to_string());
+
+    if let Some(ref query) = stmt.query {
+        parts.push(reconstruct_node(query, ctx));
+    }
+
+    parts.join(" ")
+}
+
+/// Reconstruct a CREATE TABLE AS or CREATE MATERIALIZED VIEW statement
+pub(crate) fn reconstruct_create_table_as_stmt(stmt: &CreateTableAsStmt, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::ObjectType;
+
+    let mut parts = Vec::new();
+
+    // Determine if it's a materialized view or a table
+    let obj_type = ObjectType::try_from(stmt.objtype).unwrap_or(ObjectType::Undefined);
+    let is_matview = obj_type == ObjectType::ObjectMatview;
+
+    if is_matview {
+        parts.push("create view".to_string());
+    } else {
+        parts.push("create table".to_string());
+    }
+
+    if let Some(ref into) = stmt.into {
+        if let Some(ref relation) = into.rel {
+            let name = relation.relname.to_lowercase();
+            if relation.schemaname.is_empty() || relation.schemaname == "public" {
+                parts.push(name);
+            } else {
+                parts.push(format!("{}.{}", relation.schemaname.to_lowercase(), name));
+            }
         }
     }
 
