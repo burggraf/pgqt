@@ -630,6 +630,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
     }
 
+    #[allow(dead_code)]
     fn execute_select_with_tables(&self, conn: &Connection, sql: &str, referenced_tables: &[String]) -> Result<Vec<Response>> {
         self.execute_select_with_params(conn, sql, &[], referenced_tables, &[], &[])
     }
@@ -841,7 +842,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                         modified
                             .iter()
                             .filter(|(col, val)| {
-                                original.get(*col) != Some(val.clone())
+                                original.get(*col) != Some(&(*val).clone())
                             })
                             .map(|(col, val)| (col.clone(), val.clone()))
                             .collect()

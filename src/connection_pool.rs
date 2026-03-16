@@ -80,6 +80,7 @@ impl ConnectionPool {
     /// # Arguments
     /// * `db_path` - Path to the SQLite database file
     /// * `max_connections` - Maximum number of connections in the pool
+    #[allow(dead_code)]
     pub fn new(db_path: &Path, max_connections: usize) -> Result<Self> {
         Self::with_init(db_path, max_connections, None)
     }

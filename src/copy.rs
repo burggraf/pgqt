@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex};
 use crate::handler::errors::{PgError, PgErrorCode};
 
 /// Batch size for COPY INSERT operations (performance optimization)
+#[allow(dead_code)]
 const COPY_BATCH_SIZE: usize = 1000;
 
 /// COPY operation state
@@ -457,7 +458,7 @@ impl CopyHandler {
             let converted_values: Vec<Option<String>> = values
                 .iter()
                 .enumerate()
-                .map(|(col_idx, v)| {
+                .map(|(_col_idx, v)| {
                     if v == &options.null_string {
                         None
                     } else {

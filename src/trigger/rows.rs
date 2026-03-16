@@ -104,6 +104,7 @@ pub fn build_new_row(values: &[(String, Value)]) -> HashMap<String, Value> {
 ///
 /// Parses the INSERT statement to extract column names and values.
 /// This is a best-effort parsing - complex expressions may not be fully supported.
+#[allow(dead_code)]
 pub fn build_new_row_from_insert(
     _conn: &Connection,
     _table_name: &str,
@@ -124,6 +125,7 @@ pub fn build_new_row_from_insert(
 }
 
 /// Extract values from an INSERT statement
+#[allow(dead_code)]
 fn extract_insert_values(
     stmt: &pg_query::protobuf::InsertStmt,
 ) -> Result<HashMap<String, Value>> {
@@ -585,6 +587,7 @@ pub fn fetch_inserted_row(
 }
 
 /// Extract OLD row data from a DML statement (if possible)
+#[allow(dead_code)]
 pub fn extract_old_row_from_dml_simple(
     _sql: &str,
 ) -> Option<HashMap<String, Value>> {

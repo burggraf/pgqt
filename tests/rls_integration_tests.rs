@@ -38,8 +38,8 @@ fn create_test_table(conn: &Connection) {
         ("is_public".to_string(), "BOOLEAN".to_string(), Some("DEFAULT 0".to_string())),
     ]).unwrap();
     
-    // Store relation metadata with owner
-    catalog::store_relation_metadata(&conn, "documents", 1).unwrap();
+    // Store relation metadata with owner (relkind 'r' = regular table)
+    catalog::store_relation_metadata(&conn, "documents", 1, 'r').unwrap();
     
     // Create test user
     conn.execute(
