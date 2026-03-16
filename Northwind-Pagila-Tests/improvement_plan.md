@@ -89,3 +89,18 @@ These are PostgreSQL features that cannot be fully supported in SQLite:
 
 ---
 *Last updated: 2026-03-15*
+
+## Known Issues
+
+### COPY FROM STDIN Data Loading
+**Status: PARTIAL** - Proxy handles COPY without crashing, but data is not inserted
+
+The proxy currently skips COPY data lines to avoid errors, but doesn't convert them to INSERT statements. This means:
+- ✅ Proxy doesn't crash on COPY commands
+- ✅ Script execution continues successfully  
+- ❌ Table data from COPY is not loaded
+
+**Workaround**: Use INSERT statements instead of COPY for data loading, or implement full COPY protocol parsing.
+
+**Lines affected in Pagila**: ~2000 COPY data lines (mostly actor, film, customer, payment tables)
+

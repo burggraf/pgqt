@@ -284,7 +284,14 @@ pub trait QueryExecution: HandlerUtils + Clone {
             crate::handler::set_current_user(&session.current_user);
         }
 
-        let original_upper = sql.trim().to_uppercase();
+        let trimmed = sql.trim();
+        let original_upper = trimmed.to_uppercase();
+
+        // Skip COPY protocol meta-commands sent as queries by psql
+        // \. terminates COPY data, \N represents NULL in COPY format
+        if trimmed == "\\." || trimmed.starts_with("\\N") || trimmed.starts_with("\\.") {
+            return Ok(vec![Response::Execution(Tag::new("COPY"))]);
+        }
 
         // Skip lines that look like COPY data (tab-separated values, not valid SQL)
         // This handles cases where psql sends COPY data lines as separate queries
@@ -303,7 +310,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
            !original_upper.starts_with("COMMIT") &&
            !original_upper.starts_with("ROLLBACK") &&
            !original_upper.starts_with("--") &&
-           !original_upper.starts_with("\\.") &&
            sql.contains('\t') {
             // This looks like COPY data - skip it
             return Ok(vec![Response::Execution(Tag::new("COPY"))]);
