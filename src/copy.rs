@@ -16,6 +16,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
+use bytes::Buf;
 use futures::sink::Sink;
 use futures::stream;
 use pgwire::api::copy::CopyHandler as PgWireCopyHandler;
@@ -28,6 +29,367 @@ use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
 use crate::handler::errors::{PgError, PgErrorCode};
+
+// PostgreSQL type OIDs for binary format
+const BOOL_OID: i32 = 16;
+const BYTEA_OID: i32 = 17;
+const INT2_OID: i32 = 21;
+const INT4_OID: i32 = 23;
+const INT8_OID: i32 = 20;
+const FLOAT4_OID: i32 = 700;
+const FLOAT8_OID: i32 = 701;
+const TEXT_OID: i32 = 25;
+const VARCHAR_OID: i32 = 1043;
+const BPCHAR_OID: i32 = 1042;
+const DATE_OID: i32 = 1082;
+const TIME_OID: i32 = 1083;
+const TIMESTAMP_OID: i32 = 1114;
+const TIMESTAMPTZ_OID: i32 = 1184;
+const INTERVAL_OID: i32 = 1186;
+const UUID_OID: i32 = 2950;
+const NUMERIC_OID: i32 = 1700;
+const JSON_OID: i32 = 114;
+const JSONB_OID: i32 = 3802;
+
+/// PostgreSQL epoch offset (2000-01-01) in microseconds
+const PG_EPOCH_MICROS: i64 = 946684800000000i64;
+
+/// Read a boolean from binary format (1 byte: 0=false, 1=true)
+fn read_bool_binary(data: &[u8]) -> Result<bool> {
+    if data.len() != 1 {
+        return Err(anyhow!("Boolean must be 1 byte, got {}", data.len()));
+    }
+    Ok(data[0] != 0)
+}
+
+/// Write a boolean to binary format
+fn write_bool_binary(value: bool) -> Vec<u8> {
+    vec![if value { 1 } else { 0 }]
+}
+
+/// Read an i16 from big-endian binary format
+fn read_i16_binary(data: &[u8]) -> Result<i16> {
+    if data.len() != 2 {
+        return Err(anyhow!("int2 must be 2 bytes, got {}", data.len()));
+    }
+    let bytes: [u8; 2] = data.try_into().unwrap();
+    Ok(i16::from_be_bytes(bytes))
+}
+
+/// Write an i16 to big-endian binary format
+fn write_i16_binary(value: i16) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+/// Read an i32 from big-endian binary format
+fn read_i32_binary(data: &[u8]) -> Result<i32> {
+    if data.len() != 4 {
+        return Err(anyhow!("int4 must be 4 bytes, got {}", data.len()));
+    }
+    let bytes: [u8; 4] = data.try_into().unwrap();
+    Ok(i32::from_be_bytes(bytes))
+}
+
+/// Write an i32 to big-endian binary format
+fn write_i32_binary(value: i32) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+/// Read an i64 from big-endian binary format
+fn read_i64_binary(data: &[u8]) -> Result<i64> {
+    if data.len() != 8 {
+        return Err(anyhow!("int8 must be 8 bytes, got {}", data.len()));
+    }
+    let bytes: [u8; 8] = data.try_into().unwrap();
+    Ok(i64::from_be_bytes(bytes))
+}
+
+/// Write an i64 to big-endian binary format
+fn write_i64_binary(value: i64) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+/// Read an f32 from big-endian binary format (IEEE 754)
+fn read_f32_binary(data: &[u8]) -> Result<f32> {
+    if data.len() != 4 {
+        return Err(anyhow!("float4 must be 4 bytes, got {}", data.len()));
+    }
+    let bytes: [u8; 4] = data.try_into().unwrap();
+    Ok(f32::from_be_bytes(bytes))
+}
+
+/// Write an f32 to big-endian binary format
+fn write_f32_binary(value: f32) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+/// Read an f64 from big-endian binary format (IEEE 754)
+fn read_f64_binary(data: &[u8]) -> Result<f64> {
+    if data.len() != 8 {
+        return Err(anyhow!("float8 must be 8 bytes, got {}", data.len()));
+    }
+    let bytes: [u8; 8] = data.try_into().unwrap();
+    Ok(f64::from_be_bytes(bytes))
+}
+
+/// Write an f64 to big-endian binary format
+fn write_f64_binary(value: f64) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+/// Read a date from binary format (days since 2000-01-01)
+fn read_date_binary(data: &[u8]) -> Result<String> {
+    if data.len() != 4 {
+        return Err(anyhow!("date must be 4 bytes, got {}", data.len()));
+    }
+    let days = read_i32_binary(data)?;
+    // PostgreSQL epoch is 2000-01-01, convert to Unix timestamp
+    let pg_epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let date = pg_epoch + chrono::Duration::days(days as i64);
+    Ok(date.format("%Y-%m-%d").to_string())
+}
+
+/// Write a date to binary format
+fn write_date_binary(value: &str) -> Result<Vec<u8>> {
+    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|e| anyhow!("Invalid date format: {}", e))?;
+    let pg_epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let days = (date - pg_epoch).num_days() as i32;
+    Ok(write_i32_binary(days))
+}
+
+/// Read a timestamp from binary format (microseconds since 2000-01-01)
+fn read_timestamp_binary(data: &[u8]) -> Result<String> {
+    if data.len() != 8 {
+        return Err(anyhow!("timestamp must be 8 bytes, got {}", data.len()));
+    }
+    let micros = read_i64_binary(data)?;
+    let pg_epoch = chrono::DateTime::from_timestamp(946684800, 0).unwrap();
+    let dt = pg_epoch + chrono::Duration::microseconds(micros);
+    Ok(dt.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+}
+
+/// Write a timestamp to binary format
+fn write_timestamp_binary(value: &str) -> Result<Vec<u8>> {
+    // Try parsing with various formats
+    let dt = if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
+        dt
+    } else if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
+        dt
+    } else {
+        return Err(anyhow!("Invalid timestamp format: {}", value));
+    };
+    
+    let pg_epoch = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()
+        .and_hms_opt(0, 0, 0).unwrap();
+    let micros = (dt - pg_epoch).num_microseconds().unwrap_or(0);
+    Ok(write_i64_binary(micros))
+}
+
+/// Read a UUID from binary format (16 bytes)
+fn read_uuid_binary(data: &[u8]) -> Result<String> {
+    if data.len() != 16 {
+        return Err(anyhow!("UUID must be 16 bytes, got {}", data.len()));
+    }
+    Ok(format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+        data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]
+    ))
+}
+
+/// Write a UUID to binary format
+fn write_uuid_binary(value: &str) -> Result<Vec<u8>> {
+    let uuid = uuid::Uuid::parse_str(value)
+        .map_err(|e| anyhow!("Invalid UUID: {}", e))?;
+    Ok(uuid.as_bytes().to_vec())
+}
+
+/// Read a numeric/decimal value from binary format
+/// PostgreSQL numeric format:
+/// - ndigits (i16): number of digits
+/// - weight (i16): weight of first digit
+/// - sign (i16): 0x0000=positive, 0x4000=negative, 0xC000=NaN
+/// - dscale (i16): display scale
+/// - digits (i16[]): base-10000 digits
+fn read_numeric_binary(data: &[u8]) -> Result<String> {
+    if data.len() < 8 {
+        return Err(anyhow!("Numeric data too short: {} bytes", data.len()));
+    }
+    
+    let mut cursor = std::io::Cursor::new(data);
+    let ndigits = cursor.get_i16();
+    let weight = cursor.get_i16();
+    let sign = cursor.get_i16();
+    let dscale = cursor.get_i16();
+    
+    // Check for NaN (0xC000 as i16 = -16384)
+    if sign == -16384i16 {
+        return Ok("NaN".to_string());
+    }
+    
+    let mut result = String::new();
+    if sign == 0x4000 {
+        result.push('-');
+    }
+    
+    // Read digits (each is base 10000)
+    let mut digits = Vec::new();
+    for _ in 0..ndigits {
+        if cursor.remaining() < 2 {
+            return Err(anyhow!("Numeric data truncated"));
+        }
+        digits.push(cursor.get_i16());
+    }
+    
+    if digits.is_empty() {
+        return Ok("0".to_string());
+    }
+    
+    // Build the number string
+    // First digit is most significant
+    result.push_str(&digits[0].to_string());
+    
+    // Remaining digits are 4 digits each (padded with leading zeros)
+    for i in 1..digits.len() {
+        result.push_str(&format!("{:04}", digits[i]));
+    }
+    
+    // Apply decimal point based on weight and dscale
+    let digit_count = digits.len();
+    let decimal_pos = (weight as i32 + 1) * 4;
+    
+    if decimal_pos <= 0 {
+        // Number is less than 1
+        let zeros = (-decimal_pos) as usize;
+        let mut new_result = if sign == 0x4000 { "-0.".to_string() } else { "0.".to_string() };
+        for _ in 0..zeros {
+            new_result.push('0');
+        }
+        // Remove the sign from result if present
+        let digits_only = result.trim_start_matches('-');
+        new_result.push_str(digits_only);
+        result = new_result;
+    } else if decimal_pos < (digit_count * 4) as i32 {
+        // Insert decimal point within the digits
+        let pos = decimal_pos as usize;
+        let digits_only = result.trim_start_matches('-').to_string();
+        let before = &digits_only[..pos.min(digits_only.len())];
+        let after = if pos < digits_only.len() { &digits_only[pos..] } else { "" };
+        result = if sign == 0x4000 { "-".to_string() } else { String::new() };
+        result.push_str(before);
+        if !after.is_empty() {
+            result.push('.');
+            result.push_str(after);
+        }
+    }
+    
+    // Trim trailing zeros after decimal point
+    if result.contains('.') {
+        while result.ends_with('0') {
+            result.pop();
+        }
+        if result.ends_with('.') {
+            result.pop();
+        }
+    }
+    
+    Ok(result)
+}
+
+/// Convert binary data to SQLite Value based on type OID
+fn binary_to_sqlite_value(data: &[u8], type_oid: i32) -> Result<rusqlite::types::Value> {
+    if data.is_empty() {
+        return Ok(rusqlite::types::Value::Null);
+    }
+    
+    match type_oid {
+        BOOL_OID => {
+            // Flexible boolean reading: 
+            // - Binary: 1 byte (0x00=false, 0x01=true)
+            // - Text: "t"/"f", "true"/"false", "1"/"0", "yes"/"no", "on"/"off"
+            let text = String::from_utf8_lossy(data).to_lowercase();
+            let val = match text.as_str() {
+                "t" | "true" | "1" | "yes" | "on" => true,
+                "f" | "false" | "0" | "no" | "off" => false,
+                _ => {
+                    // Try binary interpretation for single byte (0x00 or 0x01)
+                    if data.len() == 1 && (data[0] == 0 || data[0] == 1) {
+                        data[0] != 0
+                    } else {
+                        // Default to false for unknown values
+                        false
+                    }
+                }
+            };
+            Ok(rusqlite::types::Value::Integer(if val { 1 } else { 0 }))
+        }
+        INT2_OID => {
+            // Flexible: binary (2 bytes) or text
+            let val = match data.len() {
+                2 => read_i16_binary(data)? as i64,
+                _ => String::from_utf8_lossy(data).parse::<i64>()?,
+            };
+            Ok(rusqlite::types::Value::Integer(val))
+        }
+        INT4_OID => {
+            // Flexible: binary (4 bytes) or text
+            let val = match data.len() {
+                4 => read_i32_binary(data)? as i64,
+                _ => String::from_utf8_lossy(data).parse::<i64>()?,
+            };
+            Ok(rusqlite::types::Value::Integer(val))
+        }
+        INT8_OID => {
+            // Flexible integer reading based on actual data length
+            // This handles cases where the catalog says INT8 but data is INT4
+            let val = match data.len() {
+                2 => read_i16_binary(data)? as i64,
+                4 => read_i32_binary(data)? as i64,
+                8 => read_i64_binary(data)?,
+                _ => String::from_utf8_lossy(data).parse::<i64>()?,
+            };
+            Ok(rusqlite::types::Value::Integer(val))
+        }
+        FLOAT4_OID => {
+            let val = read_f32_binary(data)?;
+            Ok(rusqlite::types::Value::Real(val as f64))
+        }
+        FLOAT8_OID => {
+            // Flexible float reading based on actual data length
+            let val = match data.len() {
+                4 => read_f32_binary(data)? as f64,
+                8 => read_f64_binary(data)?,
+                _ => return Err(anyhow!("Invalid float data length: {}", data.len())),
+            };
+            Ok(rusqlite::types::Value::Real(val))
+        }
+        DATE_OID => {
+            let val = read_date_binary(data)?;
+            Ok(rusqlite::types::Value::Text(val))
+        }
+        TIMESTAMP_OID | TIMESTAMPTZ_OID => {
+            let val = read_timestamp_binary(data)?;
+            Ok(rusqlite::types::Value::Text(val))
+        }
+        UUID_OID => {
+            let val = read_uuid_binary(data)?;
+            Ok(rusqlite::types::Value::Text(val))
+        }
+        NUMERIC_OID => {
+            let val = read_numeric_binary(data)?;
+            Ok(rusqlite::types::Value::Text(val))
+        }
+        TEXT_OID | VARCHAR_OID | BPCHAR_OID | JSON_OID | JSONB_OID | BYTEA_OID => {
+            // Text types - store as-is
+            Ok(rusqlite::types::Value::Text(String::from_utf8_lossy(data).to_string()))
+        }
+        _ => {
+            // Unknown type - try as text
+            Ok(rusqlite::types::Value::Text(String::from_utf8_lossy(data).to_string()))
+        }
+    }
+}
 
 /// Batch size for COPY INSERT operations (performance optimization)
 #[allow(dead_code)]
@@ -606,6 +968,10 @@ impl CopyHandler {
         }
 
         let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        
+        // Get column names and types (if columns is empty, gets all table columns)
+        let (column_names, column_types) = self.get_column_type_oids(table_name, columns, &conn)?;
+        
         let mut row_count = 0;
 
         // 4. Process tuples
@@ -622,13 +988,13 @@ impl CopyHandler {
             }
 
             let mut values = Vec::new();
-            for _ in 0..field_count {
+            for col_idx in 0..field_count {
                 if cursor.remaining() < 4 {
                     return Err(anyhow!("Binary COPY data too short (field length)"));
                 }
                 let len = cursor.get_i32();
                 if len == -1 {
-                    values.push(None);
+                    values.push(rusqlite::types::Value::Null);
                 } else if len < 0 {
                     return Err(anyhow!("Invalid field length in binary COPY: {}", len));
                 } else {
@@ -638,27 +1004,23 @@ impl CopyHandler {
                     let mut field_data = vec![0u8; len as usize];
                     cursor.copy_to_slice(&mut field_data);
                     
-                    // Convert binary to string for SQLite (simplified)
-                    // In a real implementation, we'd handle specific type OIDs
-                    // For now, we assume text or simple numeric types
-                    values.push(Some(String::from_utf8_lossy(&field_data).to_string()));
+                    // Get the type OID for this column
+                    let type_oid = column_types.get(col_idx as usize).copied().unwrap_or(TEXT_OID);
+                    
+                    // Convert binary data to SQLite value based on type
+                    let value = binary_to_sqlite_value(&field_data, type_oid)
+                        .map_err(|e| anyhow!("COPY {}: row {}, column {}: {}", 
+                            table_name, row_count + 1, col_idx + 1, e))?;
+                    values.push(value);
                 }
             }
 
-            // Build and execute INSERT statement
-            let sql = build_insert_sql(table_name, columns, values.len())?;
+            // Build and execute INSERT statement (use column_names which may have been populated from catalog)
+            let sql = build_insert_sql(table_name, &column_names, values.len())?;
             let mut stmt = conn.prepare(&sql)?;
 
             // Convert params for rusqlite
-            let params: Vec<rusqlite::types::Value> = values
-                .into_iter()
-                .map(|v| match v {
-                    Some(s) => rusqlite::types::Value::Text(s),
-                    None => rusqlite::types::Value::Null,
-                })
-                .collect();
-
-            let param_refs: Vec<&dyn rusqlite::ToSql> = params
+            let param_refs: Vec<&dyn rusqlite::ToSql> = values
                 .iter()
                 .map(|p| p as &dyn rusqlite::ToSql)
                 .collect();
@@ -668,6 +1030,60 @@ impl CopyHandler {
         }
 
         Ok(row_count)
+    }
+    
+    /// Get column type OIDs from the catalog
+    fn get_column_type_oids(
+        &self,
+        table_name: &str,
+        columns: &[String],
+        conn: &Connection,
+    ) -> Result<(Vec<String>, Vec<i32>)> {
+        let mut column_names = Vec::new();
+        let mut type_oids = Vec::new();
+        
+        // If no columns specified, get all columns from the table
+        let columns_to_lookup: Vec<String> = if columns.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT column_name, original_type 
+                 FROM __pg_meta__ 
+                 WHERE table_name = ?1
+                 ORDER BY rowid"
+            )?;
+            let rows = stmt.query_map([table_name], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            
+            let mut cols = Vec::new();
+            for row in rows {
+                let (col_name, type_name) = row?;
+                column_names.push(col_name.clone());
+                type_oids.push(type_name_to_oid(&type_name));
+                cols.push(col_name);
+            }
+            cols
+        } else {
+            for col_name in columns {
+                column_names.push(col_name.clone());
+                
+                // Try to get the type from the catalog
+                let type_name: Result<String, rusqlite::Error> = conn.query_row(
+                    "SELECT original_type FROM __pg_meta__ 
+                     WHERE table_name = ?1 AND column_name = ?2",
+                    [table_name, col_name],
+                    |row| row.get(0),
+                );
+                
+                let oid = match type_name {
+                    Ok(name) => type_name_to_oid(&name),
+                    Err(_) => TEXT_OID, // Default to text
+                };
+                type_oids.push(oid);
+            }
+            columns.to_vec()
+        };
+        
+        Ok((column_names, type_oids))
     }
 
     /// Get the current COPY state
@@ -940,6 +1356,38 @@ pub fn format_csv_value(
     }
 }
 
+/// Convert a type name (PostgreSQL or SQLite) to its OID
+fn type_name_to_oid(type_name: &str) -> i32 {
+    let normalized = type_name.to_lowercase();
+    match normalized.as_str() {
+        // PostgreSQL type names
+        "bool" | "boolean" => BOOL_OID,
+        "int2" | "smallint" => INT2_OID,
+        "int4" | "int" => INT4_OID,
+        "int8" | "bigint" => INT8_OID,
+        "float4" => FLOAT4_OID,
+        "float8" | "double precision" => FLOAT8_OID,
+        "text" => TEXT_OID,
+        "varchar" | "character varying" => VARCHAR_OID,
+        "bpchar" | "character" | "char" => BPCHAR_OID,
+        "date" => DATE_OID,
+        "time" | "time without time zone" => TIME_OID,
+        "timestamp" | "timestamp without time zone" => TIMESTAMP_OID,
+        "timestamptz" | "timestamp with time zone" => TIMESTAMPTZ_OID,
+        "interval" => INTERVAL_OID,
+        "uuid" => UUID_OID,
+        "numeric" | "decimal" => NUMERIC_OID,
+        "json" => JSON_OID,
+        "jsonb" => JSONB_OID,
+        "bytea" => BYTEA_OID,
+        // SQLite type names (mapped to PostgreSQL equivalents)
+        "integer" => INT8_OID,  // SQLite INTEGER -> PostgreSQL bigint/int8
+        "real" => FLOAT8_OID,   // SQLite REAL -> PostgreSQL float8 (not float4)
+        "blob" => BYTEA_OID,    // SQLite BLOB -> PostgreSQL bytea
+        _ => TEXT_OID, // Default to text for unknown types
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1016,5 +1464,134 @@ mod tests {
 
         let sql2 = build_insert_sql("users", &[], 3).unwrap();
         assert_eq!(sql2, "INSERT INTO users VALUES (?1, ?2, ?3)");
+    }
+
+    // Binary format tests
+    #[test]
+    fn test_read_bool_binary() {
+        assert_eq!(read_bool_binary(&[0]).unwrap(), false);
+        assert_eq!(read_bool_binary(&[1]).unwrap(), true);
+        // PostgreSQL binary format: any non-zero is true
+        assert_eq!(read_bool_binary(&[2]).unwrap(), true);
+        assert!(read_bool_binary(&[]).is_err());
+        assert!(read_bool_binary(&[0, 1]).is_err());
+    }
+
+    #[test]
+    fn test_write_bool_binary() {
+        assert_eq!(write_bool_binary(false), vec![0]);
+        assert_eq!(write_bool_binary(true), vec![1]);
+    }
+
+    #[test]
+    fn test_read_i16_binary() {
+        let bytes = [0x00, 0x01]; // big-endian 1
+        assert_eq!(read_i16_binary(&bytes).unwrap(), 1);
+        
+        let bytes = [0xFF, 0xFF]; // big-endian -1
+        assert_eq!(read_i16_binary(&bytes).unwrap(), -1);
+        
+        let bytes = [0x7F, 0xFF]; // big-endian 32767
+        assert_eq!(read_i16_binary(&bytes).unwrap(), 32767);
+    }
+
+    #[test]
+    fn test_write_i16_binary() {
+        assert_eq!(write_i16_binary(1), vec![0x00, 0x01]);
+        assert_eq!(write_i16_binary(-1), vec![0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn test_read_i32_binary() {
+        let bytes = [0x00, 0x00, 0x00, 0x01]; // big-endian 1
+        assert_eq!(read_i32_binary(&bytes).unwrap(), 1);
+        
+        let bytes = [0xFF, 0xFF, 0xFF, 0xFF]; // big-endian -1
+        assert_eq!(read_i32_binary(&bytes).unwrap(), -1);
+    }
+
+    #[test]
+    fn test_write_i32_binary() {
+        assert_eq!(write_i32_binary(1), vec![0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(write_i32_binary(-1), vec![0xFF, 0xFF, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn test_read_i64_binary() {
+        let bytes = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]; // big-endian 1
+        assert_eq!(read_i64_binary(&bytes).unwrap(), 1);
+        
+        let bytes = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // big-endian -1
+        assert_eq!(read_i64_binary(&bytes).unwrap(), -1);
+    }
+
+    #[test]
+    fn test_write_i64_binary() {
+        assert_eq!(write_i64_binary(1), vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(write_i64_binary(-1), vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn test_read_f32_binary() {
+        let bytes = [0x3F, 0x80, 0x00, 0x00]; // big-endian 1.0
+        assert_eq!(read_f32_binary(&bytes).unwrap(), 1.0);
+        
+        let bytes = [0x40, 0x49, 0x0F, 0xDB]; // big-endian ~3.14159
+        assert!((read_f32_binary(&bytes).unwrap() - 3.14159).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_read_f64_binary() {
+        let bytes = [0x3F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // big-endian 1.0
+        assert_eq!(read_f64_binary(&bytes).unwrap(), 1.0);
+        
+        let bytes = [0x40, 0x09, 0x21, 0xFB, 0x54, 0x44, 0x2D, 0x18]; // big-endian ~3.14159
+        assert!((read_f64_binary(&bytes).unwrap() - 3.14159265358979).abs() < 0.0000001);
+    }
+
+    #[test]
+    fn test_read_uuid_binary() {
+        let bytes = [0xa0, 0xee, 0xbc, 0x99, 0x9c, 0x0b, 0x4e, 0xf8, 
+                     0xbb, 0x6d, 0x6b, 0xb9, 0xbd, 0x38, 0x0a, 0x11];
+        assert_eq!(read_uuid_binary(&bytes).unwrap(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
+    }
+
+    #[test]
+    fn test_binary_to_sqlite_value() {
+        // Test bool
+        let result = binary_to_sqlite_value(&[1], BOOL_OID).unwrap();
+        assert_eq!(result, rusqlite::types::Value::Integer(1));
+        
+        // Test int4
+        let result = binary_to_sqlite_value(&[0x00, 0x00, 0x00, 0x2A], INT4_OID).unwrap(); // 42
+        assert_eq!(result, rusqlite::types::Value::Integer(42));
+        
+        // Test int8
+        let result = binary_to_sqlite_value(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A], INT8_OID).unwrap(); // 42
+        assert_eq!(result, rusqlite::types::Value::Integer(42));
+        
+        // Test float8
+        let result = binary_to_sqlite_value(&[0x40, 0x09, 0x21, 0xFB, 0x54, 0x44, 0x2D, 0x18], FLOAT8_OID).unwrap();
+        assert!(matches!(result, rusqlite::types::Value::Real(_)));
+        
+        // Test text
+        let result = binary_to_sqlite_value(b"hello", TEXT_OID).unwrap();
+        assert_eq!(result, rusqlite::types::Value::Text("hello".to_string()));
+    }
+
+    #[test]
+    fn test_type_name_to_oid() {
+        assert_eq!(type_name_to_oid("bool"), BOOL_OID);
+        assert_eq!(type_name_to_oid("int4"), INT4_OID);
+        // "integer" maps to INT8 because SQLite INTEGER is stored as int8
+        assert_eq!(type_name_to_oid("integer"), INT8_OID);
+        assert_eq!(type_name_to_oid("text"), TEXT_OID);
+        assert_eq!(type_name_to_oid("float8"), FLOAT8_OID);
+        assert_eq!(type_name_to_oid("double precision"), FLOAT8_OID);
+        assert_eq!(type_name_to_oid("uuid"), UUID_OID);
+        assert_eq!(type_name_to_oid("unknown_type"), TEXT_OID);
+        // SQLite type mappings
+        assert_eq!(type_name_to_oid("INTEGER"), INT8_OID);
+        assert_eq!(type_name_to_oid("REAL"), FLOAT8_OID);
     }
 }
