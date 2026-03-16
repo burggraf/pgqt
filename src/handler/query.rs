@@ -459,11 +459,17 @@ pub trait QueryExecution: HandlerUtils + Clone {
         let execute_result = (|| -> Result<Vec<Response>> {
         let upper_orig = original_sql.trim().to_uppercase();
         if upper_orig.starts_with("CREATE SCHEMA") {
-            return self.handle_create_schema(original_sql);
+            // Get session connection first to ensure schema is attached to the right connection
+            let conn = self.get_session_connection(client_id)?;
+            let conn_guard = conn.lock().unwrap();
+            return self.handle_create_schema_with_conn(original_sql, &conn_guard);
         }
 
         if upper_orig.starts_with("DROP SCHEMA") {
-            return self.handle_drop_schema(original_sql);
+            // Get session connection first to ensure schema is attached to the right connection
+            let conn = self.get_session_connection(client_id)?;
+            let conn_guard = conn.lock().unwrap();
+            return self.handle_drop_schema_with_conn(original_sql, &conn_guard);
         }
 
         if upper_orig.starts_with("EXPLAIN") {

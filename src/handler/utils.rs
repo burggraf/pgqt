@@ -320,6 +320,12 @@ pub trait HandlerUtils {
 
     /// Handle CREATE SCHEMA statement
     fn handle_create_schema(&self, sql: &str) -> Result<Vec<Response>> {
+        let conn = self.conn().lock().unwrap();
+        self.handle_create_schema_with_conn(sql, &conn)
+    }
+
+    /// Handle CREATE SCHEMA statement with a provided connection
+    fn handle_create_schema_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
         // Parse schema name from CREATE SCHEMA [IF NOT EXISTS] name [AUTHORIZATION user]
         let upper_sql = sql.to_uppercase();
         let if_not_exists = upper_sql.contains("IF NOT EXISTS");
@@ -345,10 +351,8 @@ pub trait HandlerUtils {
             ));
         }
 
-        let conn = self.conn().lock().unwrap();
-
         // Check if schema already exists
-        if crate::schema::schema_exists(&conn, &schema_name)? {
+        if crate::schema::schema_exists(conn, &schema_name)? {
             if if_not_exists {
                 return Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))]);
             }
@@ -356,16 +360,22 @@ pub trait HandlerUtils {
         }
 
         // Create schema in catalog
-        crate::schema::create_schema(&conn, &schema_name, None)?;
+        crate::schema::create_schema(conn, &schema_name, None)?;
 
         // Attach the schema database
-        self.schema_manager().attach_schema(&conn, &schema_name)?;
+        self.schema_manager().attach_schema(conn, &schema_name)?;
 
         Ok(vec![Response::Execution(Tag::new("CREATE SCHEMA"))])
     }
 
     /// Handle DROP SCHEMA statement
     fn handle_drop_schema(&self, sql: &str) -> Result<Vec<Response>> {
+        let conn = self.conn().lock().unwrap();
+        self.handle_drop_schema_with_conn(sql, &conn)
+    }
+
+    /// Handle DROP SCHEMA statement with a provided connection
+    fn handle_drop_schema_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
         // Parse schema name from DROP SCHEMA [IF EXISTS] name [CASCADE | RESTRICT]
         let upper_sql = sql.to_uppercase();
         let if_exists = upper_sql.contains("IF EXISTS");
@@ -392,18 +402,21 @@ pub trait HandlerUtils {
             return Err(anyhow!("cannot drop system schema \"{}\"", schema_name));
         }
 
-        let conn = self.conn().lock().unwrap();
-
         // Check if schema exists
-        if !crate::schema::schema_exists(&conn, &schema_name)? {
+        if !crate::schema::schema_exists(conn, &schema_name)? {
             if if_exists {
                 return Ok(vec![Response::Execution(Tag::new("DROP SCHEMA"))]);
             }
             return Err(anyhow!("schema \"{}\" does not exist", schema_name));
         }
 
+        // Ensure schema is attached before trying to drop objects
+        if !self.schema_manager().is_attached(&schema_name) {
+            let _ = self.schema_manager().attach_schema(conn, &schema_name);
+        }
+
         // Check if schema is empty (unless CASCADE)
-        if !cascade && !crate::schema::schema_is_empty(&conn, &schema_name, self.schema_manager())? {
+        if !cascade && !crate::schema::schema_is_empty(conn, &schema_name, self.schema_manager())? {
             return Err(anyhow!(
                 "schema \"{}\" cannot be dropped without CASCADE because it contains objects",
                 schema_name
@@ -412,15 +425,15 @@ pub trait HandlerUtils {
 
         // Drop all objects in the schema (if CASCADE)
         if cascade {
-            crate::schema::drop_schema_objects(&conn, &schema_name, self.schema_manager())?;
+            crate::schema::drop_schema_objects(conn, &schema_name, self.schema_manager())?;
         }
 
         // Remove schema from catalog first
-        crate::schema::drop_schema(&conn, &schema_name)?;
+        crate::schema::drop_schema(conn, &schema_name)?;
 
         // Try to detach the schema database - this may fail if it's locked
         // In that case, we just mark it for cleanup later
-        match self.schema_manager().detach_schema(&conn, &schema_name) {
+        match self.schema_manager().detach_schema(conn, &schema_name) {
             Ok(_) => {}
             Err(e) => {
                 // Log the error but continue - the schema is already removed from catalog

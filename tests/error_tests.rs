@@ -5,15 +5,33 @@
 
 use pgqt::handler::SqliteHandler;
 use pgqt::handler::query::QueryExecution;
+use std::fs;
 
-/// Helper to create a test handler with a temporary database
-fn create_test_handler() -> SqliteHandler {
-    SqliteHandler::new(":memory:").expect("Failed to create handler")
+/// Counter for generating unique database paths
+static DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Helper to create a test handler with a temporary file database
+/// Note: We use a file database instead of :memory: because the connection pool
+/// creates multiple connections, and each :memory: connection gets its own isolated database.
+fn create_test_handler() -> (SqliteHandler, String) {
+    let temp_dir = std::env::temp_dir();
+    let counter = DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let db_path = temp_dir.join(format!("pgqt_error_test_{}_{}.db", std::process::id(), counter));
+    let db_path_str = db_path.to_str().unwrap().to_string();
+    // Clean up any existing file
+    let _ = fs::remove_file(&db_path_str);
+    let handler = SqliteHandler::new(&db_path_str).expect("Failed to create handler");
+    (handler, db_path_str)
+}
+
+/// Helper to clean up the test database
+fn cleanup_db(path: &str) {
+    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn test_unique_violation_sqlstate() {
-    let handler = create_test_handler();
+    let (handler, db_path) = create_test_handler();
     
     // Create a table with a unique constraint
     let result = handler.execute_query(
@@ -47,11 +65,13 @@ fn test_unique_violation_sqlstate() {
         "Error message should indicate unique constraint violation: {}",
         err_str
     );
+    
+    cleanup_db(&db_path);
 }
 
 #[test]
 fn test_not_null_violation_sqlstate() {
-    let handler = create_test_handler();
+    let (handler, db_path) = create_test_handler();
     
     // Create a table with a NOT NULL constraint
     let result = handler.execute_query(
@@ -76,11 +96,13 @@ fn test_not_null_violation_sqlstate() {
         "Error message should indicate NOT NULL constraint violation: {}",
         err_str
     );
+    
+    cleanup_db(&db_path);
 }
 
 #[test]
 fn test_undefined_table_sqlstate() {
-    let handler = create_test_handler();
+    let (handler, db_path) = create_test_handler();
     
     // Try to select from a non-existent table
     let result = handler.execute_query(
@@ -98,11 +120,13 @@ fn test_undefined_table_sqlstate() {
         "Error message should indicate table doesn't exist: {}",
         err_str
     );
+    
+    cleanup_db(&db_path);
 }
 
 #[test]
 fn test_syntax_error_sqlstate() {
-    let handler = create_test_handler();
+    let (handler, db_path) = create_test_handler();
     
     // Try to execute invalid SQL
     let result = handler.execute_query(
@@ -120,11 +144,13 @@ fn test_syntax_error_sqlstate() {
         "Error message should indicate syntax error: {}",
         err_str
     );
+    
+    cleanup_db(&db_path);
 }
 
 #[test]
 fn test_check_violation_sqlstate() {
-    let handler = create_test_handler();
+    let (handler, db_path) = create_test_handler();
     
     // Create a table with a CHECK constraint
     // Note: SQLite doesn't have native CHECK constraint support in the same way,
@@ -150,4 +176,6 @@ fn test_check_violation_sqlstate() {
             err_str
         );
     }
+    
+    cleanup_db(&db_path);
 }

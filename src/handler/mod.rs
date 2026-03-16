@@ -1940,11 +1940,23 @@ impl SqliteHandler {
         // Checkout a new connection from the pool
         let (conn, handle) = self.conn_pool.checkout(client_id)?;
         
-        // Register functions on the new connection
+        // Register functions on the new connection and attach schemas
         {
             let guard = conn.lock().unwrap();
             Self::register_builtin_functions(&guard, self.functions().clone(), self.sessions().clone())?;
             let _ = self.register_plpgsql_wrappers(&guard);
+            
+            // Attach all existing schemas to the new connection
+            if let Ok(schemas) = crate::schema::list_schemas(&guard) {
+                for schema in schemas {
+                    if schema.nspname != "public" 
+                        && schema.nspname != "pg_catalog" 
+                        && schema.nspname != "information_schema" 
+                    {
+                        let _ = self.schema_manager.attach_schema(&guard, &schema.nspname);
+                    }
+                }
+            }
         }
 
         self.client_connections.insert(client_id, (conn.clone(), handle));
