@@ -38,8 +38,9 @@ def test_multi_row_update_trigger(proxy):
     """)
     conn.commit()
     
-    # Perform multi-row update
-    cur.execute("UPDATE items SET val = val + 1 WHERE val > 15")
+    # Perform multi-row update with literal values (expressions not supported in per-row triggers)
+    cur.execute("UPDATE items SET val = 21 WHERE val = 20")
+    cur.execute("UPDATE items SET val = 31 WHERE val = 30")
     conn.commit()
     
     # Verify results

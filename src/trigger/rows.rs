@@ -544,6 +544,34 @@ pub fn extract_update_expressions(
     Ok(exprs)
 }
 
+/// Check if an update expression is a simple literal value or a complex expression
+/// Returns true if the expression is complex (contains operators, column references, etc.)
+/// Returns false if the expression is a simple literal (number, string, etc.)
+pub fn is_complex_expression(expr: &str) -> bool {
+    // Simple literals don't contain these characters
+    let complex_chars = ['+', '-', '*', '/', '(', ')'];
+    
+    // Check for complex single-character indicators
+    for indicator in &complex_chars {
+        if expr.contains(*indicator) {
+            return true;
+        }
+    }
+    
+    // Check for multi-character operators
+    if expr.contains("||") || expr.contains("::") {
+        return true;
+    }
+    
+    // Check for column references (alphanumeric that could be column names)
+    // If it contains spaces but isn't quoted, it's likely complex
+    if expr.contains(' ') && !expr.starts_with('\'') && !expr.starts_with('"') {
+        return true;
+    }
+    
+    false
+}
+
 /// Convert a rusqlite Row to a HashMap of column names and values
 pub fn row_to_map(row: &rusqlite::Row) -> Result<HashMap<String, Value>> {
     let mut result = HashMap::new();
@@ -594,11 +622,76 @@ pub fn extract_old_row_from_dml_simple(
     None // Placeholder
 }
 
-/// Extract inserted row values from an INSERT statement
-pub fn extract_inserted_row(
-    _sql: &str,
-) -> Option<HashMap<String, Value>> {
-    None // Placeholder
+/// Extract the NEW row data from an INSERT statement
+///
+/// Parses INSERT statements to extract column names and values.
+/// Supports simple INSERT VALUES statements.
+///
+/// # Arguments
+/// * `sql` - The INSERT SQL statement
+///
+/// # Returns
+/// A HashMap containing column names and their values, or None if parsing fails
+pub fn extract_inserted_row(sql: &str) -> Option<HashMap<String, Value>> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+
+    let result = pg_query::parse(sql).ok()?;
+
+    if let Some(raw_stmt) = result.protobuf.stmts.first() {
+        if let Some(ref stmt_node) = raw_stmt.stmt {
+            if let Some(NodeEnum::InsertStmt(stmt)) = &stmt_node.node {
+                return extract_insert_data(stmt);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract column names and values from an InsertStmt
+fn extract_insert_data(stmt: &pg_query::protobuf::InsertStmt) -> Option<HashMap<String, Value>> {
+    use pg_query::protobuf::node::Node as NodeEnum;
+
+    let mut result = HashMap::new();
+
+    // Get column names from the insert statement
+    let column_names: Vec<String> = stmt
+        .cols
+        .iter()
+        .filter_map(|col| {
+            if let Some(NodeEnum::ResTarget(rt)) = col.node.as_ref() {
+                Some(rt.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Get values from the VALUES clause
+    if let Some(ref select_stmt) = stmt.select_stmt {
+        if let Some(NodeEnum::SelectStmt(select)) = select_stmt.node.as_ref() {
+            // Get the first set of values (for simple INSERT VALUES)
+            if let Some(values_list_node) = select.values_lists.first() {
+                if let Some(ref node_inner) = values_list_node.node {
+                    if let NodeEnum::List(list) = node_inner {
+                        for (i, value_node) in list.items.iter().enumerate() {
+                            if i < column_names.len() {
+                                if let Ok(val) = extract_value_from_node(value_node) {
+                                    result.insert(column_names[i].clone(), val);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 #[cfg(test)]

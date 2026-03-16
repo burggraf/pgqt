@@ -309,11 +309,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         if original_upper.starts_with("CREATE TRIGGER") {
-            return self.handle_create_trigger(sql);
+            return self.handle_create_trigger(client_id, sql);
         }
 
         if original_upper.starts_with("DROP TRIGGER") {
-            return self.handle_drop_trigger(sql);
+            return self.handle_drop_trigger(client_id, sql);
         }
 
         let result = crate::transpiler::transpile_with_metadata(sql);
@@ -923,14 +923,27 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         if operation == crate::trigger::OperationType::Update {
             let updates = extract_update_expressions(original_sql)?;
+            
+            // Check if any update expression is complex (contains operators, column references, etc.)
+            // If so, we can't use per-row trigger execution because we can't evaluate expressions
+            let has_complex_expressions = updates.values().any(|expr| crate::trigger::rows::is_complex_expression(expr));
+            
+            if has_complex_expressions {
+                // For updates with complex expressions, execute without per-row triggers
+                // The triggers will still fire, but we can't modify individual rows
+                return self.execute_statement(conn, sqlite_sql);
+            }
+            
             let select_sql = format!("SELECT *, rowid FROM {} WHERE {}", table_name, where_sql);
             
             let rows_data = {
                 let mut stmt = conn.prepare(&select_sql)?;
+                let col_count = stmt.column_count();
+                let rowid_idx = col_count - 1; // rowid is the last column in "SELECT *, rowid"
                 let mut rows = stmt.query([])?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next()? {
-                    results.push((row_to_map(row)?, row.get::<_, i64>("rowid")?));
+                    results.push((row_to_map(row)?, row.get::<_, i64>(rowid_idx)?));
                 }
                 results
             };
@@ -970,10 +983,12 @@ pub trait QueryExecution: HandlerUtils + Clone {
             
             let rows_data = {
                 let mut stmt = conn.prepare(&select_sql)?;
+                let col_count = stmt.column_count();
+                let rowid_idx = col_count - 1; // rowid is the last column in "SELECT *, rowid"
                 let mut rows = stmt.query([])?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next()? {
-                    results.push((row_to_map(row)?, row.get::<_, i64>("rowid")?));
+                    results.push((row_to_map(row)?, row.get::<_, i64>(rowid_idx)?));
                 }
                 results
             };

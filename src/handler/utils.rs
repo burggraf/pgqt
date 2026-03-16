@@ -889,9 +889,10 @@ pub trait HandlerUtils {
     }
 
     /// Handle CREATE TRIGGER statement
-    fn handle_create_trigger(&self, sql: &str) -> Result<Vec<Response>> {
-        let conn = self.conn().lock().unwrap();
-        self.handle_create_trigger_with_conn(sql, &conn)
+    fn handle_create_trigger(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
+        let conn = self.get_session_connection(client_id)?;
+        let guard = conn.lock().unwrap();
+        self.handle_create_trigger_with_conn(sql, &guard)
     }
 
     /// Handle CREATE TRIGGER statement with a provided connection
@@ -902,9 +903,10 @@ pub trait HandlerUtils {
     }
 
     /// Handle DROP TRIGGER statement
-    fn handle_drop_trigger(&self, sql: &str) -> Result<Vec<Response>> {
-        let conn = self.conn().lock().unwrap();
-        self.handle_drop_trigger_with_conn(sql, &conn)
+    fn handle_drop_trigger(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
+        let conn = self.get_session_connection(client_id)?;
+        let guard = conn.lock().unwrap();
+        self.handle_drop_trigger_with_conn(sql, &guard)
     }
 
     /// Handle DROP TRIGGER statement with a provided connection
