@@ -28,6 +28,9 @@ use pgwire::messages::PgWireBackendMessage;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
+pub mod encoding;
+use encoding::{CopyEncoding, decode_to_utf8, encode_from_utf8};
+
 use crate::handler::errors::{PgError, PgErrorCode};
 
 // PostgreSQL type OIDs for binary format
@@ -52,9 +55,11 @@ const JSON_OID: i32 = 114;
 const JSONB_OID: i32 = 3802;
 
 /// PostgreSQL epoch offset (2000-01-01) in microseconds
+#[allow(dead_code)]
 const PG_EPOCH_MICROS: i64 = 946684800000000i64;
 
 /// Read a boolean from binary format (1 byte: 0=false, 1=true)
+#[allow(dead_code)]
 fn read_bool_binary(data: &[u8]) -> Result<bool> {
     if data.len() != 1 {
         return Err(anyhow!("Boolean must be 1 byte, got {}", data.len()));
@@ -63,6 +68,7 @@ fn read_bool_binary(data: &[u8]) -> Result<bool> {
 }
 
 /// Write a boolean to binary format
+#[allow(dead_code)]
 fn write_bool_binary(value: bool) -> Vec<u8> {
     vec![if value { 1 } else { 0 }]
 }
@@ -77,6 +83,7 @@ fn read_i16_binary(data: &[u8]) -> Result<i16> {
 }
 
 /// Write an i16 to big-endian binary format
+#[allow(dead_code)]
 fn write_i16_binary(value: i16) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
@@ -91,6 +98,7 @@ fn read_i32_binary(data: &[u8]) -> Result<i32> {
 }
 
 /// Write an i32 to big-endian binary format
+#[allow(dead_code)]
 fn write_i32_binary(value: i32) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
@@ -105,6 +113,7 @@ fn read_i64_binary(data: &[u8]) -> Result<i64> {
 }
 
 /// Write an i64 to big-endian binary format
+#[allow(dead_code)]
 fn write_i64_binary(value: i64) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
@@ -119,6 +128,7 @@ fn read_f32_binary(data: &[u8]) -> Result<f32> {
 }
 
 /// Write an f32 to big-endian binary format
+#[allow(dead_code)]
 fn write_f32_binary(value: f32) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
@@ -133,6 +143,7 @@ fn read_f64_binary(data: &[u8]) -> Result<f64> {
 }
 
 /// Write an f64 to big-endian binary format
+#[allow(dead_code)]
 fn write_f64_binary(value: f64) -> Vec<u8> {
     value.to_be_bytes().to_vec()
 }
@@ -150,6 +161,7 @@ fn read_date_binary(data: &[u8]) -> Result<String> {
 }
 
 /// Write a date to binary format
+#[allow(dead_code)]
 fn write_date_binary(value: &str) -> Result<Vec<u8>> {
     let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|e| anyhow!("Invalid date format: {}", e))?;
@@ -170,6 +182,7 @@ fn read_timestamp_binary(data: &[u8]) -> Result<String> {
 }
 
 /// Write a timestamp to binary format
+#[allow(dead_code)]
 fn write_timestamp_binary(value: &str) -> Result<Vec<u8>> {
     // Try parsing with various formats
     let dt = if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f") {
@@ -199,6 +212,7 @@ fn read_uuid_binary(data: &[u8]) -> Result<String> {
 }
 
 /// Write a UUID to binary format
+#[allow(dead_code)]
 fn write_uuid_binary(value: &str) -> Result<Vec<u8>> {
     let uuid = uuid::Uuid::parse_str(value)
         .map_err(|e| anyhow!("Invalid UUID: {}", e))?;
@@ -221,7 +235,7 @@ fn read_numeric_binary(data: &[u8]) -> Result<String> {
     let ndigits = cursor.get_i16();
     let weight = cursor.get_i16();
     let sign = cursor.get_i16();
-    let dscale = cursor.get_i16();
+    let _dscale = cursor.get_i16();
     
     // Check for NaN (0xC000 as i16 = -16384)
     if sign == -16384i16 {
@@ -457,7 +471,7 @@ pub struct CopyOptions {
     /// Include header row (CSV only)
     pub header: bool,
     /// Character encoding
-    pub encoding: String,
+    pub encoding: CopyEncoding,
     /// Force quote for specific columns (CSV TO only)
     pub force_quote: Option<Vec<String>>,
     /// Force not null for specific columns (CSV FROM only)
@@ -475,7 +489,7 @@ impl Default for CopyOptions {
             escape: '\t',  // Same as delimiter for text
             null_string: "\\N".to_string(),
             header: false,
-            encoding: "UTF8".to_string(),
+            encoding: CopyEncoding::Utf8,
             force_quote: None,
             force_not_null: None,
             force_quote_all: false,
@@ -557,7 +571,7 @@ impl CopyOptions {
 
     /// Set encoding
     #[allow(dead_code)]
-    pub fn with_encoding(mut self, encoding: String) -> Self {
+    pub fn with_encoding(mut self, encoding: CopyEncoding) -> Self {
         self.encoding = encoding;
         self
     }
@@ -672,7 +686,11 @@ impl CopyHandler {
                 .map(|name| format_csv_value(Some(name), options.delimiter, options.quote, false))
                 .collect::<Vec<String>>()
                 .join(&options.delimiter.to_string());
-            all_data.push(Ok(CopyData::new(Bytes::from(format!("{}\n", header_row)))));
+            let header_line = format!("{}\n", header_row);
+            // Encode header to target encoding
+            let encoded_header = encode_from_utf8(&header_line, &options.encoding)
+                .map_err(|e| anyhow!("COPY encoding error: {}", e))?;
+            all_data.push(Ok(CopyData::new(Bytes::from(encoded_header))));
         }
 
         while let Some(row) = rows.next()? {
@@ -732,7 +750,16 @@ impl CopyHandler {
                     continue; // Skip the newline-added push below
                 }
             };
-            all_data.push(Ok(CopyData::new(Bytes::from(format!("{}\n", line)))));
+            
+            // Encode from UTF-8 to target encoding for text/CSV formats
+            let encoded_line = match options.format {
+                CopyFormat::Text | CopyFormat::Csv => {
+                    encode_from_utf8(&format!("{}\n", line), &options.encoding)
+                        .map_err(|e| anyhow!("COPY encoding error: {}", e))?
+                }
+                CopyFormat::Binary => format!("{}\n", line).into_bytes(),
+            };
+            all_data.push(Ok(CopyData::new(Bytes::from(encoded_line))));
         }
 
         // Add trailer for binary format
@@ -786,8 +813,9 @@ impl CopyHandler {
         let mut row_count = 0;
         let mut line_number = 0;
 
-        // Parse text format: tab-delimited rows, newline-separated
-        let content = String::from_utf8_lossy(data);
+        // Convert from source encoding to UTF-8, then parse text format
+        let content = decode_to_utf8(data, &options.encoding)
+            .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
         // Use split_inclusive to handle empty trailing fields and preserve row boundaries
         let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
@@ -870,8 +898,9 @@ impl CopyHandler {
         let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         let mut row_count = 0;
 
-        // Parse CSV format
-        let content = String::from_utf8_lossy(data);
+        // Convert from source encoding to UTF-8, then parse CSV format
+        let content = decode_to_utf8(data, &options.encoding)
+            .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
         let lines: Vec<&str> = content.lines().collect();
 
         // Skip header if present
@@ -1043,7 +1072,7 @@ impl CopyHandler {
         let mut type_oids = Vec::new();
         
         // If no columns specified, get all columns from the table
-        let columns_to_lookup: Vec<String> = if columns.is_empty() {
+        let _columns_to_lookup: Vec<String> = if columns.is_empty() {
             let mut stmt = conn.prepare(
                 "SELECT column_name, original_type 
                  FROM __pg_meta__ 

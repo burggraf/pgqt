@@ -4,6 +4,7 @@
 //! into SQLite-compatible SQL, including CREATE TABLE, ALTER TABLE,
 //! DROP, TRUNCATE, CREATE INDEX, and COPY statements.
 
+use anyhow::anyhow;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     Node, CreateStmt, ColumnDef, Constraint, AlterTableStmt, DropStmt, TruncateStmt,
@@ -811,7 +812,12 @@ pub(crate) fn reconstruct_copy_stmt(stmt: &CopyStmt, ctx: &mut TranspileContext)
                         if let Some(ref arg) = def.arg {
                             if let Some(ref inner) = arg.node {
                                 if let NodeEnum::String(s) = inner {
-                                    options.encoding = s.sval.clone();
+                                    match crate::copy::encoding::CopyEncoding::from_name(&s.sval) {
+                                        Ok(enc) => options.encoding = enc,
+                                        Err(e) => {
+                                            return Err(anyhow!("COPY: {}", e));
+                                        }
+                                    }
                                 }
                             }
                         }

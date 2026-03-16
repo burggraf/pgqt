@@ -24,7 +24,7 @@
 - **Trigger Support**: PostgreSQL-compatible triggers using PL/pgSQL logic. See [docs/TRIGGERS.md](./docs/TRIGGERS.md).
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 - **LATERAL Joins**: Supported for table-valued functions (like `jsonb_each`). See [docs/LATERAL.md](./docs/LATERAL.md).
-- **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats for efficient data transfer. See [docs/COPY.md](./docs/COPY.md).
+- **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats with character encoding support (UTF8, LATIN1, WINDOWS-1252, EUC_JP, etc.) for efficient data transfer. See [docs/COPY.md](./docs/COPY.md) and [docs/copy-encoding.md](./docs/copy-encoding.md).
 
 ## Quick Start
 
