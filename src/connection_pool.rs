@@ -53,12 +53,25 @@ impl Drop for ConnectionHandle {
 }
 
 /// A pool of SQLite connections for session management
-#[derive(Clone)]
 pub struct ConnectionPool {
     db_path: PathBuf,
     available: Arc<Mutex<Vec<Arc<Mutex<Connection>>>>>,
     in_use: Arc<Mutex<HashSet<u32>>>,
     max_connections: usize,
+    /// Function to initialize new connections (e.g. register UDFs)
+    on_init: Option<Arc<dyn Fn(&Connection) -> Result<()> + Send + Sync>>,
+}
+
+impl Clone for ConnectionPool {
+    fn clone(&self) -> Self {
+        Self {
+            db_path: self.db_path.clone(),
+            available: self.available.clone(),
+            in_use: self.in_use.clone(),
+            max_connections: self.max_connections,
+            on_init: self.on_init.clone(),
+        }
+    }
 }
 
 impl ConnectionPool {
@@ -68,6 +81,11 @@ impl ConnectionPool {
     /// * `db_path` - Path to the SQLite database file
     /// * `max_connections` - Maximum number of connections in the pool
     pub fn new(db_path: &Path, max_connections: usize) -> Result<Self> {
+        Self::with_init(db_path, max_connections, None)
+    }
+
+    /// Create a new connection pool with an initialization function
+    pub fn with_init(db_path: &Path, max_connections: usize, on_init: Option<Arc<dyn Fn(&Connection) -> Result<()> + Send + Sync>>) -> Result<Self> {
         if max_connections == 0 {
             return Err(anyhow!("max_connections must be greater than 0"));
         }
@@ -77,6 +95,7 @@ impl ConnectionPool {
             available: Arc::new(Mutex::new(Vec::with_capacity(max_connections))),
             in_use: Arc::new(Mutex::new(HashSet::new())),
             max_connections,
+            on_init,
         };
 
         // Pre-initialize one connection to verify database is accessible
@@ -197,6 +216,11 @@ impl ConnectionPool {
 
         // Enable foreign keys
         conn.execute("PRAGMA foreign_keys=ON", [])?;
+
+        // Call initialization function if provided
+        if let Some(on_init) = &self.on_init {
+            on_init(&conn)?;
+        }
 
         Ok(conn)
     }

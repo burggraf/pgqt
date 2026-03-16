@@ -646,17 +646,22 @@ pub(crate) fn reconstruct_index_stmt(stmt: &IndexStmt, ctx: &mut TranspileContex
 
     // Index name
     let idx_name = stmt.idxname.to_lowercase();
-    parts.push(idx_name);
+    parts.push(idx_name.clone());
 
     // ON table_name
     if let Some(ref relation) = stmt.relation {
+        let table_name_only = relation.relname.to_lowercase();
+        if ctx.known_views.contains(&table_name_only) {
+            return format!("-- CREATE INDEX {} ON {} (ignored: views may not be indexed in SQLite)", idx_name, table_name_only);
+        }
+
         parts.push("on".to_string());
         let table_name = if relation.schemaname.is_empty() || relation.schemaname == "public" {
-            relation.relname.to_lowercase()
+            table_name_only.clone()
         } else {
-            format!("{}.{}", relation.schemaname.to_lowercase(), relation.relname.to_lowercase())
+            format!("{}.{}", relation.schemaname.to_lowercase(), table_name_only)
         };
-        ctx.referenced_tables.push(relation.relname.to_lowercase());
+        ctx.referenced_tables.push(table_name_only);
         parts.push(table_name);
     }
 
@@ -910,6 +915,7 @@ pub(crate) fn reconstruct_view_stmt(stmt: &ViewStmt, ctx: &mut TranspileContext)
 
     if let Some(ref relation) = stmt.view {
         let name = relation.relname.to_lowercase();
+        ctx.known_views.push(name.clone());
         if relation.schemaname.is_empty() || relation.schemaname == "public" {
             parts.push(name);
         } else {
@@ -960,6 +966,9 @@ pub(crate) fn reconstruct_create_table_as_stmt(stmt: &CreateTableAsStmt, ctx: &m
     if let Some(ref into) = stmt.into {
         if let Some(ref relation) = into.rel {
             let name = relation.relname.to_lowercase();
+            if is_matview {
+                ctx.known_views.push(name.clone());
+            }
             if relation.schemaname.is_empty() || relation.schemaname == "public" {
                 parts.push(name);
             } else {

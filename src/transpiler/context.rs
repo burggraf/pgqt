@@ -69,6 +69,8 @@ pub struct TranspileContext {
     pub max_recursion_depth: usize,
     /// Column types for result set metadata (aligned with column_aliases)
     pub column_types: Vec<Option<String>>,
+    /// Tables that are actually views (for indexing compatibility)
+    pub known_views: Vec<String>,
 }
 
 impl Default for TranspileContext {
@@ -93,6 +95,7 @@ impl TranspileContext {
             in_insert_values: false,
             max_recursion_depth: 100,
             column_types: Vec::new(),
+            known_views: Vec::new(),
         }
     }
 
@@ -111,6 +114,7 @@ impl TranspileContext {
             in_insert_values: false,
             max_recursion_depth: 100,
             column_types: Vec::new(),
+            known_views: Vec::new(),
         }
     }
 
@@ -131,6 +135,7 @@ impl TranspileContext {
             in_insert_values: false,
             max_recursion_depth: 100,
             column_types: Vec::new(),
+            known_views: Vec::new(),
         }
     }
     

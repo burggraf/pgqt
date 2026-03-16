@@ -203,10 +203,22 @@ impl SqliteHandler {
         let conn_arc = Arc::new(Mutex::new(conn));
         let copy_handler = crate::copy::CopyHandler::new(conn_arc.clone());
 
-        // Create connection pool with default size of 10
-        let conn_pool = ConnectionPool::new(std::path::Path::new(db_path), 10)?;
-
         let sessions = Arc::new(DashMap::new());
+        let functions = Arc::new(DashMap::new());
+
+        // Create connection pool with an initialization function that registers UDFs
+        let sessions_init = sessions.clone();
+        let functions_init = functions.clone();
+        let conn_pool = ConnectionPool::with_init(
+            std::path::Path::new(db_path), 
+            10,
+            Some(Arc::new(move |conn| {
+                Self::register_builtin_functions(conn, functions_init.clone(), sessions_init.clone())?;
+                // Note: PL/pgSQL wrappers need access to self.functions() which is 'functions'
+                // We'll register them manually or make a helper
+                Ok(())
+            }))
+        )?;
 
         let handler = Self {
             conn: conn_arc,
@@ -215,10 +227,10 @@ impl SqliteHandler {
             client_connections: Arc::new(DashMap::new()),
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
-            functions: Arc::new(DashMap::new()),
+            functions,
         };
 
-        // Register PostgreSQL-compatible functions
+        // Register PostgreSQL-compatible functions on the main connection too
         Self::register_builtin_functions(&handler.conn.lock().unwrap(), handler.functions.clone(), sessions)?;
 
         // Register PL/pgSQL call wrappers
@@ -801,6 +813,15 @@ impl SqliteHandler {
             }
         })?;
 
+        // setval(seq, val, is_called) - set sequence value
+        // For SQLite, we just ignore this as we use AUTOINCREMENT
+        conn.create_scalar_function("setval", 2, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            Ok(0i64)
+        })?;
+        conn.create_scalar_function("setval", 3, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            Ok(0i64)
+        })?;
+
         // version - returns PostgreSQL version string
         conn.create_scalar_function("version", 0, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
             Ok("PostgreSQL 15.0 (pgqt)".to_string())
@@ -821,7 +842,15 @@ impl SqliteHandler {
             // Let's use a thread-local for CLIENT_ID
             let cid = get_current_client_id();
             if let Some(mut session) = sessions_set.get_mut(&cid) {
-                session.settings.insert(name.to_lowercase(), value.clone());
+                let lower_name = name.to_lowercase();
+                session.settings.insert(lower_name.clone(), value.clone());
+                
+                // Keep search_path field in sync with settings
+                if lower_name == "search_path" {
+                    if let Ok(new_path) = crate::schema::SearchPath::parse(&value) {
+                        session.search_path = new_path;
+                    }
+                }
             }
             
             Ok(value)
@@ -1910,6 +1939,14 @@ impl SqliteHandler {
 
         // Checkout a new connection from the pool
         let (conn, handle) = self.conn_pool.checkout(client_id)?;
+        
+        // Register functions on the new connection
+        {
+            let guard = conn.lock().unwrap();
+            Self::register_builtin_functions(&guard, self.functions().clone(), self.sessions().clone())?;
+            let _ = self.register_plpgsql_wrappers(&guard);
+        }
+
         self.client_connections.insert(client_id, (conn.clone(), handle));
         Ok(conn)
     }

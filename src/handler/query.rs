@@ -16,6 +16,19 @@ use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, T
 
 /// Helper to robustly split multiple SQL statements
 fn robust_split(sql: &str) -> Vec<String> {
+    // Optimization: if it doesn't contain a semicolon, it's likely a single statement
+    if !sql.contains(';') {
+        return vec![sql.to_string()];
+    }
+
+    // Special handling for COPY ... FROM stdin
+    // If it's a COPY with inline data, don't split it here because the scanner might get confused
+    // or we might split the data lines.
+    if sql.to_uppercase().contains("COPY") && sql.to_uppercase().contains("FROM STDIN") {
+        // Return as a single block - the COPY handler should manage the transition
+        return vec![sql.to_string()];
+    }
+
     // Attempt to use pg_query scanner first (most robust)
     match pg_query::split_with_scanner(sql) {
         Ok(statements) => {
@@ -248,6 +261,12 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a single transpiled statement with parameters
     fn execute_transpiled_stmt_params(&self, client_id: u32, transpiled: &str, original_sql: &str, params: &[Option<String>], transpile_result: &crate::transpiler::TranspileResult) -> Result<Vec<Response>> {
+        // Robust skip for comments and empty statements
+        let trimmed = transpiled.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            return Ok(vec![Response::Execution(Tag::new("OK"))]);
+        }
+
         let upper_sql = transpiled.trim().to_uppercase();
 
         if upper_sql.starts_with("SELECT __PG_CREATE_ENUM") {
@@ -366,7 +385,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return Err(anyhow!("permission denied for table(s)"));
         }
 
-        let sqlite_sql = self.apply_rls_to_query(transpiled.to_string(), transpile_result.operation_type, &transpile_result.referenced_tables);
+        let sqlite_sql = self.apply_rls_to_query(client_id, transpiled.to_string(), transpile_result.operation_type, &transpile_result.referenced_tables);
 
         let conn = self.get_session_connection(client_id)?;
         let conn_guard = conn.lock().unwrap();

@@ -221,17 +221,21 @@ pub trait HandlerUtils {
     }
 
     /// Apply RLS (Row-Level Security) to a transpiled query
-    fn apply_rls_to_query(&self, sql: String, operation_type: crate::transpiler::OperationType, tables: &[String]) -> String {
+    fn apply_rls_to_query(&self, client_id: u32, sql: String, operation_type: crate::transpiler::OperationType, tables: &[String]) -> String {
         use crate::rls_inject::{inject_rls_into_select_sql, inject_rls_into_update_sql, inject_rls_into_delete_sql};
 
+        // If it's a comment or no-op, don't apply RLS
+        if sql.trim().starts_with("--") {
+            return sql;
+        }
+
         // If no tables are referenced, skip RLS injection
-        // This avoids issues with queries like "SELECT 1" that have no FROM clause
         if tables.is_empty() {
             return sql;
         }
 
         // Get current user from session
-        let session = self.sessions().get(&0);
+        let session = self.sessions().get(&client_id);
         let current_user = session.map(|s| s.current_user.clone()).unwrap_or_else(|| "postgres".to_string());
 
         let conn = self.conn().lock().unwrap();
