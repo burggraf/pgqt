@@ -252,6 +252,9 @@ impl CopyHandler {
         columns: Vec<String>,
         options: CopyOptions,
     ) -> Result<Response> {
+        // Get column count before moving
+        let column_count = columns.len();
+        
         let mut state = self.state.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         let mut buffer = self.buffer.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         let mut row_count = self.row_count.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
@@ -265,13 +268,13 @@ impl CopyHandler {
         buffer.clear();
         *row_count = 0;
 
-        // For COPY FROM, we return a CopyResponse with an empty stream
+        // For COPY FROM, we return a CopyResponse with column information
         // The actual data will be received via on_copy_data
         let empty_stream = stream::iter(Vec::<Result<CopyData, PgWireError>>::new());
         
         Ok(Response::CopyIn(CopyResponse::new(
             options.format.format_code(),
-            0,  // No columns needed for COPY FROM response
+            column_count,
             empty_stream,
         )))
     }

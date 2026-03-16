@@ -284,36 +284,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
             crate::handler::set_current_user(&session.current_user);
         }
 
-        let trimmed = sql.trim();
-        let original_upper = trimmed.to_uppercase();
-
-        // Skip COPY protocol meta-commands sent as queries by psql
-        // \. terminates COPY data, \N represents NULL in COPY format
-        if trimmed == "\\." || trimmed.starts_with("\\N") || trimmed.starts_with("\\.") {
-            return Ok(vec![Response::Execution(Tag::new("COPY"))]);
-        }
-
-        // Skip lines that look like COPY data (tab-separated values, not valid SQL)
-        // This handles cases where psql sends COPY data lines as separate queries
-        if !original_upper.is_empty() && 
-           !original_upper.starts_with("SELECT") && 
-           !original_upper.starts_with("INSERT") &&
-           !original_upper.starts_with("UPDATE") &&
-           !original_upper.starts_with("DELETE") &&
-           !original_upper.starts_with("CREATE") &&
-           !original_upper.starts_with("DROP") &&
-           !original_upper.starts_with("ALTER") &&
-           !original_upper.starts_with("COPY") &&
-           !original_upper.starts_with("SET") &&
-           !original_upper.starts_with("SHOW") &&
-           !original_upper.starts_with("BEGIN") &&
-           !original_upper.starts_with("COMMIT") &&
-           !original_upper.starts_with("ROLLBACK") &&
-           !original_upper.starts_with("--") &&
-           sql.contains('\t') {
-            // This looks like COPY data - skip it
-            return Ok(vec![Response::Execution(Tag::new("COPY"))]);
-        }
+        let original_upper = sql.trim().to_uppercase();
 
         if original_upper == "SHOW ALL" {
             return self.handle_show_all();
@@ -387,7 +358,15 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a single transpiled statement with parameters
     fn execute_transpiled_stmt_params(&self, client_id: u32, transpiled: &str, original_sql: &str, params: &[Option<String>], transpile_result: &crate::transpiler::TranspileResult) -> Result<Vec<Response>> {
-        // Robust skip for comments and empty statements
+        // Check for COPY metadata FIRST before any other processing
+        // The transpiled SQL might be a comment marker like "-- COPY From..."
+        debug!("COPY check: copy_metadata={:?}", transpile_result.copy_metadata.is_some());
+        if let Some(copy_stmt) = transpile_result.copy_metadata.clone() {
+            debug!("Handling COPY statement: {:?}", copy_stmt.direction);
+            return self.handle_copy_statement(copy_stmt);
+        }
+
+        // Robust skip for comments and empty statements (after COPY check)
         let trimmed = transpiled.trim();
         if trimmed.is_empty() || trimmed.starts_with("--") {
             return Ok(vec![Response::Execution(Tag::new("OK"))]);
@@ -501,10 +480,6 @@ pub trait QueryExecution: HandlerUtils + Clone {
             }
             Err(_) => {
             }
-        }
-
-        if let Some(copy_stmt) = transpile_result.copy_metadata.clone() {
-            return self.handle_copy_statement(copy_stmt);
         }
 
         if !self.check_permissions(&transpile_result.referenced_tables, transpile_result.operation_type, original_sql)? {
