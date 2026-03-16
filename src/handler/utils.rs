@@ -887,27 +887,28 @@ pub trait HandlerUtils {
 
     /// Handle CREATE TRIGGER statement
     fn handle_create_trigger(&self, sql: &str) -> Result<Vec<Response>> {
-        // Parse CREATE TRIGGER
-        let metadata = crate::transpiler::parse_create_trigger(sql)?;
-
-        // Store in catalog
         let conn = self.conn().lock().unwrap();
-        crate::catalog::store_trigger(&conn, &metadata)?;
+        self.handle_create_trigger_with_conn(sql, &conn)
+    }
 
+    /// Handle CREATE TRIGGER statement with a provided connection
+    fn handle_create_trigger_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
+        let metadata = crate::transpiler::parse_create_trigger(sql)?;
+        crate::catalog::store_trigger(conn, &metadata)?;
         Ok(vec![Response::Execution(Tag::new("CREATE TRIGGER"))])
     }
 
     /// Handle DROP TRIGGER statement
     fn handle_drop_trigger(&self, sql: &str) -> Result<Vec<Response>> {
-        // Parse DROP TRIGGER to get trigger name and table
-        let (trigger_name, table_name) = crate::transpiler::parse_drop_trigger(sql)?;
-
-        // Get table OID
-        let table_oid = crate::catalog::trigger::calc_table_oid(&table_name);
-
-        // Remove from catalog
         let conn = self.conn().lock().unwrap();
-        let dropped = crate::catalog::drop_trigger(&conn, &trigger_name, table_oid)?;
+        self.handle_drop_trigger_with_conn(sql, &conn)
+    }
+
+    /// Handle DROP TRIGGER statement with a provided connection
+    fn handle_drop_trigger_with_conn(&self, sql: &str, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
+        let (trigger_name, table_name) = crate::transpiler::parse_drop_trigger(sql)?;
+        let table_oid = crate::catalog::trigger::calc_table_oid(&table_name);
+        let dropped = crate::catalog::drop_trigger(conn, &trigger_name, table_oid)?;
 
         if dropped {
             Ok(vec![Response::Execution(Tag::new("DROP TRIGGER"))])
