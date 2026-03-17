@@ -6,7 +6,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     JoinExpr, SubLink, NullTest, CaseExpr, CoalesceExpr, ResTarget, 
-    RangeVar, RangeSubselect, RangeFunction
+    RangeVar, RangeSubselect
 };
 use crate::transpiler::TranspileContext;
 

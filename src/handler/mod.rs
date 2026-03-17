@@ -389,6 +389,35 @@ impl SqliteHandler {
             Ok(base.powf(exp))
         })?;
 
+        // timezone(timezone, timestamp) - convert timestamp to specified timezone
+        // PostgreSQL: timezone('UTC', '2024-01-01 12:00:00') => '2024-01-01 12:00:00'
+        conn.create_scalar_function("timezone", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, NaiveDateTime};
+            
+            let tz_name: String = ctx.get(0)?;
+            let ts: String = ctx.get(1)?;
+            
+            let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+            
+            let tz_offset_mins = parse_timezone_offset(&tz_name);
+            
+            match dt {
+                Ok(dt) => {
+                    let offset = chrono::FixedOffset::east_opt(tz_offset_mins * 60)
+                        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+                    let dt_in_tz = dt.with_timezone(&offset);
+                    Ok(dt_in_tz.format("%Y-%m-%d %H:%M:%S").to_string())
+                }
+                Err(_) => Ok(ts),
+            }
+        })?;
+
         // split_part(string, delimiter, index) - split string by delimiter and return nth part
         // PostgreSQL: split_part('abc~def~ghi', '~', 2) => 'def'
         // Negative index counts from end: -1 => last part
@@ -511,6 +540,114 @@ impl SqliteHandler {
                     }
                 }
                 Err(_) => Ok(ts), // Return original if parsing fails
+            }
+        })?;
+
+        // date_trunc(field, timestamp, timezone) - truncate timestamp to specified precision with timezone
+        // PostgreSQL: date_trunc('day', '2024-03-15 10:30:45'::timestamptz, 'Australia/Sydney') => '2024-03-15 00:00:00+11'
+        conn.create_scalar_function("date_trunc", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{DateTime, Utc, Datelike, Timelike, NaiveDateTime};
+
+            let field: String = ctx.get::<String>(0)?.to_lowercase();
+            let ts: String = ctx.get(1)?;
+            let tz_name: String = ctx.get(2)?;
+
+            // Parse the timestamp
+            let dt = ts.parse::<DateTime<Utc>>().or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            }).or_else(|_| {
+                NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d")
+                    .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+            });
+
+            // Get timezone offset in minutes
+            let tz_offset_mins = parse_timezone_offset(&tz_name);
+
+            match dt {
+                Ok(dt) => {
+                    // Convert to target timezone
+                    let offset = chrono::FixedOffset::east_opt(tz_offset_mins * 60)
+                        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+                    let dt_in_tz = dt.with_timezone(&offset);
+
+                    let truncated = match field.as_str() {
+                        "millennium" => {
+                            let m = (dt_in_tz.year() - 1) / 1000 + 1;
+                            dt_in_tz.with_year((m - 1) * 1000 + 1)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "century" => {
+                            let c = (dt_in_tz.year() - 1) / 100 + 1;
+                            dt_in_tz.with_year((c - 1) * 100 + 1)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "decade" => {
+                            dt_in_tz.with_year((dt_in_tz.year() / 10) * 10)
+                                .and_then(|d| d.with_month(1))
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "year" => {
+                            dt_in_tz.with_month(1)
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "quarter" => {
+                            let q_month = ((dt_in_tz.month() - 1) / 3) * 3 + 1;
+                            dt_in_tz.with_month(q_month)
+                                .and_then(|d| d.with_day(1))
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "month" => {
+                            dt_in_tz.with_day(1)
+                                .and_then(|d| d.with_hour(0))
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "week" => {
+                            let days_from_monday = dt_in_tz.weekday().num_days_from_monday() as i64;
+                            let monday = dt_in_tz - chrono::Duration::days(days_from_monday);
+                            monday.with_hour(0)
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "day" => {
+                            dt_in_tz.with_hour(0)
+                                .and_then(|d| d.with_minute(0))
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "hour" => {
+                            dt_in_tz.with_minute(0)
+                                .and_then(|d| d.with_second(0))
+                        }
+                        "minute" => {
+                            dt_in_tz.with_second(0)
+                        }
+                        "second" => Some(dt_in_tz),
+                        _ => Some(dt_in_tz),
+                    };
+
+                    match truncated {
+                        Some(t) => Ok(t.format("%Y-%m-%d %H:%M:%S").to_string()),
+                        None => Ok(ts),
+                    }
+                }
+                Err(_) => Ok(ts),
             }
         })?;
 
@@ -1792,6 +1929,12 @@ impl SqliteHandler {
             Ok(Uuid::now_v7().to_string())
         })?;
         
+        // uuidv7(text) - Generate a time-ordered UUID (version 7), accepts arg for compatibility
+        conn.create_scalar_function("uuidv7", 1, FunctionFlags::SQLITE_UTF8, |_ctx| {
+            use uuid::Uuid;
+            Ok(Uuid::now_v7().to_string())
+        })?;
+        
         // uuid_extract_version(uuid) - Extract version from UUID
         // Returns the version number (1, 4, 7, etc.)
         conn.create_scalar_function("uuid_extract_version", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
@@ -1922,6 +2065,67 @@ impl SqliteHandler {
             };
             
             Ok(error_msg.unwrap_or_default())
+        })?;
+
+        // make_timestamp(year, month, day, hour, min, sec) - Create timestamp from components
+        // PostgreSQL: make_timestamp(2014, 12, 28, 6, 30, 45.887) => '2014-12-28 06:30:45.887'
+        conn.create_scalar_function("make_timestamp", 6, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Datelike};
+
+            let year: i32 = ctx.get(0)?;
+            let month: u32 = ctx.get::<i64>(1)? as u32;
+            let day: u32 = ctx.get::<i64>(2)? as u32;
+            let hour: u32 = ctx.get::<i64>(3)? as u32;
+            let min: u32 = ctx.get::<i64>(4)? as u32;
+            let sec: f64 = ctx.get(5)?;
+
+            // Handle special cases like year 0, negative years, etc.
+            let adjusted_year = if year == 0 { 1 } else { year };
+
+            // Create date, handling month/day overflow
+            let date = NaiveDate::from_ymd_opt(adjusted_year, month, day)
+                .or_else(|| {
+                    // Try last day of month if day is invalid
+                    let last_day = NaiveDate::from_ymd_opt(adjusted_year, month + 1, 1)
+                        .unwrap_or_else(|| NaiveDate::from_ymd_opt(adjusted_year + 1, 1, 1).unwrap_or(NaiveDate::MIN))
+                        .pred_opt().unwrap_or(NaiveDate::MIN);
+                    NaiveDate::from_ymd_opt(adjusted_year, month, last_day.day())
+                })
+                .unwrap_or_else(|| NaiveDate::MIN);
+
+            // Handle seconds >= 60 (carry over to minutes)
+            let total_seconds = sec.floor() as u32;
+            let nanos = ((sec - sec.floor()) * 1_000_000_000.0) as u32;
+            let extra_mins = total_seconds / 60;
+            let secs = total_seconds % 60;
+
+            let time = NaiveTime::from_hms_nano_opt(
+                hour + extra_mins / 60,
+                min + extra_mins % 60,
+                secs,
+                nanos
+            ).unwrap_or_else(|| NaiveTime::MIN);
+
+            let datetime = NaiveDateTime::new(date, time);
+            Ok(datetime.format("%Y-%m-%d %H:%M:%S%.f").to_string())
+        })?;
+
+        // isfinite(timestamp|interval) - Check if timestamp/interval is finite (not infinity)
+        // PostgreSQL: isfinite(timestamp 'infinity') => false
+        conn.create_scalar_function("isfinite", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let val: String = ctx.get(0)?;
+            let lower = val.to_lowercase();
+            // Return 0 (false) for infinity values, 1 (true) for finite values
+            let is_finite = !lower.contains("infinity");
+            Ok(if is_finite { 1i64 } else { 0i64 })
+        })?;
+
+        // eval(sql) - Evaluate SQL dynamically (stub for PostgreSQL compatibility testing)
+        // Note: This is a stub that returns NULL. Real implementation would require executing SQL.
+        conn.create_scalar_function("eval", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            // Stub: returns NULL for compatibility with PostgreSQL tests
+            // A full implementation would need to execute the SQL and return the result
+            Ok::<Option<String>, rusqlite::Error>(None)
         })?;
 
         // encode/decode functions for bytea support

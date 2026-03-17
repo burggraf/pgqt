@@ -125,6 +125,26 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         pg_query::protobuf::AExprKind::AexprOpAll => {
             return format!("{} = all ({})", lexpr_sql, rexpr_sql);
         }
+        pg_query::protobuf::AExprKind::AexprBetween => {
+            // PostgreSQL allows BETWEEN x, y syntax (with comma)
+            // SQLite requires BETWEEN x AND y
+            // The rexpr_sql contains both bounds, we need to replace comma with AND
+            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            return format!("{} BETWEEN {}", lexpr_sql, bounds);
+        }
+        pg_query::protobuf::AExprKind::AexprNotBetween => {
+            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
+        }
+        pg_query::protobuf::AExprKind::AexprBetweenSym => {
+            // Symmetric BETWEEN - treat as regular BETWEEN for now
+            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            return format!("{} BETWEEN {}", lexpr_sql, bounds);
+        }
+        pg_query::protobuf::AExprKind::AexprNotBetweenSym => {
+            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
+        }
         _ => {}
     }
 
@@ -346,6 +366,7 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 format!("{} + {}", lexpr_sql, rexpr_sql)
             }
         }
+        "^" => format!("power({}, {})", lexpr_sql, rexpr_sql),
         _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
     }
 }

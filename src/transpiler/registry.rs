@@ -182,7 +182,8 @@ impl Registry {
             "strip", "numnode", "querytree", "ts_rewrite", "ts_lexize", "ts_debug", 
             "ts_stat", "array_to_tsvector", "jsonb_to_tsvector", "int4range", "int8range", 
             "numrange", "tsrange", "tstzrange", "daterange", "repeat", "generate_series", 
-            "regexp", "regexpi", "make_interval", "justify_interval", "justify_days", "justify_hours"
+            "regexp", "regexpi", "make_interval", "justify_interval", "justify_days", "justify_hours",
+            "power"
         ] {
             functions.register(f, FunctionMapping::Simple(*f));
         }
@@ -347,7 +348,7 @@ impl Registry {
 
         functions.register("timezone", FunctionMapping::Complex(|args| {
             if args.len() >= 2 {
-                args[1].clone()
+                format!("timezone({}, {})", args[0], args[1])
             } else {
                 "0".to_string()
             }

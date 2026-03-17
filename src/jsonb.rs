@@ -4,7 +4,6 @@
 //! extension to support PostgreSQL JSONB operations.
 
 use rusqlite::functions::FunctionFlags;
-use rusqlite::types::Value;
 use rusqlite::Connection;
 use serde_json::Value as JsonValue;
 

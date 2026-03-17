@@ -65,6 +65,16 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         return reconstruct_generate_series(func_call, ctx);
     }
     
+    // Special handling for timestamp functions with precision argument
+    // PostgreSQL: current_timestamp(0), now(2), etc. -> ignore precision, return datetime('now')
+    if matches!(func_name_lower.as_str(), "current_timestamp" | "current_time" | "current_date" | "now" | "clock_timestamp" | "statement_timestamp" | "transaction_timestamp") {
+        return match func_name_lower.as_str() {
+            "current_date" => "date('now')".to_string(),
+            "current_time" => "time('now')".to_string(),
+            _ => "datetime('now')".to_string(),
+        };
+    }
+    
     let func_parts: Vec<String> = func_call
         .funcname
         .iter()
