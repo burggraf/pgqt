@@ -11,7 +11,7 @@
 
 set -e
 
-REPO="${1:-$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]//;s/\.git$//')}""
+REPO="${1:-$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]//;s/\.git$//')}"
 
 if [ -z "$REPO" ]; then
     echo "Error: Could not detect repository. Please run from a git repo or specify:"
