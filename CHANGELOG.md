@@ -2,6 +2,13 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [0.6.2] - 2026-03-17
+
+### Fixed
+- **Array operator detection**: Fixed PostgreSQL array literal detection for curly brace arrays like `{"a","b"}`
+- **JSONB vs Array precedence**: Updated operator dispatch to correctly distinguish PostgreSQL arrays from JSONB objects
+- **array_e2e_test.py**: All 21 E2E array tests now passing
+
 ## [0.6.1] - 2026-03-17
 
 ### PostgreSQL Compatibility Improvements
