@@ -35,6 +35,7 @@ pub mod fts;
 pub mod functions;
 pub mod geo;
 pub mod handler;
+pub mod jsonb;
 pub mod plpgsql;
 pub mod range;
 pub mod regex_funcs;

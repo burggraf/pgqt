@@ -403,3 +403,28 @@ fn test_range_with_offset() {
     // Should contain the window clause (even if INTERVAL needs special handling)
     assert!(result.contains("over"));
 }
+
+
+#[test]
+fn test_named_arguments_in_function_call() {
+    // Test that named arguments (name := value) are properly handled
+    // This is used in window.sql for nth_value_def function calls
+    let input = "SELECT nth_value_def(n := 2, val := ten) OVER (PARTITION BY four) FROM s";
+    let result = transpile(input);
+    // Should contain the function with reconstructed arguments (positional)
+    assert!(result.contains("nth_value_def("), "Function name should be preserved");
+    assert!(result.contains("2"), "First argument (n) should be reconstructed");
+    assert!(result.contains("ten"), "Second argument (val) should be reconstructed");
+    assert!(result.contains("over"), "OVER clause should be present");
+    assert!(result.contains("partition by four"), "PARTITION BY clause should be present");
+}
+
+#[test]
+fn test_named_arguments_with_default() {
+    // Test named arguments where some use defaults
+    let input = "SELECT nth_value_def(val := ten) OVER (PARTITION BY four) FROM s";
+    let result = transpile(input);
+    assert!(result.contains("nth_value_def("), "Function name should be preserved");
+    assert!(result.contains("ten"), "Argument (val) should be reconstructed");
+    assert!(result.contains("over"), "OVER clause should be present");
+}

@@ -61,6 +61,7 @@ mod trigger;
 mod regex_funcs;
 mod array_agg;
 mod hypothetical_rank;
+mod jsonb;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};

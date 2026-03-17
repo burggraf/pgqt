@@ -24,6 +24,7 @@ use crate::catalog::{init_catalog, init_system_views};
 use crate::connection_pool::{ConnectionHandle, ConnectionPool};
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
+use crate::jsonb;
 
 // Thread-local storage for the current user during query execution
 thread_local! {
@@ -305,6 +306,7 @@ impl SqliteHandler {
 
         // Register hypothetical-set aggregate functions
         crate::hypothetical_rank::register_hypothetical_functions(conn)?;
+        jsonb::register_jsonb_functions(conn)?;
 
         // Register current_user function that returns the session user
         conn.create_scalar_function("pgqt_current_user", 0, FunctionFlags::SQLITE_UTF8, |_ctx| {

@@ -45,6 +45,13 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::ColumnRef(ref col_ref) => utils::reconstruct_column_ref(col_ref, ctx),
             NodeEnum::String(s) => s.sval.clone(),
             NodeEnum::FuncCall(ref func_call) => reconstruct_func_call(func_call, ctx),
+            NodeEnum::NamedArgExpr(ref named_arg) => {
+                // For named arguments, we just reconstruct the actual argument value
+                // The named parameter syntax (name := value) is converted to positional
+                named_arg.arg.as_ref()
+                    .map(|n| reconstruct_node(n, ctx))
+                    .unwrap_or_default()
+            }
             NodeEnum::AConst(ref aconst) => {
                 let val = utils::reconstruct_aconst(aconst);
                 // Check if this constant is a string and looks like a range literal
