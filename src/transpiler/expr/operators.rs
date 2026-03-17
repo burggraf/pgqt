@@ -10,6 +10,7 @@ use super::{reconstruct_node, is_array_expr, is_json_array_string};
 use super::arrays;
 use super::ranges;
 use super::geo;
+use super::jsonb_ops;
 
 /// Check if a SQL expression looks like an integer type or integer literal
 fn is_integer_expression(expr: &str) -> bool {
@@ -90,6 +91,11 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
     // Check if operands are array expressions before reconstructing
     let lexpr_is_array = a_expr.lexpr.as_ref().is_some_and(|n| is_array_expr(n) || is_json_array_string(n));
     let rexpr_is_array = a_expr.rexpr.as_ref().is_some_and(|n| is_array_expr(n) || is_json_array_string(n));
+    
+    // Check for JSONB operations at AST level
+    let lexpr_is_jsonb = a_expr.lexpr.as_ref().is_some_and(|n| jsonb_ops::is_node_jsonb(n));
+    let rexpr_is_jsonb = a_expr.rexpr.as_ref().is_some_and(|n| jsonb_ops::is_node_jsonb(n));
+    let is_jsonb_op = lexpr_is_jsonb || rexpr_is_jsonb;
     
     let lexpr_sql = a_expr
         .lexpr
@@ -182,6 +188,8 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 geo::geo_contains(&lexpr_sql, &rexpr_sql)
             } else if arrays::is_array_operation(lexpr_is_array, rexpr_is_array, &lexpr_sql, &rexpr_sql) {
                 arrays::array_contains(&lexpr_sql, &rexpr_sql)
+            } else if is_jsonb_op {
+                jsonb_ops::jsonb_contains(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_contains(&lexpr_sql, &rexpr_sql)
             } else {
@@ -196,6 +204,8 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 geo::geo_contained(&lexpr_sql, &rexpr_sql)
             } else if arrays::is_array_operation(lexpr_is_array, rexpr_is_array, &lexpr_sql, &rexpr_sql) {
                 arrays::array_contained(&lexpr_sql, &rexpr_sql)
+            } else if is_jsonb_op {
+                jsonb_ops::jsonb_contained(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_contained(&lexpr_sql, &rexpr_sql)
             } else {
@@ -258,9 +268,9 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         "&<" => ranges::range_no_extend_right(&lexpr_sql, &rexpr_sql),
         "&>" => ranges::range_no_extend_left(&lexpr_sql, &rexpr_sql),
         // JSONB operators (PostgreSQL compatibility)
-        "?" => format!("json_type({}, '$.' || {}) IS NOT NULL", lexpr_sql, rexpr_sql),
-        "?|" => format!("EXISTS (SELECT 1 FROM json_each({}) WHERE json_type({}, '$.' || value) IS NOT NULL)", rexpr_sql, lexpr_sql),
-        "?&" => format!("NOT EXISTS (SELECT 1 FROM json_each({}) WHERE json_type({}, '$.' || value) IS NULL)", rexpr_sql, lexpr_sql),
+        "?" => jsonb_ops::jsonb_key_exists(&lexpr_sql, &rexpr_sql),
+        "?|" => jsonb_ops::jsonb_exists_any(&lexpr_sql, &rexpr_sql),
+        "?&" => jsonb_ops::jsonb_exists_all(&lexpr_sql, &rexpr_sql),
         // || operator is overloaded in PostgreSQL
         "||" => {
             let lexpr_lower = lexpr_sql.to_lowercase();

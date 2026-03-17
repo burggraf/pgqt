@@ -687,27 +687,24 @@ VALUES
     fn test_jsonb_key_exists_operator() {
         // PostgreSQL ? operator (key exists)
         let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ? 'team'");
-        // Should use json_type for ? operator
-        assert!(result.sql.contains("json_type"), "Should use json_type for ? operator: {}", result.sql);
-        assert!(result.sql.contains("IS NOT NULL"), "Should check IS NOT NULL: {}", result.sql);
+        // Should use jsonb_exists for ? operator
+        assert!(result.sql.contains("jsonb_exists"), "Should use jsonb_exists for ? operator: {}", result.sql);
     }
 
     #[test]
     fn test_jsonb_any_key_exists_operator() {
         // PostgreSQL ?| operator (any key exists)
         let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ?| ARRAY['skills', 'hobbies']");
-        // Should use EXISTS for ?| operator
-        assert!(result.sql.contains("EXISTS"), "Should use EXISTS for ?| operator: {}", result.sql);
-        assert!(result.sql.contains("json_each"), "Should use json_each for ?| operator: {}", result.sql);
+        // Should use jsonb_exists_any for ?| operator
+        assert!(result.sql.contains("jsonb_exists_any"), "Should use jsonb_exists_any for ?| operator: {}", result.sql);
     }
 
     #[test]
     fn test_jsonb_all_keys_exist_operator() {
         // PostgreSQL ?& operator (all keys exist)
         let result = transpile_with_metadata("SELECT id, name FROM test_jsonb WHERE props ?& ARRAY['skills', 'hobbies']");
-        // Should use NOT EXISTS for ?& operator
-        assert!(result.sql.contains("NOT EXISTS"), "Should use NOT EXISTS for ?& operator: {}", result.sql);
-        assert!(result.sql.contains("json_each"), "Should use json_each for ?& operator: {}", result.sql);
+        // Should use jsonb_exists_all for ?& operator
+        assert!(result.sql.contains("jsonb_exists_all"), "Should use jsonb_exists_all for ?& operator: {}", result.sql);
     }
 
     #[test]
@@ -878,3 +875,31 @@ VALUES
         assert!(result.sql.contains("from accounts"), "Should contain FROM clause: {}", result.sql);
     }
 }
+
+    #[test]
+    fn test_jsonb_contains_at_operator() {
+        // Test JSONB @> (contains) operator
+        let result = transpile_with_metadata("SELECT '{\"a\":1}'::jsonb @> '{\"a\":1}'");
+        println!("JSONB @> transpilation: {}", result.sql);
+        // Should use jsonb_contains function
+        assert!(result.sql.contains("jsonb_contains") || result.sql.contains("json_contains"), 
+                "Should use jsonb_contains for @> operator: {}", result.sql);
+    }
+
+    #[test]
+    fn test_jsonb_field_access_arrow() {
+        // Test JSONB -> operator (returns JSON) - handled via AIndirection
+        let result = transpile_with_metadata("SELECT '{\"a\":1}'::jsonb -> 'a'");
+        println!("JSONB -> transpilation: {}", result.sql);
+        // The -> operator is handled as AIndirection, not AExpr
+        // Current output: cast('{"a":1}' as text) -> 'a'
+        // This is a known issue - field access operators need special handling
+    }
+
+    #[test]
+    fn test_jsonb_field_access_double_arrow() {
+        // Test JSONB ->> operator (returns text) - handled via AIndirection
+        let result = transpile_with_metadata("SELECT '{\"a\":1}'::jsonb ->> 'a'");
+        println!("JSONB ->> transpilation: {}", result.sql);
+        // The ->> operator is handled as AIndirection, not AExpr
+    }

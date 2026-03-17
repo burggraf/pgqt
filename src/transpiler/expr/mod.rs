@@ -16,6 +16,7 @@
 mod arrays;
 mod ranges;
 mod geo;
+mod jsonb_ops;
 mod utils;
 mod sql_value;
 mod stmt;
