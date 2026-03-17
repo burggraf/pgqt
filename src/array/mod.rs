@@ -57,6 +57,13 @@ pub use functions::{
     array_to_string_fn,
     array_length_fn,
     array_cardinality,
+    array_sort_fn,
+    array_sample_fn,
+    array_reverse_fn,
+    array_shuffle_fn,
+    array_to_json_fn,
+    array_lower_fn,
+    array_upper_fn,
 };
 
 // Other items are available through submodules:

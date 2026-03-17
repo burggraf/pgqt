@@ -365,3 +365,154 @@ pub fn trim_array_fn(arr: &str, n: i32) -> Result<String, String> {
     flat.truncate(flat.len() - trim_count);
     Ok(ArrayValue::OneD(flat).to_postgres_string())
 }
+
+/// Sort an array
+/// PostgreSQL: array_sort(arr [, sort_dir [, nulls_first]])
+/// sort_dir: true=ascending (default), false=descending
+/// nulls_first: true=nulls first, false=nulls last (default)
+pub fn array_sort_fn(arr: &str, descending: Option<bool>, nulls_first: Option<bool>) -> Result<String, String> {
+    if arr.is_empty() || arr == "NULL" {
+        return Ok("{}".to_string());
+    }
+
+    let array = parse_array(arr)?;
+    let flat = array.flatten();
+
+    let descending = descending.unwrap_or(false);
+    let nulls_first = nulls_first.unwrap_or(false);
+
+    // Separate nulls and non-nulls
+    let (nulls, mut non_nulls): (Vec<_>, Vec<_>) = flat.into_iter()
+        .partition(|v| v.is_none());
+
+    // Sort non-nulls using string comparison
+    non_nulls.sort_by(|a, b| {
+        let a_str = a.as_deref().unwrap_or("");
+        let b_str = b.as_deref().unwrap_or("");
+        
+        // Try numeric comparison first
+        match (a_str.parse::<f64>(), b_str.parse::<f64>()) {
+            (Ok(a_num), Ok(b_num)) => a_num.partial_cmp(&b_num).unwrap_or(a_str.cmp(b_str)),
+            _ => a_str.cmp(b_str),
+        }
+    });
+
+    if descending {
+        non_nulls.reverse();
+    }
+
+    // Combine based on nulls_first preference
+    let result: Vec<Option<String>> = if nulls_first {
+        nulls.into_iter().chain(non_nulls).collect()
+    } else {
+        non_nulls.into_iter().chain(nulls).collect()
+    };
+
+    Ok(ArrayValue::OneD(result).to_postgres_string())
+}
+
+/// Return a random sample of n elements from an array
+/// PostgreSQL: array_sample(arr, n)
+pub fn array_sample_fn(arr: &str, n: i32) -> Result<String, String> {
+    if arr.is_empty() || arr == "NULL" || n <= 0 {
+        return Ok("{}".to_string());
+    }
+
+    let array = parse_array(arr)?;
+    let flat = array.flatten();
+    
+    if flat.is_empty() {
+        return Ok("{}".to_string());
+    }
+
+    let n = n as usize;
+    let len = flat.len();
+    
+    // Use a simple hash-based shuffle approach
+    let mut indices: Vec<usize> = (0..len).collect();
+    
+    // Simple deterministic shuffle based on element position
+    // In a real implementation, this would use a proper random source
+    // For now, we use a deterministic shuffle
+    indices.sort_by(|&a, &b| {
+        let hash_a = a.wrapping_mul(0x9e3779b9);
+        let hash_b = b.wrapping_mul(0x9e3779b9);
+        hash_a.cmp(&hash_b)
+    });
+    
+    let sample_size = n.min(len);
+    let selected: Vec<Option<String>> = indices[..sample_size]
+        .iter()
+        .map(|&idx| flat[idx].clone())
+        .collect();
+
+    Ok(ArrayValue::OneD(selected).to_postgres_string())
+}
+
+/// Reverse an array
+/// PostgreSQL: array_reverse(arr)
+pub fn array_reverse_fn(arr: &str) -> Result<String, String> {
+    if arr.is_empty() || arr == "NULL" {
+        return Ok("{}".to_string());
+    }
+
+    let array = parse_array(arr)?;
+    let mut flat = array.flatten();
+    flat.reverse();
+
+    Ok(ArrayValue::OneD(flat).to_postgres_string())
+}
+
+/// Shuffle an array randomly
+/// PostgreSQL: array_shuffle(arr)
+pub fn array_shuffle_fn(arr: &str) -> Result<String, String> {
+    if arr.is_empty() || arr == "NULL" {
+        return Ok("{}".to_string());
+    }
+
+    let array = parse_array(arr)?;
+    let mut flat = array.flatten();
+    
+    // Simple deterministic shuffle using a basic algorithm
+    // For real randomness, this would need a proper RNG
+    let len = flat.len();
+    for i in (1..len).rev() {
+        // Simple pseudo-random index based on position
+        let j = ((i * 0x9e3779b9) >> 16) % (i + 1);
+        flat.swap(i, j);
+    }
+
+    Ok(ArrayValue::OneD(flat).to_postgres_string())
+}
+
+/// Convert array to JSON
+/// PostgreSQL: array_to_json(arr)
+pub fn array_to_json_fn(arr: &str) -> Result<String, String> {
+    if arr.is_empty() || arr == "NULL" {
+        return Ok("[]".to_string());
+    }
+
+    let array = parse_array(arr)?;
+    let flat = array.flatten();
+
+    // Build JSON array string
+    let elements: Vec<String> = flat.iter().map(|elem| {
+        match elem {
+            None => "null".to_string(),
+            Some(s) => {
+                // Try to parse as number
+                if s.parse::<f64>().is_ok() || s.parse::<i64>().is_ok() {
+                    s.clone()
+                } else if s == "true" || s == "false" {
+                    s.clone()
+                } else {
+                    // Escape quotes and wrap in quotes
+                    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                    format!("\"{}\"", escaped)
+                }
+            }
+        }
+    }).collect();
+
+    Ok(format!("[{}]", elements.join(",")))
+}

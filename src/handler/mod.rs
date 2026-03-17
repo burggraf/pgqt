@@ -1298,6 +1298,92 @@ impl SqliteHandler {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
         })?;
 
+        conn.create_scalar_function("string_to_array", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let delimiter: String = ctx.get(1)?;
+            let null_str: String = ctx.get(2)?;
+            crate::array::functions::string_to_array_fn(&text, &delimiter, Some(&null_str))
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_fill", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let value: String = ctx.get(0)?;
+            let dimensions: String = ctx.get(1)?;
+            let lower_bounds: String = ctx.get(2)?;
+            crate::array::functions::array_fill_fn(&value, &dimensions, Some(&lower_bounds))
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_sort", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            crate::array::functions::array_sort_fn(&arr, None, None)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("array_sort", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let descending: i32 = ctx.get(1)?;
+            crate::array::functions::array_sort_fn(&arr, Some(descending != 0), None)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        conn.create_scalar_function("array_sort", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let descending: i32 = ctx.get(1)?;
+            let nulls_first: i32 = ctx.get(2)?;
+            crate::array::functions::array_sort_fn(&arr, Some(descending != 0), Some(nulls_first != 0))
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_sample", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let n: i32 = ctx.get(1)?;
+            crate::array::functions::array_sample_fn(&arr, n)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_reverse", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            crate::array::functions::array_reverse_fn(&arr)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_shuffle", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            crate::array::functions::array_shuffle_fn(&arr)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_to_json", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            crate::array::functions::array_to_json_fn(&arr)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+        })?;
+
+        
+        conn.create_scalar_function("array_lower", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let dim: i32 = ctx.get(1)?;
+            crate::array::functions::array_lower_fn(&arr, dim)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+                .map(|opt| opt.map(|v| v as i64))
+        })?;
+
+        
+        conn.create_scalar_function("array_upper", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let arr: String = ctx.get(0)?;
+            let dim: i32 = ctx.get(1)?;
+            crate::array::functions::array_upper_fn(&arr, dim)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))
+                .map(|opt| opt.map(|v| v as i64))
+        })?;
+
         // Geo functions
         conn.create_scalar_function("geo_distance", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let p1: String = ctx.get(0)?;
