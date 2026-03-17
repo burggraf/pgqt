@@ -341,6 +341,7 @@ async fn run_listener(config: PortConfig) -> Result<()> {
 
 #[allow(dead_code)]
 /// Set up output redirection based on CLI arguments
+#[cfg(unix)]
 fn setup_output_redirection(output: &OutputDest, error_output: &OutputDest) -> Result<()> {
     use std::fs::OpenOptions;
     use std::os::unix::io::AsRawFd;
@@ -407,6 +408,15 @@ fn setup_output_redirection(output: &OutputDest, error_output: &OutputDest) -> R
         }
     }
 
+    Ok(())
+}
+
+#[allow(dead_code)]
+/// Stub for Windows - output redirection not supported
+#[cfg(windows)]
+fn setup_output_redirection(_output: &OutputDest, _error_output: &OutputDest) -> Result<()> {
+    // Output redirection is not implemented for Windows
+    // The output will go to stdout/stderr as normal
     Ok(())
 }
 
