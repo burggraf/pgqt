@@ -1,4 +1,4 @@
-name: Release PGQT macOS x64
+name: Release PGQT Binaries (All Platforms)
 
 on:
   workflow_dispatch:
@@ -22,9 +22,18 @@ permissions:
   contents: write
 
 jobs:
-  build-macos-x64:
-    name: Build macOS x64
-    runs-on: macos-latest  # ARM runner, but we'll cross-compile to x86_64
+  build-macos:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: amd64
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,70 +41,45 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin
+          targets: ${{ matrix.target }}
 
       - name: Build binary
         env:
           CARGO_INCREMENTAL: 0
         run: |
-          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target ${{ matrix.target }}
           mkdir -p dist
-          cp target/x86_64-apple-darwin/release/pgqt dist/pgqt
+          cp target/${{ matrix.target }}/release/pgqt dist/pgqt
 
       - name: Import Code Signing Certificate
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Import certificate
           echo "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
           security import $RUNNER_TEMP/certificate.p12 \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          # Set keychain as default and allow codesign access
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Verify certificate was imported
-          echo "Available signing identities:"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-
-          # Clean up certificate file
           rm -f $RUNNER_TEMP/certificate.p12
 
       - name: Sign macOS Binary
         run: |
-          # Find the Developer ID Application identity
           IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "Using identity: $IDENTITY"
-
           if [ -z "$IDENTITY" ]; then
             echo "Error: No Developer ID Application identity found"
             security find-identity -v -p codesigning
             exit 1
           fi
-
-          # Sign with Developer ID Application certificate
-          codesign --force --options runtime \
-            --sign "$IDENTITY" \
-            --timestamp \
-            dist/pgqt
-
-          # Verify signature
+          codesign --force --options runtime --sign "$IDENTITY" --timestamp dist/pgqt
           codesign --verify --verbose dist/pgqt
-          codesign -dv --verbose=4 dist/pgqt
 
       - name: Notarize macOS Binary
         env:
@@ -103,18 +87,13 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Create ZIP for notarization (notarytool requires archive)
           cd dist
           zip pgqt-notarize.zip pgqt
-
-          # Submit for notarization and wait
           xcrun notarytool submit pgqt-notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-
-          # Clean up notarization zip
           rm -f pgqt-notarize.zip
 
       - name: Cleanup Keychain
@@ -128,17 +107,105 @@ jobs:
       - name: Create archive
         run: |
           cd dist
-          zip pgqt-${{ github.event.inputs.version }}-darwin-amd64.zip pgqt
+          zip pgqt-${{ github.event.inputs.version }}-darwin-${{ matrix.arch }}.zip pgqt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pgqt-darwin-amd64
-          path: dist/pgqt-${{ github.event.inputs.version }}-darwin-amd64.zip
+          name: pgqt-darwin-${{ matrix.arch }}
+          path: dist/pgqt-${{ github.event.inputs.version }}-darwin-${{ matrix.arch }}.zip
+
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary
+        env:
+          CARGO_INCREMENTAL: 0
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/pgqt dist/pgqt
+
+      - name: Create archive
+        run: |
+          cd dist
+          zip pgqt-${{ github.event.inputs.version }}-linux-${{ matrix.arch }}.zip pgqt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgqt-linux-${{ matrix.arch }}
+          path: dist/pgqt-${{ github.event.inputs.version }}-linux-${{ matrix.arch }}.zip
+
+  build-windows:
+    name: Build Windows ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            arch: amd64
+          - target: aarch64-pc-windows-msvc
+            arch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary
+        env:
+          CARGO_INCREMENTAL: 0
+        run: |
+          cargo build --release --target ${{ matrix.target }} --no-default-features
+        shell: pwsh
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/pgqt.exe dist/pgqt.exe
+        shell: pwsh
+
+      - name: Create archive
+        run: |
+          cd dist
+          Compress-Archive -Path pgqt.exe -DestinationPath pgqt-${{ github.event.inputs.version }}-windows-${{ matrix.arch }}.zip
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgqt-windows-${{ matrix.arch }}
+          path: dist/pgqt-${{ github.event.inputs.version }}-windows-${{ matrix.arch }}.zip
 
   release:
     name: Create Release
-    needs: build-macos-x64
+    needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -162,7 +229,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version }}
-          name: PGQT ${{ github.event.inputs.version }} (macOS x64)
+          name: PGQT ${{ github.event.inputs.version }}
           draft: ${{ github.event.inputs.draft }}
           prerelease: ${{ github.event.inputs.prerelease }}
           files: |
