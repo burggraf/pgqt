@@ -73,6 +73,51 @@ pub(crate) fn is_node_jsonb(node: &Node) -> bool {
 ///
 /// This detects:
 /// - String literals containing JSON objects or arrays: '{"a":1}', '[1,2,3]'
+/// - Cast expressions to json/jsonb: '...'::jsonb, cast(... as jsonb)
+/// - Expressions with json/jsonb in their name (columns, functions)
+#[allow(dead_code)]
+pub(crate) fn is_jsonb_expression(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    let trimmed = expr.trim();
+
+    // Check for cast to json/jsonb
+    if lower.contains("::json") || lower.contains("::jsonb") {
+        return true;
+    }
+
+    // Check for cast() syntax
+    if lower.contains("cast(") && lower.contains("as json") {
+        return true;
+    }
+
+    // Check for string literal containing JSON object or array
+    if (trimmed.starts_with("'{") && trimmed.contains("}"))
+        || (trimmed.starts_with("'[") && trimmed.contains("]"))
+    {
+        return true;
+    }
+
+    // Check for json/jsonb functions or column names
+    if lower.contains("jsonb") {
+        return true;
+    }
+
+    // Check for json_ functions that return JSON
+    if lower.starts_with("json_") || lower.starts_with("jsonb_") {
+        return true;
+    }
+
+    false
+}
+
+/// Check if this is a JSONB contains operation (@>)
+///
+/// Both operands should be JSON/JSONB expressions
+#[allow(dead_code)]
+pub(crate) fn is_jsonb_contains_operation(left: &str, right: &str) -> bool {
+    is_jsonb_expression(left) && is_jsonb_expression(right)
+}
+
 /// Generate SQLite SQL for JSONB contains operator (@>)
 /// Uses the jsonb_contains function registered in src/jsonb.rs
 pub(crate) fn jsonb_contains(left: &str, right: &str) -> String {
