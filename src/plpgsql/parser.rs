@@ -1,6 +1,5 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use crate::plpgsql::ast::PlpgsqlFunction;
-use pg_query::protobuf::node::Node as NodeEnum;
 
 /// Function metadata extracted from CREATE FUNCTION statement
 #[derive(Debug, Clone)]
@@ -15,6 +14,7 @@ pub struct FunctionMetadata {
 /// Parse a single PL/pgSQL function and return its AST
 #[cfg(feature = "plpgsql")]
 pub fn parse_plpgsql_function(sql: &str) -> Result<PlpgsqlFunction> {
+    use anyhow::Context;
     
     let metadata = extract_function_metadata(sql)?;
     
@@ -51,7 +51,9 @@ pub fn parse_plpgsql_function(_sql: &str) -> Result<PlpgsqlFunction> {
 }
 
 /// Extract function metadata from CREATE FUNCTION statement using pg_query
+#[cfg(feature = "plpgsql")]
 fn extract_function_metadata(sql: &str) -> Result<FunctionMetadata> {
+    use pg_query::protobuf::node::Node as NodeEnum;
     
     let result = pg_query::parse(sql)
         .map_err(|e| anyhow::anyhow!("Failed to parse CREATE FUNCTION: {}", e))?;
@@ -89,6 +91,8 @@ fn extract_function_metadata(sql: &str) -> Result<FunctionMetadata> {
 #[cfg(feature = "plpgsql")]
 #[allow(dead_code)]
 pub fn parse_plpgsql_batch(sql: &str) -> Result<Vec<PlpgsqlFunction>> {
+    use anyhow::Context;
+    
     let json = pg_parse::parse_plpgsql(sql)
         .map_err(|e| anyhow::anyhow!("Failed to parse PL/pgSQL batch: {:?}", e))?;
     

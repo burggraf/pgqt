@@ -53,17 +53,6 @@ jobs:
             os_name: linux
             arch: arm64
             ext: ''
-          # Windows builds (cross-compile from ubuntu)
-          - target: x86_64-pc-windows-gnu
-            runner: ubuntu-latest
-            os_name: windows
-            arch: amd64
-            ext: '.exe'
-          - target: aarch64-pc-windows-msvc
-            runner: windows-latest
-            os_name: windows
-            arch: arm64
-            ext: '.exe'
 
     steps:
       - name: Checkout code
@@ -74,22 +63,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install MinGW (Windows x64 from Linux)
-        if: matrix.target == 'x86_64-pc-windows-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
-
       - name: Build binary
         env:
           CARGO_INCREMENTAL: 0
         run: |
-          # Windows builds don't support plpgsql feature (pg_parse C library doesn't build on Windows)
-          if [[ "${{ matrix.os_name }}" == "windows" ]]; then
-            cargo build --release --target ${{ matrix.target }} --no-default-features
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+          cargo build --release --target ${{ matrix.target }}
           mkdir -p dist
           cp target/${{ matrix.target }}/release/pgqt${{ matrix.ext }} dist/pgqt${{ matrix.ext }}
         shell: bash
@@ -181,18 +159,10 @@ jobs:
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
 
-      - name: Create archive (non-Windows)
-        if: matrix.runner != 'windows-latest'
+      - name: Create archive
         run: |
           cd dist
           zip pgqt-${{ github.event.inputs.version }}-${{ matrix.os_name }}-${{ matrix.arch }}.zip pgqt${{ matrix.ext }}
-
-      - name: Create archive (Windows)
-        if: matrix.runner == 'windows-latest'
-        shell: pwsh
-        run: |
-          cd dist
-          Compress-Archive -Path pgqt${{ matrix.ext }} -DestinationPath pgqt-${{ github.event.inputs.version }}-${{ matrix.os_name }}-${{ matrix.arch }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
