@@ -24,7 +24,7 @@ permissions:
 jobs:
   build-macos-x64:
     name: Build macOS x64
-    runs-on: macos-13  # macos-13 is the last runner with native x86_64 support
+    runs-on: macos-latest  # ARM runner, but we'll cross-compile to x86_64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
