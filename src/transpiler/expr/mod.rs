@@ -165,6 +165,13 @@ pub(crate) fn reconstruct_node(node: &Node, ctx: &mut TranspileContext) -> Strin
             NodeEnum::AArrayExpr(ref a_array_expr) => {
                 arrays::reconstruct_a_array_expr(a_array_expr, ctx, reconstruct_node)
             }
+            NodeEnum::RowExpr(ref row_expr) => {
+                // Reconstruct ROW(val1, val2, ...) - used for composite types
+                let args: Vec<String> = row_expr.args.iter()
+                    .map(|n| reconstruct_node(n, ctx))
+                    .collect();
+                format!("({})", args.join(", "))
+            }
             NodeEnum::RangeFunction(ref range_func) => {
                 ranges::reconstruct_range_function(range_func, ctx, reconstruct_node)
             }

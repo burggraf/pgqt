@@ -239,13 +239,29 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
 
     // Process arguments
     let mut args: Vec<String> = Vec::new();
+    let mut has_qualified_star = false;
     if !func_call.agg_star {
         for n in &func_call.args {
+            // Check if this is a qualified star like "t2.*" in count(t2.*)
+            // PostgreSQL allows this but SQLite doesn't, so we convert to "*"
+            if func_name == "count" {
+                if let Some(ref inner) = n.node {
+                    if let NodeEnum::ColumnRef(col_ref) = inner {
+                        let fields: Vec<_> = col_ref.fields.iter()
+                            .filter_map(|f| f.node.as_ref())
+                            .collect();
+                        if let Some(NodeEnum::AStar(_)) = fields.last() {
+                            has_qualified_star = true;
+                            continue; // Skip adding this argument, we'll use "*"
+                        }
+                    }
+                }
+            }
             args.push(reconstruct_node(n, ctx));
         }
     }
     
-    let args_str = if func_call.agg_star {
+    let args_str = if func_call.agg_star || has_qualified_star {
         "*".to_string()
     } else {
         args.join(", ")

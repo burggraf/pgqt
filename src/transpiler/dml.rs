@@ -1002,6 +1002,10 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
     if let Some(ref select_stmt) = stmt.select_stmt {
         let select_sql = reconstruct_node(select_stmt, ctx);
         parts.push(select_sql);
+    } else {
+        // Handle INSERT ... DEFAULT VALUES (no select_stmt)
+        // In SQLite, we can use DEFAULT VALUES directly
+        parts.push("DEFAULT VALUES".to_string());
     }
 
     // Handle ON CONFLICT clause (upsert)
@@ -1088,22 +1092,103 @@ fn reconstruct_on_conflict_clause(on_conflict: &pg_query::protobuf::OnConflictCl
             
             // Handle the SET clause for DO UPDATE
             if !on_conflict.target_list.is_empty() {
-                // target_list contains the SET assignments for DO UPDATE
-                let set_clauses: Vec<String> = on_conflict.target_list
-                    .iter()
-                    .filter_map(|n| {
-                        if let Some(ref inner) = n.node {
-                            if let NodeEnum::ResTarget(target) = inner {
-                                let col_name = target.name.to_lowercase();
-                                let val = target.val.as_ref()
-                                    .map(|v| reconstruct_node(v, ctx))
-                                    .unwrap_or_default();
-                                return Some(format!("{} = {}", col_name, val));
+                // Check for multi-column assignment (MultiAssignRef)
+                let mut multi_assign_targets: Vec<(String, String)> = Vec::new();
+                let mut is_multi_assign = false;
+                
+                for n in &on_conflict.target_list {
+                    if let Some(ref inner) = n.node {
+                        if let NodeEnum::ResTarget(target) = inner {
+                            if let Some(ref val_node) = target.val {
+                                if let Some(ref val_inner) = val_node.node {
+                                    if let NodeEnum::MultiAssignRef(multi_ref) = val_inner {
+                                        is_multi_assign = true;
+                                        let col_name = target.name.to_lowercase();
+                                        let col_idx = (multi_ref.colno as usize).saturating_sub(1);
+                                        
+                                        if let Some(ref source_node) = multi_ref.source {
+                                            if let Some(ref source_inner) = source_node.node {
+                                                match source_inner {
+                                                    NodeEnum::RowExpr(row_expr) => {
+                                                        if col_idx < row_expr.args.len() {
+                                                            let arg = &row_expr.args[col_idx];
+                                                            let val = reconstruct_node(arg, ctx);
+                                                            multi_assign_targets.push((col_name, val));
+                                                        }
+                                                    }
+                                                    NodeEnum::SubLink(sublink) => {
+                                                        // Handle (SELECT ...) as source
+                                                        if let Some(ref subselect) = sublink.subselect {
+                                                            if let Some(ref subselect_inner) = subselect.node {
+                                                                if let NodeEnum::SelectStmt(select_stmt) = subselect_inner {
+                                                                    if col_idx < select_stmt.target_list.len() {
+                                                                        let target = &select_stmt.target_list[col_idx];
+                                                                        let target_sql = reconstruct_node(target, ctx);
+                                                                        
+                                                                        let from_sql = if !select_stmt.from_clause.is_empty() {
+                                                                            let from_tables: Vec<String> = select_stmt.from_clause
+                                                                                .iter()
+                                                                                .map(|n| reconstruct_node(n, ctx))
+                                                                                .collect();
+                                                                            from_tables.join(", ")
+                                                                        } else {
+                                                                            String::new()
+                                                                        };
+                                                                        
+                                                                        let where_sql = if let Some(ref where_clause) = select_stmt.where_clause {
+                                                                            format!(" WHERE {}", reconstruct_node(where_clause, ctx))
+                                                                        } else {
+                                                                            String::new()
+                                                                        };
+                                                                        
+                                                                        let subquery_sql = if from_sql.is_empty() {
+                                                                            format!("(SELECT {})", target_sql)
+                                                                        } else {
+                                                                            format!("(SELECT {} FROM {}{})", target_sql, from_sql, where_sql)
+                                                                        };
+                                                                        
+                                                                        multi_assign_targets.push((col_name, subquery_sql));
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        let val = reconstruct_node(source_node, ctx);
+                                                        multi_assign_targets.push((col_name, val));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        None
-                    })
-                    .collect();
+                    }
+                }
+                
+                let set_clauses: Vec<String> = if is_multi_assign && !multi_assign_targets.is_empty() {
+                    multi_assign_targets.iter()
+                        .map(|(col, val)| format!("{} = {}", col, val))
+                        .collect()
+                } else {
+                    // Standard single-column assignments
+                    on_conflict.target_list
+                        .iter()
+                        .filter_map(|n| {
+                            if let Some(ref inner) = n.node {
+                                if let NodeEnum::ResTarget(target) = inner {
+                                    let col_name = target.name.to_lowercase();
+                                    let val = target.val.as_ref()
+                                        .map(|v| reconstruct_node(v, ctx))
+                                        .unwrap_or_default();
+                                    return Some(format!("{} = {}", col_name, val));
+                                }
+                            }
+                            None
+                        })
+                        .collect()
+                };
                 
                 if !set_clauses.is_empty() {
                     parts.push(set_clauses.join(", "));
@@ -1122,6 +1207,98 @@ fn reconstruct_on_conflict_clause(on_conflict: &pg_query::protobuf::OnConflictCl
     }
 
     parts.join(" ")
+}
+
+/// Extract column names for table aliases from the FROM clause
+/// This is used to expand table.* patterns in UPDATE SET clauses
+fn extract_table_alias_columns_from_from_clause(from_clause: &[Node]) -> std::collections::HashMap<String, Vec<String>> {
+    use std::collections::HashMap;
+    let mut alias_columns: HashMap<String, Vec<String>> = HashMap::new();
+    
+    for node in from_clause {
+        if let Some(ref inner) = node.node {
+            match inner {
+                NodeEnum::RangeSubselect(subselect) => {
+                    // Handle (VALUES ...) AS alias(col1, col2)
+                    if let Some(ref alias) = subselect.alias {
+                        let alias_name = alias.aliasname.to_lowercase();
+                        let cols: Vec<String> = alias.colnames
+                            .iter()
+                            .filter_map(|n| {
+                                if let Some(ref col_inner) = n.node {
+                                    if let NodeEnum::String(s) = col_inner {
+                                        return Some(s.sval.to_lowercase());
+                                    }
+                                }
+                                None
+                            })
+                            .collect();
+                        if !cols.is_empty() {
+                            alias_columns.insert(alias_name, cols);
+                        }
+                    }
+                }
+                NodeEnum::RangeVar(range_var) => {
+                    // Handle table AS alias
+                    if let Some(ref alias) = range_var.alias {
+                        let alias_name = alias.aliasname.to_lowercase();
+                        // For table references, we can't know columns without schema info
+                        // Leave empty - v.* won't be expanded for tables
+                        let _ = alias_name; // Acknowledge we saw the alias
+                    }
+                }
+                NodeEnum::JoinExpr(join_expr) => {
+                    // Recursively process join arguments
+                    let left_cols = extract_table_alias_columns_from_from_clause(&[*join_expr.larg.clone().unwrap_or_default()]);
+                    let right_cols = extract_table_alias_columns_from_from_clause(&[*join_expr.rarg.clone().unwrap_or_default()]);
+                    for (k, v) in left_cols.into_iter().chain(right_cols.into_iter()) {
+                        alias_columns.insert(k, v);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    alias_columns
+}
+
+/// Try to expand a v.* pattern in a RowExpr
+/// Returns Some(column_ref) if expansion is possible, None otherwise
+fn try_extract_star_expansion(
+    row_expr: &pg_query::protobuf::RowExpr,
+    alias_columns: &std::collections::HashMap<String, Vec<String>>,
+    col_idx: usize,
+) -> Option<String> {
+    // Check if this is a v.* pattern (single argument with table.* reference)
+    if row_expr.args.len() != 1 {
+        return None;
+    }
+    
+    let arg = &row_expr.args[0];
+    if let Some(ref arg_inner) = arg.node {
+        if let NodeEnum::ColumnRef(col_ref) = arg_inner {
+            // Check if the fields are ["table", "*"]
+            if col_ref.fields.len() == 2 {
+                if let (Some(first_field), Some(second_field)) = (col_ref.fields.first(), col_ref.fields.get(1)) {
+                    if let (Some(ref first_node), Some(ref second_node)) = (first_field.node.clone(), second_field.node.clone()) {
+                        if let (NodeEnum::String(s), NodeEnum::AStar(_)) = (first_node, second_node) {
+                            let table_alias_name = s.sval.to_lowercase();
+                            // Check if we have column info for this alias
+                            if let Some(cols) = alias_columns.get(&table_alias_name) {
+                                // Expand v.* to v.col at the given index
+                                if col_idx < cols.len() {
+                                    return Some(format!("{}.{}", table_alias_name, cols[col_idx]));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    None
 }
 
 /// Reconstruct an UPDATE statement
@@ -1153,6 +1330,9 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
         .unwrap_or_default();
     parts.push(table_name.clone());
 
+    // Extract table alias columns from FROM clause for v.* expansion
+    let alias_columns = extract_table_alias_columns_from_from_clause(&stmt.from_clause);
+
     // Validate UPDATE SET values before reconstruction
     let validation_errors = validate_update_values(
         &table_name,
@@ -1181,16 +1361,84 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
                         if let NodeEnum::MultiAssignRef(multi_ref) = val_inner {
                             // This is a row constructor - store the column name and extract value
                             let col_name = target.name.to_lowercase();
+                            let col_idx = (multi_ref.colno as usize).saturating_sub(1);
                             
                             // Extract the specific value for this column from the source
                             if let Some(ref source_node) = multi_ref.source {
                                 if let Some(ref source_inner) = source_node.node {
-                                    if let NodeEnum::RowExpr(row_expr) = source_inner {
-                                        // Get the value at position (colno - 1) since colno is 1-indexed
-                                        let col_idx = (multi_ref.colno as usize).saturating_sub(1);
-                                        if col_idx < row_expr.args.len() {
-                                            let arg = &row_expr.args[col_idx];
-                                            let mut val = reconstruct_node(arg, ctx);
+                                    match source_inner {
+                                        NodeEnum::RowExpr(row_expr) => {
+                                            // Handle ROW(val1, val2, ...) or (val1, val2, ...)
+                                            // Also handle ROW(v.*) expansion
+                                            
+                                            // Check if this is a v.* pattern that needs expansion
+                                            let star_expansion = try_extract_star_expansion(&row_expr, &alias_columns, col_idx);
+                                            
+                                            if let Some(val) = star_expansion {
+                                                row_constructor_targets.push((col_name, val));
+                                            } else if col_idx < row_expr.args.len() {
+                                                let arg = &row_expr.args[col_idx];
+                                                let mut val = reconstruct_node(arg, ctx);
+                                                if let Some(ref alias) = table_alias {
+                                                    val = remove_table_alias_from_columns(&val, alias);
+                                                }
+                                                if table_alias.is_some() {
+                                                    if let Some(ref orig_table) = original_table_name {
+                                                        val = remove_table_alias_from_columns(&val, orig_table);
+                                                    }
+                                                }
+                                                row_constructor_targets.push((col_name, val));
+                                            }
+                                        }
+                                        NodeEnum::SubLink(sublink) => {
+                                            // Handle (SELECT ...) as source for multi-column assignment
+                                            // SQLite doesn't support this directly, so we need to transform
+                                            // each column to its own scalar subquery
+                                            if let Some(ref subselect) = sublink.subselect {
+                                                if let Some(ref subselect_inner) = subselect.node {
+                                                    if let NodeEnum::SelectStmt(select_stmt) = subselect_inner {
+                                                        // Get the target list from the subquery
+                                                        if col_idx < select_stmt.target_list.len() {
+                                                            let target = &select_stmt.target_list[col_idx];
+                                                            let target_sql = reconstruct_node(target, ctx);
+                                                            
+                                                            // Build the FROM clause
+                                                            let from_sql = if !select_stmt.from_clause.is_empty() {
+                                                                let from_tables: Vec<String> = select_stmt.from_clause
+                                                                    .iter()
+                                                                    .map(|n| reconstruct_node(n, ctx))
+                                                                    .collect();
+                                                                from_tables.join(", ")
+                                                            } else {
+                                                                String::new()
+                                                            };
+                                                            
+                                                            // Build WHERE clause if present
+                                                            let where_sql = if let Some(ref where_clause) = select_stmt.where_clause {
+                                                                format!(" WHERE {}", reconstruct_node(where_clause, ctx))
+                                                            } else {
+                                                                String::new()
+                                                            };
+                                                            
+                                                            // Create a scalar subquery for this column
+                                                            let mut subquery_sql = if from_sql.is_empty() {
+                                                                format!("(SELECT {})", target_sql)
+                                                            } else {
+                                                                format!("(SELECT {} FROM {}{})", target_sql, from_sql, where_sql)
+                                                            };
+                                                            
+                                                            if let Some(ref alias) = table_alias {
+                                                                subquery_sql = remove_table_alias_from_columns(&subquery_sql, alias);
+                                                            }
+                                                            row_constructor_targets.push((col_name, subquery_sql));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // For other sources, just use the value directly
+                                            let mut val = reconstruct_node(source_node, ctx);
                                             if let Some(ref alias) = table_alias {
                                                 val = remove_table_alias_from_columns(&val, alias);
                                             }

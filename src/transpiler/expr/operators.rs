@@ -267,6 +267,11 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         }
         // JSONB key removal (only if not datetime - interval)
         "-" => {
+            // Handle unary minus (negative numbers/expression)
+            if lexpr_sql.is_empty() {
+                return format!("-{}", rexpr_sql);
+            }
+            
             // First check if this is datetime - interval
             if is_datetime_expression(&lexpr_sql) && is_interval_expression(&rexpr_sql) {
                 // Transform: datetime - interval -> datetime(datetime, '-interval_value')
@@ -285,7 +290,8 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 }
             }
             
-            // Otherwise handle as JSON removal or regular subtraction
+            // Handle array element removal: array - element
+            // Only treat as array removal if left operand is actually an array
             let rexpr_trimmed = rexpr_sql.trim();
             if rexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("[") {
                 let array_str = rexpr_trimmed.trim_matches(|c| c == '\'');
@@ -295,8 +301,12 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 } else {
                     format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
                 }
-            } else {
+            } else if lexpr_is_array || lexpr_sql.trim().starts_with("'[") {
+                // Only treat as array removal if left operand is actually an array
                 format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+            } else {
+                // Regular numeric subtraction
+                format!("{} - {}", lexpr_sql, rexpr_sql)
             }
         }
         // Vector distance operators (pgvector compatibility) and geometric distance

@@ -172,7 +172,7 @@ impl Registry {
             "pg_table_is_visible", "pg_type_is_visible", "pg_function_is_visible", 
             "format_type", "current_schema", "current_schemas", "current_database", 
             "current_setting", "pg_my_temp_schema", "pg_get_expr", "pg_get_indexdef", 
-            "obj_description", "pg_get_constraintdef", "pg_encoding_to_char", 
+            "obj_description", "pg_get_constraintdef", "pg_encoding_to_char", "isfinite", 
             "array_to_string", "array_length", "pg_table_size", "pg_total_relation_size", 
             "pg_size_pretty", "stddev_pop", "stddev_samp", "var_pop", "var_samp", 
             "covar_pop", "covar_samp", "corr", "regr_slope", "regr_intercept", 

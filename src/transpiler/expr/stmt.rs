@@ -21,7 +21,15 @@ pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileCon
 
     // Left side
     if let Some(ref left) = join_expr.larg {
-        parts.push(reconstruct_node(left, ctx));
+        let left_sql = reconstruct_node(left, ctx);
+        // If left side is a join expression and this join has a USING clause,
+        // we need to wrap it in parentheses to avoid "ON" clause ambiguity
+        if left.node.as_ref().map(|n| matches!(n, NodeEnum::JoinExpr(_))).unwrap_or(false)
+            && (!join_expr.using_clause.is_empty() || join_expr.join_using_alias.is_some()) {
+            parts.push(format!("({})", left_sql));
+        } else {
+            parts.push(left_sql);
+        }
     }
 
     // Determine join type
