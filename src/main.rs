@@ -108,6 +108,7 @@ impl std::str::FromStr for OutputDest {
 #[derive(Parser, Debug)]
 #[command(name = "pgqt")]
 #[command(about = "A PostgreSQL wire protocol proxy for SQLite")]
+#[command(version)]
 struct Cli {
     /// Path to JSON configuration file
     /// If not specified, looks for pgqt.json in the executable directory
