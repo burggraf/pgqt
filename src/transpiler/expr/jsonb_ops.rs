@@ -36,9 +36,16 @@ pub(crate) fn is_node_jsonb(node: &Node) -> bool {
                 if let Some(ref val) = const_node.val {
                     if let pg_query::protobuf::a_const::Val::Sval(sval) = val {
                         let s = sval.sval.trim();
-                        // Check for JSON object or array syntax
-                        return (s.starts_with("{") && s.ends_with("}")) ||
-                               (s.starts_with("[") && s.ends_with("]"));
+                        // Check for JSON array: [1,2,3] or [{"a":1}]
+                        if s.starts_with("[") && s.ends_with("]") {
+                            return true;
+                        }
+                        // Check for JSON object: {"key":"value"} (has colon)
+                        // PostgreSQL arrays are {"a","b"} (no colon, quoted elements)
+                        if s.starts_with("{") && s.ends_with("}") {
+                            // If it contains ":" it's likely JSON, not a PostgreSQL array
+                            return s.contains(':');
+                        }
                     }
                 }
                 false

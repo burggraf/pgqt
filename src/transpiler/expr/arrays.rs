@@ -98,7 +98,15 @@ pub(crate) fn is_array_operation(lexpr_is_array: bool, rexpr_is_array: bool, lex
         return false;
     }
     
-    lexpr_is_array || rexpr_is_array || lexpr_lower.contains('[') || rexpr_lower.contains('[')
+    // Check for PostgreSQL array literals:
+    // - Square bracket arrays: [1,2,3] or ARRAY[1,2,3]
+    // - Curly brace arrays: {"a","b"} (text arrays)
+    let has_array_syntax = |s: &str| {
+        s.contains('[') || 
+        (s.starts_with("{") && s.ends_with("}") && s.contains('"'))
+    };
+    
+    lexpr_is_array || rexpr_is_array || has_array_syntax(&lexpr_lower) || has_array_syntax(&rexpr_lower)
 }
 
 /// Check if a SQL value looks like a geometric type
