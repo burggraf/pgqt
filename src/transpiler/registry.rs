@@ -429,6 +429,43 @@ impl Registry {
             }
         }));
 
+        // mod - modulo operator (PostgreSQL compatibility)
+        functions.register("mod", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                format!("({} % {})", args[0], args[1])
+            } else {
+                format!("mod({})", args.join(", "))
+            }
+        }));
+
+        // trunc - truncate number (PostgreSQL compatibility)
+        functions.register("trunc", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                // trunc(x) -> cast to integer
+                format!("CAST({} AS INTEGER)", args[0])
+            } else if args.len() == 2 {
+                // trunc(x, n) -> truncate to n decimal places
+                format!("round({} - 0.5 * power(10, -{}), {})", args[0], args[1], args[1])
+            } else {
+                format!("trunc({})", args.join(", "))
+            }
+        }));
+
+        // strpos - position of substring (PostgreSQL compatibility)
+        // Note: PostgreSQL strpos(substring, string) vs SQLite instr(string, substring)
+        functions.register("strpos", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                format!("instr({}, {})", args[1], args[0])
+            } else {
+                format!("strpos({})", args.join(", "))
+            }
+        }));
+
+        // pg_input_error_info - stub for PostgreSQL compatibility
+        functions.register("pg_input_error_info", FunctionMapping::Complex(|_args| {
+            "NULL".to_string()
+        }));
+
         // btrim - trim characters from both ends (PostgreSQL compatibility)
         functions.register("btrim", FunctionMapping::Complex(|args| {
             if args.len() == 1 {

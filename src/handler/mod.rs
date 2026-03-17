@@ -2348,7 +2348,28 @@ impl SqliteHandler {
             Ok(regex.find_iter(text_slice).count() as i64)
         })?;
 
-        // similar_to_escape - helper for SIMILAR TO operator
+        // similar_to_escape - helper for SIMILAR TO operator (1 arg variant)
+        conn.create_scalar_function("similar_to_escape", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            // Convert SQL SIMILAR TO pattern to regex pattern (no escape character)
+            let mut result = String::new();
+            let mut chars = pattern.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '%' {
+                    result.push_str(".*");
+                } else if ch == '_' {
+                    result.push('.');
+                } else if "[]()|+*?^{}$\\".contains(ch) {
+                    result.push('\\');
+                    result.push(ch);
+                } else {
+                    result.push(ch);
+                }
+            }
+            Ok(result)
+        })?;
+
+        // similar_to_escape - helper for SIMILAR TO operator (2 arg variant)
         conn.create_scalar_function("similar_to_escape", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
             let pattern: String = ctx.get(0)?;
             let escape: String = ctx.get(1)?;
