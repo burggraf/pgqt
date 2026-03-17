@@ -2,6 +2,15 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **JOIN Improvements**: Enhanced JOIN operation support
+  - JOIN result aliasing: `(t1 JOIN t2) AS x` now works by wrapping in subquery
+  - USING clause aliasing: `JOIN ... USING (col) AS alias` support
+  - NATURAL JOIN support: `NATURAL JOIN`, `NATURAL LEFT JOIN`, etc.
+  - Added warning for column renaming in table aliases (not supported in SQLite)
+
 ## [0.2.0] - 2026-03-14
 
 ### Added

@@ -798,15 +798,21 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         let (table_name, trigger_op) = match operation {
             crate::transpiler::OperationType::INSERT => {
-                let table = extract_table_and_operation(original_sql).unwrap().0;
+                let table = extract_table_and_operation(original_sql)
+                    .map(|(t, _)| t)
+                    .unwrap_or_default();
                 (table, OperationType::Insert)
             }
             crate::transpiler::OperationType::UPDATE => {
-                let table = extract_table_and_operation(original_sql).unwrap().0;
+                let table = extract_table_and_operation(original_sql)
+                    .map(|(t, _)| t)
+                    .unwrap_or_default();
                 (table, OperationType::Update)
             }
             crate::transpiler::OperationType::DELETE => {
-                let table = extract_table_and_operation(original_sql).unwrap().0;
+                let table = extract_table_and_operation(original_sql)
+                    .map(|(t, _)| t)
+                    .unwrap_or_default();
                 (table, OperationType::Delete)
             }
             _ => return self.execute_statement(conn, sqlite_sql),

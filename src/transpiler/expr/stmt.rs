@@ -16,18 +16,31 @@ use super::reconstruct_node;
 pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileContext) -> String {
     let mut parts = Vec::new();
 
+    // Check if this is a NATURAL JOIN
+    let is_natural = join_expr.is_natural;
+
     // Left side
     if let Some(ref left) = join_expr.larg {
         parts.push(reconstruct_node(left, ctx));
     }
 
-    // Join type
-    let join_type = match join_expr.jointype() {
-        pg_query::protobuf::JoinType::JoinInner => "join",
-        pg_query::protobuf::JoinType::JoinLeft => "left join",
-        pg_query::protobuf::JoinType::JoinRight => "left join", // SQLite doesn't support RIGHT JOIN
-        pg_query::protobuf::JoinType::JoinFull => "left join", // SQLite doesn't support FULL JOIN
-        _ => "join",
+    // Determine join type
+    let join_type = if is_natural {
+        match join_expr.jointype() {
+            pg_query::protobuf::JoinType::JoinInner => "natural join",
+            pg_query::protobuf::JoinType::JoinLeft => "natural left join",
+            pg_query::protobuf::JoinType::JoinRight => "natural left join",
+            pg_query::protobuf::JoinType::JoinFull => "natural left join",
+            _ => "natural join",
+        }
+    } else {
+        match join_expr.jointype() {
+            pg_query::protobuf::JoinType::JoinInner => "join",
+            pg_query::protobuf::JoinType::JoinLeft => "left join",
+            pg_query::protobuf::JoinType::JoinRight => "left join",
+            pg_query::protobuf::JoinType::JoinFull => "left join",
+            _ => "join",
+        }
     };
     parts.push(join_type.to_string());
 
@@ -36,7 +49,7 @@ pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileCon
         parts.push(reconstruct_node(right, ctx));
     }
 
-    // ON clause
+    // ON clause (not used with NATURAL or USING)
     if let Some(ref qual) = join_expr.quals {
         let qual_sql = reconstruct_node(qual, ctx);
         if !qual_sql.is_empty() {
@@ -45,7 +58,7 @@ pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileCon
         }
     }
 
-    // USING clause (if present instead of ON)
+    // USING clause
     if !join_expr.using_clause.is_empty() {
         parts.push("using".to_string());
         let cols: Vec<String> = join_expr
@@ -63,7 +76,21 @@ pub(crate) fn reconstruct_join_expr(join_expr: &JoinExpr, ctx: &mut TranspileCon
         parts.push(format!("({})", cols.join(", ")));
     }
 
-    parts.join(" ")
+    let join_sql = parts.join(" ");
+
+    // Handle JOIN aliases by wrapping in a subquery
+    // SQLite doesn't support "JOIN ... USING (...) AS alias" syntax directly
+    let using_alias_name = join_expr.join_using_alias.as_ref()
+        .map(|a| a.aliasname.to_lowercase());
+    let join_alias_name = join_expr.alias.as_ref()
+        .map(|a| a.aliasname.to_lowercase());
+    
+    if let Some(alias_name) = using_alias_name.or(join_alias_name) {
+        // For SQLite compatibility, wrap the JOIN in a subquery with the alias
+        format!("(select * from {}) as {}", join_sql, alias_name)
+    } else {
+        join_sql
+    }
 }
 
 /// Reconstruct a SubLink (subquery)
@@ -179,6 +206,16 @@ pub(crate) fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileCon
     ctx.referenced_tables.push(table_name.clone());
     let schema_name = range_var.schemaname.to_lowercase();
     let alias = range_var.alias.as_ref().map(|a| a.aliasname.to_lowercase());
+
+    // Check for column renaming (e.g., J1_TBL t1 (a, b, c))
+    // Note: SQLite doesn't support this syntax, so we emit a warning
+    let has_col_renames = range_var.alias.as_ref()
+        .map(|a| !a.colnames.is_empty())
+        .unwrap_or(false);
+    
+    if has_col_renames {
+        ctx.add_error("Column renaming in table aliases (e.g., 'table t (col1, col2)') is not supported in SQLite".to_string());
+    }
 
     let full_table = if schema_name.is_empty() || schema_name == "public" || schema_name == "pg_catalog" {
         table_name.clone()
