@@ -107,6 +107,8 @@ postgresql://postgres@127.0.0.1:5432/test.db
 | ARRAY types (INT[], TEXT[], etc.)                             | TEXT                              | ✅                      |
 | ENUM, DOMAIN                                                  | TEXT                              | ✅                      |
 
+**For complete type documentation, see [docs/DATA_TYPES.md](./docs/DATA_TYPES.md).**
+
 ### SQL Transpilation
 
 The proxy automatically rewrites PostgreSQL-specific syntax:
