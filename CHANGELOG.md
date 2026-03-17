@@ -2,6 +2,15 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [0.6.3] - 2026-03-17
+
+### Documentation
+- **README.md**: Updated documentation to reflect current implementation status
+  - Removed outdated "No stored procedures" limitation - PL/pgSQL is fully implemented
+  - Removed outdated "Limited window functions" limitation - Full window function support exists
+  - Marked PL/pgSQL as complete in Phase 3 roadmap
+  - Changed Phase 3 status from "In Progress" to "Complete" (all 12 items done)
+
 ## [0.6.2] - 2026-03-17
 
 ### Fixed

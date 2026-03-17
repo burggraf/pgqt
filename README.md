@@ -822,8 +822,6 @@ src/
 ### Current
 
 - **Single-writer model**: SQLite's concurrency model (no MVCC like PostgreSQL)
-- **No stored procedures**: PL/pgSQL not yet implemented (Phase 3 roadmap)
-- **Limited window functions**: Basic support only
 
 ### PostgreSQL Features Not Supported
 
@@ -1279,13 +1277,13 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 
 ## Roadmap
 
-### Phase 3 (In Progress)
+### Phase 3 (Complete)
 
 - [x] **Users & Permissions (RBAC)** - Role-based access control with GRANT/REVOKE
 - [x] **Schemas (Namespaces)** - Full schema support using SQLite ATTACH DATABASE
 - [x] **Window Functions** - Full support for all PostgreSQL window functions with frame specifications
 - [x] `DISTINCT ON` polyfill using window functions
-- [ ] PL/pgSQL procedural blocks via Lua runtime
+- [x] **PL/pgSQL procedural blocks via Lua runtime**
 - [x] Row-Level Security (RLS) emulation
 - [x] **Full-Text Search (FTS)** - PostgreSQL-compatible FTS using FTS5
 - [x] **Trigger Support** - PostgreSQL-compatible BEFORE/AFTER triggers using PL/pgSQL
