@@ -87,6 +87,7 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
           mkdir -p dist
           cp target/${{ matrix.target }}/release/pgqt${{ matrix.ext }} dist/pgqt${{ matrix.ext }}
+        shell: bash
 
       # macOS Code Signing and Notarization
       - name: Import Code Signing Certificate
