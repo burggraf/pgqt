@@ -1922,6 +1922,321 @@ impl SqliteHandler {
             Ok(error_msg.unwrap_or_default())
         })?;
 
+        // encode/decode functions for bytea support
+        conn.create_scalar_function("hex_decode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let hex: String = ctx.get(0)?;
+            let bytes = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i+2.min(hex.len()-i)], 16))
+                .collect::<Result<Vec<u8>, _>>()
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(bytes)
+        })?;
+
+        conn.create_scalar_function("hex_encode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let bytes: Vec<u8> = ctx.get(0)?;
+            Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+        })?;
+
+        conn.create_scalar_function("escape_decode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let input: String = ctx.get(0)?;
+            let mut result = Vec::new();
+            let mut chars = input.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' && chars.peek() == Some(&'x') {
+                    chars.next();
+                    let mut hex = String::new();
+                    while let Some(&h) = chars.peek() {
+                        if h.is_ascii_hexdigit() {
+                            hex.push(h);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if !hex.is_empty() {
+                        if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                            result.push(byte);
+                        }
+                    }
+                } else if ch == '\\' {
+                    if let Some(&next) = chars.peek() {
+                        if next.is_ascii_digit() {
+                            let mut octal = String::new();
+                            octal.push(next);
+                            chars.next();
+                            for _ in 0..2 {
+                                if let Some(&d) = chars.peek() {
+                                    if d.is_ascii_digit() && d <= '7' {
+                                        octal.push(d);
+                                        chars.next();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Ok(byte) = u8::from_str_radix(&octal, 8) {
+                                result.push(byte);
+                            }
+                        } else {
+                            result.push(next as u8);
+                            chars.next();
+                        }
+                    } else {
+                        result.push(ch as u8);
+                    }
+                } else {
+                    result.push(ch as u8);
+                }
+            }
+            Ok(result)
+        })?;
+
+        conn.create_scalar_function("escape_encode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let bytes: Vec<u8> = ctx.get(0)?;
+            let mut result = String::new();
+            for &byte in &bytes {
+                match byte {
+                    0 => result.push_str("\\000"),
+                    39 => result.push_str("\\'"),
+                    92 => result.push_str("\\\\"),
+                    8 => result.push_str("\\b"),
+                    12 => result.push_str("\\f"),
+                    10 => result.push_str("\\n"),
+                    13 => result.push_str("\\r"),
+                    9 => result.push_str("\\t"),
+                    _ if byte < 32 || byte > 126 => result.push_str(&format!("\\x{:02x}", byte)),
+                    _ => result.push(byte as char),
+                }
+            }
+            Ok(result)
+        })?;
+
+        conn.create_scalar_function("base64_decode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            // Base64 decode - simplified placeholder
+            // TODO: Add base64 crate dependency for full implementation
+            Ok(Vec::<u8>::new())
+        })?;
+
+        conn.create_scalar_function("base64_encode", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |_ctx| {
+            // Base64 encode - simplified placeholder  
+            // TODO: Add base64 crate dependency for full implementation
+            Ok(String::new())
+        })?;
+
+        // regexp_count - count occurrences of pattern in string
+        conn.create_scalar_function("regexp_count", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(regex.find_iter(&text).count() as i64)
+        })?;
+
+        conn.create_scalar_function("regexp_count", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            Ok(regex.find_iter(text_slice).count() as i64)
+        })?;
+
+        conn.create_scalar_function("regexp_count", 4, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let _flags: String = ctx.get(3)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            Ok(regex.find_iter(text_slice).count() as i64)
+        })?;
+
+        // similar_to_escape - helper for SIMILAR TO operator
+        conn.create_scalar_function("similar_to_escape", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let escape: String = ctx.get(1)?;
+            if escape.is_empty() {
+                return Ok(pattern);
+            }
+            let esc = escape.chars().next().unwrap();
+            // Convert SQL SIMILAR TO pattern to regex pattern
+            let mut result = String::new();
+            let mut chars = pattern.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == esc {
+                    if let Some(&next) = chars.peek() {
+                        result.push(next);
+                        chars.next();
+                    }
+                } else if ch == '%' {
+                    result.push_str(".*");
+                } else if ch == '_' {
+                    result.push('.');
+                } else if "[]()|+*?^{}$\\".contains(ch) {
+                    result.push('\\');
+                    result.push(ch);
+                } else {
+                    result.push(ch);
+                }
+            }
+            Ok(result)
+        })?;
+
+        // similar_to_escape with 3 args (used internally by PostgreSQL)
+        conn.create_scalar_function("similar_to_escape", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let pattern: String = ctx.get(0)?;
+            let escape: String = ctx.get(1)?;
+            let _unused: Option<String> = ctx.get(2).ok();
+            if escape.is_empty() {
+                return Ok(pattern);
+            }
+            let esc = escape.chars().next().unwrap();
+            let mut result = String::new();
+            let mut chars = pattern.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == esc {
+                    if let Some(&next) = chars.peek() {
+                        result.push(next);
+                        chars.next();
+                    }
+                } else if ch == '%' {
+                    result.push_str(".*");
+                } else if ch == '_' {
+                    result.push('.');
+                } else if "[]()|+*?^{}$\\".contains(ch) {
+                    result.push('\\');
+                    result.push(ch);
+                } else {
+                    result.push(ch);
+                }
+            }
+            Ok(result)
+        })?;
+
+        // regexp_like - check if pattern matches
+        conn.create_scalar_function("regexp_like", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
+        })?;
+
+        conn.create_scalar_function("regexp_like", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let flags: String = ctx.get(2)?;
+            let mut regex_pattern = pattern;
+            if flags.contains('i') {
+                regex_pattern = format!("(?i){}", regex_pattern);
+            }
+            if flags.contains('n') {
+                regex_pattern = format!("(?s){}", regex_pattern);
+            }
+            let regex = regex::Regex::new(&regex_pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(if regex.is_match(&text) { 1i64 } else { 0i64 })
+        })?;
+
+        // regexp_instr - find position of pattern match
+        conn.create_scalar_function("regexp_instr", 2, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            Ok(regex.find(&text).map(|m| m.start() as i64 + 1).unwrap_or(0))
+        })?;
+
+        conn.create_scalar_function("regexp_instr", 3, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            Ok(regex.find(text_slice).map(|m| (start_idx + m.start()) as i64 + 1).unwrap_or(0))
+        })?;
+
+        conn.create_scalar_function("regexp_instr", 4, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let occurrence: i64 = ctx.get(3)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            let mut matches = regex.find_iter(text_slice);
+            for _ in 1..occurrence {
+                matches.next();
+            }
+            Ok(matches.next().map(|m| (start_idx + m.start()) as i64 + 1).unwrap_or(0))
+        })?;
+
+        conn.create_scalar_function("regexp_instr", 5, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let occurrence: i64 = ctx.get(3)?;
+            let return_opt: i64 = ctx.get(4)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            let mut matches = regex.find_iter(text_slice);
+            for _ in 1..occurrence {
+                matches.next();
+            }
+            let m = matches.next();
+            if let Some(mat) = m {
+                if return_opt == 0 {
+                    Ok((start_idx + mat.start()) as i64 + 1)
+                } else {
+                    Ok((start_idx + mat.end()) as i64 + 1)
+                }
+            } else {
+                Ok(0)
+            }
+        })?;
+
+        // regexp_instr with 6 args (start, occurrence, return_option, flags)
+        conn.create_scalar_function("regexp_instr", 6, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+            let text: String = ctx.get(0)?;
+            let pattern: String = ctx.get(1)?;
+            let start: i64 = ctx.get(2)?;
+            let occurrence: i64 = ctx.get(3)?;
+            let return_opt: i64 = ctx.get(4)?;
+            let flags: String = ctx.get(5)?;
+            let mut regex_pattern = pattern;
+            if flags.contains('i') {
+                regex_pattern = format!("(?i){}", regex_pattern);
+            }
+            let regex = regex::Regex::new(&regex_pattern)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))))?;
+            let start_idx = (start - 1).max(0) as usize;
+            let text_slice = if start_idx < text.len() { &text[start_idx..] } else { "" };
+            let mut matches = regex.find_iter(text_slice);
+            for _ in 1..occurrence {
+                matches.next();
+            }
+            let m = matches.next();
+            if let Some(mat) = m {
+                if return_opt == 0 {
+                    Ok((start_idx + mat.start()) as i64 + 1)
+                } else {
+                    Ok((start_idx + mat.end()) as i64 + 1)
+                }
+            } else {
+                Ok(0)
+            }
+        })?;
+
         Ok(())
     }
 

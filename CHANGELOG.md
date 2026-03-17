@@ -5,6 +5,22 @@ All notable changes to PGQT will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **String Operations Enhancement**: Improved PostgreSQL string function compatibility
+  - `btrim(string [, characters])` - Trim characters from both ends
+  - `position(substring IN string)` - Find position of substring
+  - `overlay(string PLACING replacement FROM start [FOR length])` - String overlay
+  - `decode(string, 'hex'|'escape'|'base64')` - Decode encoded strings to bytea
+  - `encode(blob, 'hex'|'escape'|'base64')` - Encode bytea to various formats
+  - `trim_scale(numeric)` - Trim trailing zeros from numeric values
+  - `string_to_array(string, delimiter [, null_string])` - Split string to array
+  - `regexp_count(string, pattern [, start [, flags]])` - Count pattern occurrences
+  - `regexp_like(string, pattern [, flags])` - Check if pattern matches
+  - `regexp_instr(string, pattern [, start [, occurrence [, return_option [, flags]]]])` - Find pattern position
+  - `similar_to_escape(pattern, escape)` - SIMILAR TO pattern conversion helper
+  - Enhanced `regexp_replace` with support for 3-6 argument forms
+  - PostgreSQL compatibility suite string operations pass rate: 66.0% → 73.1%
+
+### Added
 - **JOIN Improvements**: Enhanced JOIN operation support
   - JOIN result aliasing: `(t1 JOIN t2) AS x` now works by wrapping in subquery
   - USING clause aliasing: `JOIN ... USING (col) AS alias` support

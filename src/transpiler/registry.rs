@@ -428,6 +428,99 @@ impl Registry {
             }
         }));
 
+        // btrim - trim characters from both ends (PostgreSQL compatibility)
+        functions.register("btrim", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                format!("trim({})", args[0])
+            } else if args.len() == 2 {
+                format!("trim({}, {})", args[0], args[1])
+            } else {
+                format!("btrim({})", args.join(", "))
+            }
+        }));
+
+        // position - find position of substring in string
+        functions.register("position", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                format!("instr({}, {})", args[1], args[0])
+            } else {
+                format!("position({})", args.join(", "))
+            }
+        }));
+
+        // overlay - overlay replacement string at position
+        functions.register("overlay", FunctionMapping::Complex(|args| {
+            if args.len() >= 3 {
+                let string = &args[0];
+                let replacement = &args[1];
+                let start = &args[2];
+                if args.len() >= 4 {
+                    let length = &args[3];
+                    format!("substr({}, 1, {} - 1) || {} || substr({}, {} + {})", 
+                        string, start, replacement, string, start, length)
+                } else {
+                    format!("substr({}, 1, {} - 1) || {} || substr({}, {} + length({}))", 
+                        string, start, replacement, string, start, replacement)
+                }
+            } else {
+                format!("overlay({})", args.join(", "))
+            }
+        }));
+
+        // decode - decode bytea from various encodings
+        functions.register("decode", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                let data = &args[0];
+                let encoding = args[1].trim_matches('\'').to_lowercase();
+                match encoding.as_str() {
+                    "hex" => format!("hex_decode({})", data),
+                    "escape" => format!("escape_decode({})", data),
+                    "base64" => format!("base64_decode({})", data),
+                    _ => format!("decode({}, {})", data, args[1])
+                }
+            } else {
+                format!("decode({})", args.join(", "))
+            }
+        }));
+
+        // encode - encode blob to various encodings
+        functions.register("encode", FunctionMapping::Complex(|args| {
+            if args.len() == 2 {
+                let data = &args[0];
+                let encoding = args[1].trim_matches('\'').to_lowercase();
+                match encoding.as_str() {
+                    "hex" => format!("hex({})", data),
+                    "escape" => format!("escape_encode({})", data),
+                    "base64" => format!("base64_encode({})", data),
+                    _ => format!("encode({}, {})", data, args[1])
+                }
+            } else {
+                format!("encode({})", args.join(", "))
+            }
+        }));
+
+        // trim_scale - trim trailing zeros from numeric
+        functions.register("trim_scale", FunctionMapping::Complex(|args| {
+            if args.len() == 1 {
+                format!("CAST(regexp_replace(CAST({} AS TEXT), '\\.0*$|\\.([0-9]*[1-9])0*$', '\\.\\1') AS REAL)", args[0])
+            } else {
+                format!("trim_scale({})", args.join(", "))
+            }
+        }));
+
+        // string_to_array - handled by SQLite scalar function in handler/mod.rs
+
+        // regexp_replace - replace substring matching pattern
+        functions.register("regexp_replace", FunctionMapping::Complex(|args| {
+            match args.len() {
+                3 => format!("regexp_replace({}, {}, {})", args[0], args[1], args[2]),
+                4 => format!("regexp_replace({}, {}, {}, {})", args[0], args[1], args[2], args[3]),
+                5 => format!("regexp_replace({}, {}, {}, {})", args[0], args[1], args[2], args[4]),
+                6 => format!("regexp_replace({}, {}, {}, {})", args[0], args[1], args[2], args[5]),
+                _ => format!("regexp_replace({})", args.join(", "))
+            }
+        }));
+
         Self {
             types,
             functions,
