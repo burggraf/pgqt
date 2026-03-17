@@ -1292,11 +1292,15 @@ For complete documentation, see [docs/VECTOR.md](./docs/VECTOR.md).
 - [x] **Improved LATERAL Joins** - Table-valued functions in `LATERAL` joins
 - [x] **COMMENT ON Storage** - Metadata persistence for comments
 
-### Phase 4 (In Progress)
+### Phase 4 (Complete)
 
 - [x] **Vector Search** - pgvector-compatible vector search for embeddings
 - [x] **Geometric Types** - 2D geometric data types (point, box, circle, line, lseg, path, polygon) with spatial operators and distance functions.
-- [ ] Connection pooling and load balancing
+- [x] **Connection Pooling** - SQLite connection pooling with automatic checkout/return, max connections, and transaction rollback on return
+
+### Future
+
+- [ ] Load balancing (for multi-database distributed setups)
 
 ## License
 

@@ -9,7 +9,8 @@ All notable changes to PGQT will be documented in this file.
   - Removed outdated "No stored procedures" limitation - PL/pgSQL is fully implemented
   - Removed outdated "Limited window functions" limitation - Full window function support exists
   - Marked PL/pgSQL as complete in Phase 3 roadmap
-  - Changed Phase 3 status from "In Progress" to "Complete" (all 12 items done)
+  - Marked connection pooling as complete in Phase 4 roadmap
+  - Changed Phase 3 and Phase 4 status from "In Progress" to "Complete"
 
 ## [0.6.2] - 2026-03-17
 
