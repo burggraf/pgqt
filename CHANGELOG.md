@@ -2,6 +2,84 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [0.6.1] - 2026-03-17
+
+### PostgreSQL Compatibility Improvements
+
+**Overall compatibility improved from 40.89% to 66.69% (+25.8%)**
+
+#### JOIN Operations (Phase 1.1) - 33.0% → 70.8%
+- **JOIN result aliasing**: `(t1 JOIN t2) AS x` now works by wrapping in subquery
+- **USING clause support**: Proper handling of `JOIN ... USING (id)` with column deduplication
+- **USING clause aliasing**: `JOIN ... USING (col) AS alias` support
+- **NATURAL JOIN support**: `NATURAL JOIN`, `NATURAL LEFT JOIN`, `NATURAL RIGHT JOIN`
+- **LATERAL polyfill**: Support for LATERAL with table-valued functions (`json_each`, `generate_series`, etc.)
+- **NULLS FIRST/LAST**: Emulation in ORDER BY using `(col IS NULL)` expressions
+- **Fixed panic**: `extract_table_and_operation` no longer panics on edge cases
+- **count(table.*)**: Fixed aggregate function with qualified star
+
+#### String Operations (Phase 1.2) - 27.1% → 73.1%
+- `btrim(string [, characters])` - Trim from both ends
+- `position(substring IN string)` - Find substring position
+- `overlay(string PLACING replacement FROM start [FOR length])` - String overlay
+- `trim_scale(numeric)` - Trim trailing zeros
+- `string_to_array(string, delimiter [, null_string])` - Split string to array
+- **Regular expression functions**:
+  - `regexp_count(string, pattern [, start [, flags]])`
+  - `regexp_like(string, pattern [, flags])`
+  - `regexp_instr(string, pattern [, start [, occurrence [, return_option [, flags]]]])`
+  - `regexp_replace` with 3-6 argument forms
+  - `similar_to_escape(pattern, escape)`
+- **Bytea encode/decode**: `encode()` and `decode()` for hex, escape, base64
+
+#### DML Improvements (Phase 1.3) - 47% → 61.6% avg
+- **RETURNING clause**: Full support for INSERT, UPDATE, DELETE
+  - `INSERT INTO ... RETURNING id, name`
+  - `INSERT INTO ... RETURNING *`
+  - `UPDATE ... RETURNING ...`
+  - `DELETE ... RETURNING ...`
+- **ON CONFLICT (Upsert)**:
+  - `INSERT ... ON CONFLICT DO NOTHING`
+  - `INSERT ... ON CONFLICT (columns) DO UPDATE SET ...`
+  - Support for `EXCLUDED` pseudo-table
+- **INSERT DEFAULT VALUES**: `INSERT INTO table DEFAULT VALUES`
+- **Multi-column assignment**: `(col1, col2) = (SELECT val1, val2)`
+- **Row constructor support**: `ROW(v.*)` expansion in UPDATE
+
+#### Window Functions (Phase 3.1) - 44.3% → 72.0%
+- `nth_value(expression, nth)` with IGNORE NULLS support
+- `first_value(expression)` and `last_value(expression)`
+- `cume_dist()` - Cumulative distribution
+- Hypothetical set functions: `rank()`, `dense_rank()`, `percent_rank()`, `cume_dist()`
+- Window frame improvements: `ROWS BETWEEN`, `RANGE BETWEEN`
+
+#### Array Operations (Phase 3.3)
+- `array_sort(array [, descending [, nulls_first]])` - Sort arrays
+- `array_sample(array, n)` - Random sample of n elements
+- `array_reverse(array)` - Reverse array
+- `array_shuffle(array)` - Shuffle array
+- `array_to_json(array)` - Convert to JSON
+- `array_lower(array, dim)` and `array_upper(array, dim)` - Bounds
+
+#### Timestamptz (Phase 2.3) - 14.9% → 62.6%
+- **AT TIME ZONE operator**: `timestamp AT TIME ZONE 'UTC'`
+- **timezone() function**: `timezone('America/New_York', timestamp)`
+- Timezone-aware scalar functions in SQLite
+
+#### JSONB Framework (Phase 2.1)
+- New JSONB operator detection framework
+- Foundation for `@>`, `<@`, `?`, `?|`, `?&` operators
+- Operator precedence fixes (array vs JSONB dispatch)
+
+#### Quick Wins (Phase 4.1)
+- VARCHAR type improvements
+- `isfinite()` function for interval/range types
+- Various syntax error fixes
+
+### Fixed
+- Prioritized array operations over JSONB in operator dispatch
+- Various build warnings and unused imports
+
 ## [Unreleased]
 
 ### Added
