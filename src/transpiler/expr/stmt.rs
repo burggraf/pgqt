@@ -6,7 +6,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     JoinExpr, SubLink, NullTest, CaseExpr, CoalesceExpr, ResTarget, 
-    RangeVar, RangeSubselect
+    RangeVar, RangeSubselect, RangeFunction
 };
 use crate::transpiler::TranspileContext;
 
@@ -243,8 +243,20 @@ pub(crate) fn reconstruct_range_var(range_var: &RangeVar, ctx: &mut TranspileCon
 }
 
 /// Reconstruct a RangeSubselect node (subquery in FROM clause)
+/// 
+/// For LATERAL subqueries:
+/// - If the subquery is a simple function call (like jsonb_each, generate_series),
+///   we strip LATERAL and process normally (SQLite supports these as table-valued functions)
+/// - If it's a complex correlated subquery, we report an error
 pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx: &mut TranspileContext) -> String {
-    if range_subselect.lateral {
+    // Check if this is a simple function call that can work without LATERAL
+    let is_simple_function_call = if range_subselect.lateral {
+        is_lateral_function_call(range_subselect)
+    } else {
+        false
+    };
+
+    if range_subselect.lateral && !is_simple_function_call {
         ctx.add_error("LATERAL subqueries are not yet supported in SQLite; try a window function or CTE.".to_string());
     }
 
@@ -291,4 +303,72 @@ pub(crate) fn reconstruct_range_subselect(range_subselect: &RangeSubselect, ctx:
     } else {
         format!("({})", subquery)
     }
+}
+
+/// Check if a LATERAL subquery is a simple function call that can work without LATERAL
+/// 
+/// SQLite supports table-valued functions like json_each(), json_tree(), generate_series()
+/// For these, the LATERAL keyword can be safely stripped.
+fn is_lateral_function_call(range_subselect: &RangeSubselect) -> bool {
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    // Check if the subquery is a simple SELECT with a function in FROM clause
+    if let Some(ref subquery_node) = range_subselect.subquery {
+        if let Some(ref inner) = subquery_node.node {
+            if let NodeEnum::SelectStmt(select_stmt) = inner {
+                // Check if this is a simple "SELECT * FROM func()" pattern
+                // with no WHERE, GROUP BY, etc.
+                if select_stmt.where_clause.is_some() 
+                    || !select_stmt.group_clause.is_empty()
+                    || select_stmt.having_clause.is_some()
+                    || !select_stmt.sort_clause.is_empty() {
+                    return false;
+                }
+                
+                // Check if FROM clause has a single function call
+                if select_stmt.from_clause.len() == 1 {
+                    if let Some(ref from_node) = select_stmt.from_clause[0].node {
+                        // Check for RangeFunction (table-valued function)
+                        if let NodeEnum::RangeFunction(range_func) = from_node {
+                            // Check if it's a supported table-valued function
+                            // RangeFunction has a `functions` field which is a list of function calls
+                            if !range_func.functions.is_empty() {
+                                // The first function in the list is the main one
+                                if let Some(func_node) = range_func.functions.first() {
+                                    if let Some(ref func_inner) = func_node.node {
+                                        // The function is wrapped in a List
+                                        if let NodeEnum::List(list) = func_inner {
+                                            if let Some(first_item) = list.items.first() {
+                                                if let Some(ref item_inner) = first_item.node {
+                                                    if let NodeEnum::FuncCall(func_call) = item_inner {
+                                                        if let Some(ref func_name_node) = func_call.funcname.first() {
+                                                            if let Some(ref name_inner) = func_name_node.node {
+                                                                if let NodeEnum::String(s) = name_inner {
+                                                                    let func_name = s.sval.to_lowercase();
+                                                                    // List of functions that work as table-valued in SQLite
+                                                                    return matches!(
+                                                                        func_name.as_str(),
+                                                                        "json_each" | "json_tree" | 
+                                                                        "jsonb_each" | "jsonb_tree" |
+                                                                        "generate_series" |
+                                                                        "json_array_elements" | "jsonb_array_elements" |
+                                                                        "json_object_keys" | "jsonb_object_keys"
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }

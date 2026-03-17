@@ -882,7 +882,19 @@ fn validate_update_values(
 }
 
 /// Reconstruct a SortBy node (ORDER BY)
+/// 
+/// SQLite doesn't support NULLS FIRST/LAST, so we emulate it:
+/// - NULLS FIRST: ORDER BY (expr IS NULL) DESC, expr
+/// - NULLS LAST: ORDER BY (expr IS NULL) ASC, expr
+/// 
+/// PostgreSQL defaults:
+/// - ASC default: NULLS LAST (no emulation needed)
+/// - DESC default: NULLS FIRST (no emulation needed)
+/// 
+/// We only emulate when the explicit NULLS clause differs from the default.
 pub(crate) fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::SortByNulls;
+    
     if let Some(ref inner) = node.node {
         if let NodeEnum::SortBy(sort_by) = inner {
             let expr_sql = sort_by
@@ -896,6 +908,34 @@ pub(crate) fn reconstruct_sort_by(node: &Node, ctx: &mut TranspileContext) -> St
                 pg_query::protobuf::SortByDir::SortbyDesc => " DESC",
                 _ => "",
             };
+
+            let nulls_order = SortByNulls::try_from(sort_by.sortby_nulls)
+                .unwrap_or(SortByNulls::SortbyNullsDefault);
+
+            // Check if we need to emulate NULLS FIRST/LAST
+            // PostgreSQL defaults: ASC -> NULLS LAST, DESC -> NULLS FIRST
+            // SQLite defaults: NULLS LAST for both ASC and DESC
+            // So we need emulation for:
+            // - ASC NULLS FIRST (SQLite would do NULLS LAST)
+            // - DESC NULLS LAST (SQLite would do NULLS FIRST)
+            let needs_nulls_emulation = match (direction, nulls_order) {
+                (" ASC", SortByNulls::SortbyNullsFirst) => true,   // ASC NULLS FIRST -> emulate
+                (" DESC", SortByNulls::SortbyNullsLast) => true,   // DESC NULLS LAST -> emulate
+                _ => false,
+            };
+
+            if needs_nulls_emulation {
+                // Determine the nulls ordering direction
+                // NULLS FIRST: (expr IS NULL) DESC - nulls come first
+                // NULLS LAST: (expr IS NULL) ASC - nulls come last
+                let nulls_dir = match nulls_order {
+                    SortByNulls::SortbyNullsFirst => " DESC",
+                    SortByNulls::SortbyNullsLast => " ASC",
+                    _ => "",
+                };
+                // Format: (expr IS NULL)<nulls_dir>, expr<direction>
+                return format!("({} IS NULL){}, {}{}", expr_sql, nulls_dir, expr_sql, direction.to_lowercase());
+            }
 
             return format!("{}{}", expr_sql, direction.to_lowercase());
         }

@@ -72,6 +72,53 @@ fn test_transpile_order_by() {
 }
 
 #[test]
+fn test_transpile_order_by_nulls_first() {
+    // ASC NULLS FIRST - needs emulation since SQLite default is NULLS LAST for ASC
+    let input = "SELECT * FROM users ORDER BY name ASC NULLS FIRST";
+    let result = transpile(input);
+    // Should be: (name IS NULL) DESC, name ASC
+    assert!(result.contains("order by"));
+    // Case-insensitive check for the nulls emulation
+    let lower_result = result.to_lowercase();
+    assert!(lower_result.contains("(name is null) desc"));
+    assert!(lower_result.contains("name asc"));
+}
+
+#[test]
+fn test_transpile_order_by_nulls_last() {
+    // DESC NULLS LAST - needs emulation since SQLite default is NULLS FIRST for DESC
+    let input = "SELECT * FROM users ORDER BY name DESC NULLS LAST";
+    let result = transpile(input);
+    // Should be: (name IS NULL) ASC, name DESC
+    assert!(result.contains("order by"));
+    let lower_result = result.to_lowercase();
+    assert!(lower_result.contains("(name is null) asc"));
+    assert!(lower_result.contains("name desc"));
+}
+
+#[test]
+fn test_transpile_order_by_nulls_default() {
+    // ASC NULLS LAST - PostgreSQL default, no emulation needed
+    let input = "SELECT * FROM users ORDER BY name ASC NULLS LAST";
+    let result = transpile(input);
+    // Should be just: name ASC
+    assert!(result.contains("order by"));
+    assert!(result.contains("name asc"));
+    assert!(!result.contains("is null"));
+}
+
+#[test]
+fn test_transpile_order_by_desc_nulls_first() {
+    // DESC NULLS FIRST - PostgreSQL default, no emulation needed
+    let input = "SELECT * FROM users ORDER BY name DESC NULLS FIRST";
+    let result = transpile(input);
+    // Should be just: name DESC
+    assert!(result.contains("order by"));
+    assert!(result.contains("name desc"));
+    assert!(!result.contains("is null"));
+}
+
+#[test]
 fn test_transpile_distinct() {
     let input = "SELECT DISTINCT status FROM orders";
     let result = transpile(input);
@@ -1087,4 +1134,37 @@ fn test_pg_input_error_info() {
     let sql = "SELECT pg_input_error_info('abcde', 'varchar(4)')";
     let result = transpile(sql);
     assert!(!result.is_empty());
+}
+
+#[test]
+fn test_update_from_basic() {
+    let input = "UPDATE update_test SET a=v.i FROM (VALUES(100, 20)) AS v(i, j) WHERE update_test.b = v.j";
+    let result = transpile(input);
+    assert!(result.contains("update update_test"));
+    assert!(result.contains("set a"));
+    assert!(result.contains("from"));
+}
+
+#[test]
+fn test_update_set_star_expansion() {
+    // Test v.* expansion in SET clause
+    let input = "UPDATE update_test SET a = v.* FROM (VALUES(100, 20)) AS v(i, j)";
+    let result = transpile(input);
+    assert!(result.contains("update update_test"));
+}
+
+#[test]
+fn test_update_set_row_constructor_star() {
+    // Test SET (a,b) = ROW(v.*) pattern
+    let input = "UPDATE update_test SET (a,b) = ROW(v.*) FROM (VALUES(21, 100)) AS v(i, j)";
+    let result = transpile(input);
+    assert!(result.contains("update update_test"));
+}
+
+#[test]
+fn test_update_set_subquery() {
+    // Test SET (a, b) = (SELECT ...) pattern
+    let input = "UPDATE update_test t SET (a, b) = (SELECT b, a FROM update_test s WHERE s.a = t.a)";
+    let result = transpile(input);
+    assert!(result.contains("update update_test"));
 }
