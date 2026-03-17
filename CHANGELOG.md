@@ -5,6 +5,21 @@ All notable changes to PGQT will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **DML Improvements (Phase 1.3)**: Enhanced INSERT/UPDATE/DELETE statement support
+  - **RETURNING clause support**: Added for INSERT, UPDATE, and DELETE statements
+    - `INSERT INTO ... RETURNING id` - Return specific columns
+    - `INSERT INTO ... RETURNING *` - Return all columns
+    - `UPDATE ... RETURNING ...` - Return updated rows
+    - `DELETE ... RETURNING ...` - Return deleted rows
+  - **ON CONFLICT (Upsert) support**: Full PostgreSQL-compatible upsert functionality
+    - `INSERT ... ON CONFLICT DO NOTHING` - Skip on conflict
+    - `INSERT ... ON CONFLICT (columns) DO NOTHING` - Skip on specific conflict
+    - `INSERT ... ON CONFLICT (columns) DO UPDATE SET ...` - Update on conflict
+    - Support for `EXCLUDED` pseudo-table in DO UPDATE clauses
+  - **INSERT with multiple VALUES rows**: Enhanced multi-row insertion support
+  - **UPDATE with FROM clause**: Support for UPDATE with JOINs via FROM clause
+
+### Added
 - **String Operations Enhancement**: Improved PostgreSQL string function compatibility
   - `btrim(string [, characters])` - Trim characters from both ends
   - `position(substring IN string)` - Find position of substring

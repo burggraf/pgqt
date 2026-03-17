@@ -1003,10 +1003,123 @@ pub(crate) fn reconstruct_insert_stmt(stmt: &InsertStmt, ctx: &mut TranspileCont
         let select_sql = reconstruct_node(select_stmt, ctx);
         parts.push(select_sql);
     }
+
+    // Handle ON CONFLICT clause (upsert)
+    if let Some(ref on_conflict) = stmt.on_conflict_clause {
+        let conflict_sql = reconstruct_on_conflict_clause(on_conflict, ctx);
+        parts.push(conflict_sql);
+    }
+
+    // Handle RETURNING clause
+    if !stmt.returning_list.is_empty() {
+        let returning_cols: Vec<String> = stmt.returning_list
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(format!("returning {}", returning_cols.join(", ")));
+    }
     
     ctx.current_table = None;
     ctx.values_column_aliases.clear();
     ctx.in_insert_values = false;
+
+    parts.join(" ")
+}
+
+/// Reconstruct an ON CONFLICT clause
+fn reconstruct_on_conflict_clause(on_conflict: &pg_query::protobuf::OnConflictClause, ctx: &mut TranspileContext) -> String {
+    use pg_query::protobuf::OnConflictAction;
+    
+    let mut parts = Vec::new();
+    parts.push("on conflict".to_string());
+
+    // Handle conflict target (specific columns or constraint)
+    // The conflict target comes from the infer clause (index_elems)
+    if let Some(ref infer) = on_conflict.infer {
+        if !infer.index_elems.is_empty() {
+            // index_elems contains the columns for conflict detection
+            let targets: Vec<String> = infer.index_elems
+                .iter()
+                .filter_map(|n| {
+                    if let Some(ref inner) = n.node {
+                        if let NodeEnum::IndexElem(elem) = inner {
+                            // IndexElem contains the column name directly in the `name` field
+                            if !elem.name.is_empty() {
+                                return Some(elem.name.to_lowercase());
+                            }
+                            // Or it may have an expression
+                            if let Some(ref expr) = elem.expr {
+                                return Some(reconstruct_node(expr, ctx));
+                            }
+                        } else if let NodeEnum::String(s) = inner {
+                            return Some(s.sval.to_lowercase());
+                        } else if let NodeEnum::ColumnRef(col_ref) = inner {
+                            // Column reference - get the column name
+                            if let Some(last_field) = col_ref.fields.last() {
+                                if let Some(ref field_inner) = last_field.node {
+                                    if let NodeEnum::String(s) = field_inner {
+                                        return Some(s.sval.to_lowercase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None
+                })
+                .collect();
+            
+            if !targets.is_empty() {
+                parts.push(format!("({})", targets.join(", ")));
+            }
+        } else if !infer.conname.is_empty() {
+            // Constraint name specified
+            parts.push(format!("ON CONSTRAINT {}", infer.conname.to_lowercase()));
+        }
+    }
+
+    // Handle the conflict action
+    let action = OnConflictAction::try_from(on_conflict.action).unwrap_or(OnConflictAction::Undefined);
+    match action {
+        OnConflictAction::OnconflictNothing => {
+            parts.push("do nothing".to_string());
+        }
+        OnConflictAction::OnconflictUpdate => {
+            parts.push("do update set".to_string());
+            
+            // Handle the SET clause for DO UPDATE
+            if !on_conflict.target_list.is_empty() {
+                // target_list contains the SET assignments for DO UPDATE
+                let set_clauses: Vec<String> = on_conflict.target_list
+                    .iter()
+                    .filter_map(|n| {
+                        if let Some(ref inner) = n.node {
+                            if let NodeEnum::ResTarget(target) = inner {
+                                let col_name = target.name.to_lowercase();
+                                let val = target.val.as_ref()
+                                    .map(|v| reconstruct_node(v, ctx))
+                                    .unwrap_or_default();
+                                return Some(format!("{} = {}", col_name, val));
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+                
+                if !set_clauses.is_empty() {
+                    parts.push(set_clauses.join(", "));
+                }
+            }
+            
+            // Handle WHERE clause in DO UPDATE
+            if let Some(ref where_clause) = on_conflict.where_clause {
+                let where_sql = reconstruct_node(where_clause, ctx);
+                if !where_sql.is_empty() {
+                    parts.push(format!("where {}", where_sql));
+                }
+            }
+        }
+        _ => {}
+    }
 
     parts.join(" ")
 }
@@ -1166,6 +1279,15 @@ pub(crate) fn reconstruct_update_stmt(stmt: &UpdateStmt, ctx: &mut TranspileCont
         }
     }
 
+    // Handle RETURNING clause
+    if !stmt.returning_list.is_empty() {
+        let returning_cols: Vec<String> = stmt.returning_list
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(format!("returning {}", returning_cols.join(", ")));
+    }
+
     parts.join(" ")
 }
 
@@ -1276,6 +1398,15 @@ pub(crate) fn reconstruct_delete_stmt(stmt: &DeleteStmt, ctx: &mut TranspileCont
             parts.push("where".to_string());
             parts.push(where_sql);
         }
+    }
+
+    // Handle RETURNING clause
+    if !stmt.returning_list.is_empty() {
+        let returning_cols: Vec<String> = stmt.returning_list
+            .iter()
+            .map(|n| reconstruct_node(n, ctx))
+            .collect();
+        parts.push(format!("returning {}", returning_cols.join(", ")));
     }
 
     parts.join(" ")

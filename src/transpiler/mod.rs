@@ -783,4 +783,98 @@ VALUES
         let result = transpile_with_metadata(sql);
         assert_eq!(result.sql, "update t set a = 1, b = 2");
     }
+
+    // Tests for RETURNING clause support
+    #[test]
+    fn test_insert_returning_single_column() {
+        let sql = "INSERT INTO users (name, email) VALUES ('John', 'john@example.com') RETURNING id";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning id"), "Should contain RETURNING clause: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_returning_star() {
+        let sql = "INSERT INTO users (name, email) VALUES ('John', 'john@example.com') RETURNING *";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning *"), "Should contain RETURNING *: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_returning_multiple_columns() {
+        let sql = "INSERT INTO users (name, email) VALUES ('John', 'john@example.com') RETURNING id, name, email";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning id, name, email"), "Should contain RETURNING with multiple columns: {}", result.sql);
+    }
+
+    #[test]
+    fn test_update_returning_single_column() {
+        let sql = "UPDATE users SET name = 'Jane' WHERE id = 1 RETURNING id";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("update users"));
+        assert!(result.sql.contains("returning id"), "Should contain RETURNING clause: {}", result.sql);
+    }
+
+    #[test]
+    fn test_update_returning_star() {
+        let sql = "UPDATE users SET name = 'Jane' WHERE id = 1 RETURNING *";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("update users"));
+        assert!(result.sql.contains("returning *"), "Should contain RETURNING *: {}", result.sql);
+    }
+
+    #[test]
+    fn test_delete_returning_single_column() {
+        let sql = "DELETE FROM users WHERE id = 1 RETURNING id";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("delete from users"));
+        assert!(result.sql.contains("returning id"), "Should contain RETURNING clause: {}", result.sql);
+    }
+
+    #[test]
+    fn test_delete_returning_star() {
+        let sql = "DELETE FROM users WHERE id = 1 RETURNING *";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("delete from users"));
+        assert!(result.sql.contains("returning *"), "Should contain RETURNING *: {}", result.sql);
+    }
+
+    // Tests for ON CONFLICT (upsert) support
+    #[test]
+    fn test_insert_on_conflict_do_nothing() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT DO NOTHING";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do nothing"), "Should contain DO NOTHING: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_with_target() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO NOTHING";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("(id)"), "Should contain conflict target: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_do_update() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"), "Should contain DO UPDATE SET: {}", result.sql);
+    }
+
+    // Test for UPDATE with FROM clause (JOIN support)
+    #[test]
+    fn test_update_with_from_clause() {
+        let sql = "UPDATE users SET name = accounts.name FROM accounts WHERE users.id = accounts.user_id";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("update users"));
+        assert!(result.sql.contains("from accounts"), "Should contain FROM clause: {}", result.sql);
+    }
 }
