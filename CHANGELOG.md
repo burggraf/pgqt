@@ -4,6 +4,8 @@ All notable changes to PGQT will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-03-18
+
 ### Added
 - **Supabase Dump Compatibility**: Full support for `supabase db dump` files
   - `CREATE EXTENSION` statements now handled gracefully (no-op with warning)
