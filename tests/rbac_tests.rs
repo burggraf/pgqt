@@ -33,7 +33,7 @@ fn test_grant_revoke_table_privileges() {
     // GRANT
     let sql = "GRANT SELECT, INSERT ON TABLE mytable TO alice;";
     let result = transpile_with_metadata(sql);
-    assert!(result.sql.contains("INSERT INTO __pg_acl__"));
+    assert!(result.sql.contains("INSERT OR IGNORE INTO __pg_acl__"));
     assert!(result.sql.contains("'alice'"));
     assert!(result.sql.contains("'mytable'"));
     assert!(result.sql.contains("SELECT") || result.sql.contains("select"));
