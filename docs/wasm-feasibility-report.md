@@ -48,6 +48,8 @@ This report analyzes the feasibility of adding WASM compilation targets to PGQT,
 - `libpg_query` is extracted PostgreSQL C source code
 - Requires libc and cannot compile to wasm32-unknown-unknown
 
+**Research**: The `libpg-query-node` project ([constructive-io/libpg-query-node](https://github.com/constructive-io/libpg-query-node)) demonstrates how `libpg_query` can be built for Node.js using native bindings. While this doesn't solve WASM compatibility directly, it provides insight into how the C library can be packaged for different environments and may inform alternative approaches like Emscripten builds.
+
 **Potential Solutions**:
 
 | Solution | Effort | Trade-offs |
