@@ -20,6 +20,7 @@ pub mod utils;
 pub use utils::{
     reconstruct_create_role_stmt,
     reconstruct_alter_role_stmt,
+    reconstruct_alter_role_set_stmt,
     reconstruct_drop_role_stmt,
     reconstruct_grant_stmt,
     reconstruct_grant_role_stmt,

@@ -6,7 +6,7 @@
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     CreateRoleStmt, DropRoleStmt, GrantStmt, GrantRoleStmt, AlterDefaultPrivilegesStmt,
-    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, AlterOwnerStmt, AlterRoleStmt
+    SelectStmt, InsertStmt, UpdateStmt, DeleteStmt, AlterOwnerStmt, AlterRoleStmt, AlterRoleSetStmt
 };
 use super::super::context::TranspileContext;
 
@@ -625,6 +625,81 @@ pub fn reconstruct_alter_role_stmt(stmt: &AlterRoleStmt, _ctx: &mut TranspileCon
         format!(
             "UPDATE __pg_authid__ SET {} WHERE rolname = '{}'",
             updates.join(", "),
+            role_name
+        )
+    }
+}
+
+/// Reconstruct an ALTER ROLE ... SET statement
+/// 
+/// This sets default configuration parameters for a role.
+/// Since SQLite doesn't have a configuration parameter system like PostgreSQL,
+/// we convert this to a no-op comment. The settings are preserved in the comment
+/// for documentation purposes.
+pub fn reconstruct_alter_role_set_stmt(stmt: &AlterRoleSetStmt, _ctx: &mut TranspileContext) -> String {
+    let role_name = stmt.role.as_ref()
+        .map(|r| r.rolename.clone())
+        .unwrap_or_default();
+    
+    let database = if stmt.database.is_empty() {
+        None
+    } else {
+        Some(stmt.database.clone())
+    };
+    
+    if let Some(ref set_stmt) = stmt.setstmt {
+        let param_name = &set_stmt.name;
+        
+        // Extract the value from the set statement
+        let value_str = if set_stmt.args.is_empty() {
+            // Check if this is a SET TO DEFAULT (kind value 3 is VarSetDefault)
+            if set_stmt.kind == 3 {
+                "DEFAULT".to_string()
+            } else {
+                "NULL".to_string()
+            }
+        } else {
+            // Format the argument values
+            let values: Vec<String> = set_stmt.args.iter()
+                .filter_map(|arg| {
+                    if let Some(ref node) = arg.node {
+                        match node {
+                            NodeEnum::AConst(ref aconst) => {
+                                if let Some(ref val) = aconst.val {
+                                    match val {
+                                        pg_query::protobuf::a_const::Val::Sval(s) => Some(format!("'{}'", s.sval)),
+                                        pg_query::protobuf::a_const::Val::Ival(i) => Some(i.ival.to_string()),
+                                        _ => Some("?".to_string()),
+                                    }
+                                } else {
+                                    Some("NULL".to_string())
+                                }
+                            }
+                            NodeEnum::String(ref s) => Some(format!("'{}'", s.sval)),
+                            _ => Some("?".to_string()),
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            values.join(", ")
+        };
+        
+        if let Some(ref db) = database {
+            format!(
+                "-- ALTER ROLE {} IN DATABASE {} SET {} TO {} (role configuration not implemented)",
+                role_name, db, param_name, value_str
+            )
+        } else {
+            format!(
+                "-- ALTER ROLE {} SET {} TO {} (role configuration not implemented)",
+                role_name, param_name, value_str
+            )
+        }
+    } else {
+        format!(
+            "-- ALTER ROLE {} SET (incomplete statement) (role configuration not implemented)",
             role_name
         )
     }

@@ -311,6 +311,16 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
+            NodeEnum::AlterRoleSetStmt(ref alter_role_set_stmt) => TranspileResult {
+                sql: rls::reconstruct_alter_role_set_stmt(alter_role_set_stmt, ctx),
+                create_table_metadata: None, 
+                copy_metadata: None,
+                referenced_tables: Vec::new(),
+                operation_type: OperationType::DDL,
+                errors: Vec::new(),
+                column_aliases: Vec::new(),
+                column_types: Vec::new(),
+            },
             NodeEnum::DropRoleStmt(ref drop_role_stmt) => TranspileResult {
                 sql: rls::reconstruct_drop_role_stmt(drop_role_stmt),
                 create_table_metadata: None, 

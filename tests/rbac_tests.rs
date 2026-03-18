@@ -104,3 +104,13 @@ fn test_set_role() {
     let result = transpile_with_metadata(sql);
     assert!(result.sql.contains("SET ROLE") || result.sql.contains("set role") || result.sql.contains("alice") || result.sql.contains("--"));
 }
+
+#[test]
+fn test_alter_role_set_statement_timeout() {
+    // Test ALTER ROLE ... SET statement_timeout (Supabase dump format)
+    let sql = r#"ALTER ROLE "anon" SET "statement_timeout" TO '3s'"#;
+    let result = transpile_with_metadata(sql);
+    println!("ALTER ROLE SET SQL: {}", result.sql);
+    // Should not error - either handle it or produce a no-op comment
+    assert!(!result.sql.contains("syntax error"));
+}
