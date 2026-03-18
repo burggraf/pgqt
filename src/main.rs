@@ -65,12 +65,14 @@ mod array_agg;
 mod hypothetical_rank;
 mod jsonb;
 mod cache;
+#[cfg(feature = "tls")]
 mod tls;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};
 use handler::query::QueryExecution;
 use config::{AppConfig, PortConfig, find_default_config, SqlitePragmaConfig, CacheConfig, PoolConfig, MemoryConfig, BufferPoolConfig, MemoryMonitoringConfig, MmapConfig, JournalMode, SynchronousMode, TempStore, NetworkConfig, TlsConfigOptions};
+#[cfg(feature = "tls")]
 use tls::TlsConfig;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -523,6 +525,7 @@ fn parse_output_dest(s: &str) -> Result<OutputDest> {
 /// Run a single listener for a port configuration
 async fn run_listener(config: PortConfig) -> Result<()> {
     // Initialize TLS acceptor if enabled
+    #[cfg(feature = "tls")]
     let tls_acceptor = if config.tls.ssl {
         let tls_config = if config.tls.ssl_ephemeral {
             match TlsConfig::generate_ephemeral() {
@@ -555,6 +558,14 @@ async fn run_listener(config: PortConfig) -> Result<()> {
             tls.server_config().map(|cfg| TlsAcceptor::from(cfg))
         })
     } else {
+        None
+    };
+
+    #[cfg(not(feature = "tls"))]
+    let tls_acceptor: Option<TlsAcceptor> = {
+        if config.tls.ssl {
+            eprintln!("Warning: TLS requested but not compiled in. Rebuild with --features tls");
+        }
         None
     };
 

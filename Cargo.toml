@@ -27,13 +27,14 @@ lazy_static = "1.4"
 md5 = "0.7"
 uuid = { version = "1.7", features = ["v4", "v7", "rng"] }
 lru = "0.12"
-rustls = "0.23"
-tokio-rustls = "0.26"
-rcgen = "0.13"
+rustls = { version = "0.23", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+rcgen = { version = "0.13", optional = true }
 
 [features]
-default = ["plpgsql"]
+default = ["plpgsql", "tls"]
 plpgsql = ["pg_parse"]
+tls = ["rustls", "tokio-rustls", "rcgen"]
 
 [profile.release]
 strip = true

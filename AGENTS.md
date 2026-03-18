@@ -464,6 +464,57 @@ This ensures:
 - Python 3
 - `psycopg2-binary` - PostgreSQL Python driver
 
+## Build Configuration
+
+PGQT supports feature flags for conditional compilation:
+
+### Available Features
+
+| Feature | Description | Default | Binary Impact |
+|---------|-------------|---------|---------------|
+| `tls` | TLS/SSL support via rustls | ✓ | +2.5MB |
+| `plpgsql` | PL/pgSQL stored procedure support | ✓ | ~500KB |
+
+### Build Commands
+
+```bash
+# Default build (with TLS and PL/pgSQL)
+cargo build --release
+
+# Smaller build without TLS
+cargo build --release --no-default-features --features plpgsql
+
+# Minimal build (no optional features)
+cargo build --release --no-default-features
+```
+
+### Build Scripts
+
+Three convenience scripts are provided:
+
+```bash
+./build-release.sh        # Full build with TLS (~12MB)
+./build-release-small.sh  # Without TLS (~9.5MB)
+./build-both.sh           # Build both variants
+```
+
+### Conditional Compilation
+
+When adding TLS-dependent code, use:
+
+```rust
+#[cfg(feature = "tls")]
+use crate::tls::TlsConfig;
+
+#[cfg(feature = "tls")]
+fn tls_function() { /* ... */ }
+
+#[cfg(not(feature = "tls"))]
+fn tls_function() { /* fallback */ }
+```
+
+See `src/main.rs` for examples of TLS feature gating.
+
 ## Known Limitations
 
 1. Not all PostgreSQL features are supported (see README.md for full list)

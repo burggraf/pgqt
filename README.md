@@ -35,11 +35,22 @@
 # Clone and build
 git clone https://github.com/yourusername/pgqt
 cd pgqt
+
+# Build with TLS support (default, ~12MB)
 cargo build --release
+
+# Or build smaller binary without TLS (~9.5MB)
+cargo build --release --no-default-features --features plpgsql
+
+# Or use the build scripts
+./build-release.sh        # With TLS
+./build-release-small.sh  # Without TLS
 
 # Or install via cargo
 cargo install pgqt
 ```
+
+**Note:** See [docs/build-options.md](./docs/build-options.md) for detailed build configuration options.
 
 ### Running the Proxy
 
@@ -818,9 +829,32 @@ psql -h 127.0.0.1 -p 5432 -U postgres -c "SELECT * FROM __pg_meta__"
 
 ### Building
 
+#### Quick Build
+
 ```bash
+# Default build with TLS support (~12MB)
 cargo build --release
+
+# Smaller build without TLS (~9.5MB)
+cargo build --release --no-default-features --features plpgsql
 ```
+
+#### Build Scripts
+
+We provide convenience scripts for common build configurations:
+
+```bash
+# Standard release with TLS support
+./build-release.sh
+
+# Smaller release without TLS
+./build-release-small.sh
+
+# Build both variants
+./build-both.sh
+```
+
+See [docs/build-options.md](./docs/build-options.md) for detailed build configuration options.
 
 ### Testing
 
