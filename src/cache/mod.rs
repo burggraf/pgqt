@@ -71,11 +71,13 @@ impl TranspileCache {
     }
 
     /// Get the current number of cached entries.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.cache.lock().unwrap().len()
     }
 
     /// Check if the cache is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
