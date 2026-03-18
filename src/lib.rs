@@ -23,6 +23,7 @@
 //! | [`trigger`]    | Trigger execution for INSERT/UPDATE/DELETE             |
 //! | [`vector`]     | pgvector-compatible vector similarity search           |
 
+pub mod config;
 pub mod debug;
 pub mod validation;
 pub mod array;
@@ -50,3 +51,5 @@ pub mod transpiler;
 pub mod trigger;
 pub mod vector;
 pub mod auth;
+pub mod buffer;
+pub mod memory;

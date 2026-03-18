@@ -25,6 +25,7 @@
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 - **LATERAL Joins**: Supported for table-valued functions (like `jsonb_each`). See [docs/LATERAL.md](./docs/LATERAL.md).
 - **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats with character encoding support (UTF8, LATIN1, WINDOWS-1252, EUC_JP, etc.) for efficient data transfer. See [docs/COPY.md](./docs/COPY.md) and [docs/copy-encoding.md](./docs/copy-encoding.md).
+- **Performance Tuning**: SQLite PRAGMA configuration, connection pooling, caching, and memory management. See [docs/performance-tuning.md](./docs/performance-tuning.md).
 
 ## Quick Start
 
@@ -656,6 +657,64 @@ pgqt --config pgqt.json
 | `PGQT_OUTPUT`       | `STDOUT`         | Server output destination |
 | `PGQT_ERROR_OUTPUT` | `<db>.error.log` | Error output destination  |
 | `PGQT_AUTO_CREATE_USERS` | - | Auto-create users on first connection |
+
+### Performance Tuning
+
+PGQT provides extensive performance tuning options to optimize SQLite behavior for your workload:
+
+```bash
+# SQLite PRAGMA configuration for write-heavy workloads
+pgqt --database myapp.db \
+  --journal-mode WAL \
+  --synchronous NORMAL \
+  --cache-size -64000
+
+# Connection pooling for high concurrency
+pgqt --database myapp.db \
+  --use-pooling \
+  --pool-size 16 \
+  --max-connections 200
+
+# Enable caching for read-heavy workloads
+pgqt --database myapp.db \
+  --transpile-cache-size 512 \
+  --enable-result-cache \
+  --result-cache-size 256
+
+# Memory management for large datasets
+pgqt --database myapp.db \
+  --enable-buffer-pool \
+  --buffer-pool-size 100 \
+  --memory-monitoring \
+  --auto-cleanup
+
+# Unix socket for local connections (more efficient than TCP)
+pgqt --database myapp.db --socket-dir /var/run/pgqt --no-tcp
+
+# TLS/SSL encryption
+pgqt --database myapp.db --ssl --ssl-cert server.crt --ssl-key server.key
+```
+
+**Key Performance Options:**
+
+| Category | Option | Description |
+|----------|--------|-------------|
+| **SQLite PRAGMA** | `--journal-mode` | WAL, DELETE, MEMORY, OFF |
+| | `--synchronous` | OFF, NORMAL, FULL, EXTRA |
+| | `--cache-size` | Page cache size (pages or KB) |
+| | `--mmap-size` | Memory-mapped I/O size |
+| **Connection Pool** | `--use-pooling` | Enable connection pooling |
+| | `--pool-size` | Initial pool size |
+| | `--max-connections` | Max concurrent connections |
+| **Caching** | `--transpile-cache-size` | SQL transpile cache entries |
+| | `--enable-result-cache` | Enable query result caching |
+| **Memory** | `--enable-buffer-pool` | Enable buffer pooling |
+| | `--memory-monitoring` | Monitor memory usage |
+| | `--auto-cleanup` | Auto cleanup on high memory |
+| **Network** | `--socket-dir` | Unix socket directory |
+| | `--ssl` | Enable TLS encryption |
+
+For complete documentation, see [docs/performance-tuning.md](./docs/performance-tuning.md).
 
 ### Programmatic Usage
 

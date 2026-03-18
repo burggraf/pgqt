@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex, Weak};
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 
+use crate::config::PoolConfig;
+use crate::config::SqlitePragmaConfig;
+
 /// A handle representing a checked-out connection
 /// When dropped, the connection is returned to the pool
 pub struct ConnectionHandle {
@@ -102,6 +105,42 @@ impl ConnectionPool {
         // Pre-initialize one connection to verify database is accessible
         let initial_conn = pool.create_connection()?;
         pool.available.lock().unwrap().push(Arc::new(Mutex::new(initial_conn)));
+
+        Ok(pool)
+    }
+
+    /// Create a new connection pool with full configuration
+    pub fn with_config(
+        db_path: &Path,
+        config: PoolConfig,
+        on_init: Option<Arc<dyn Fn(&Connection) -> Result<()> + Send + Sync>>,
+        _pragma_config: SqlitePragmaConfig,
+    ) -> Result<Self> {
+        if config.max_connections == 0 {
+            return Err(anyhow!("max_connections must be greater than 0"));
+        }
+
+        let pool = Self {
+            db_path: db_path.to_path_buf(),
+            available: Arc::new(Mutex::new(Vec::with_capacity(config.max_connections))),
+            in_use: Arc::new(Mutex::new(HashSet::new())),
+            max_connections: config.max_connections,
+            on_init,
+        };
+
+        // Pre-initialize connections up to pool_size
+        let initial_size = config.pool_size.min(config.max_connections);
+        for _ in 0..initial_size {
+            match pool.create_connection() {
+                Ok(conn) => {
+                    pool.available.lock().unwrap().push(Arc::new(Mutex::new(conn)));
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to create initial connection: {}", e);
+                    break;
+                }
+            }
+        }
 
         Ok(pool)
     }

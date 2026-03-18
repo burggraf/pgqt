@@ -1,6 +1,6 @@
 [package]
 name = "pgqt"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 
 [dependencies]
@@ -27,6 +27,9 @@ lazy_static = "1.4"
 md5 = "0.7"
 uuid = { version = "1.7", features = ["v4", "v7", "rng"] }
 lru = "0.12"
+rustls = "0.23"
+tokio-rustls = "0.26"
+rcgen = "0.13"
 
 [features]
 default = ["plpgsql"]

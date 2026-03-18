@@ -23,6 +23,7 @@ use crate::debug;
 use crate::cache::TranspileCache;
 use crate::catalog::{init_catalog, init_system_views};
 use crate::connection_pool::{ConnectionHandle, ConnectionPool};
+use crate::config::PoolConfig;
 use crate::schema::{SchemaManager, SearchPath};
 use crate::copy;
 use crate::jsonb;
@@ -198,7 +199,13 @@ pub struct SqliteHandler {
 
 impl SqliteHandler {
     /// Create a new SqliteHandler with the given database path
+    #[allow(dead_code)]
     pub fn new(db_path: &str) -> Result<Self> {
+        Self::with_pool_config(db_path, None)
+    }
+
+    /// Create a new SqliteHandler with pool configuration
+    pub fn with_pool_config(db_path: &str, pool_config: Option<PoolConfig>) -> Result<Self> {
         let conn = Connection::open(db_path)?;
 
         // Configure SQLite prepared statement cache (default is 16, increase to 64)
@@ -216,15 +223,21 @@ impl SqliteHandler {
         // Create connection pool with an initialization function that registers UDFs
         let sessions_init = sessions.clone();
         let functions_init = functions.clone();
-        let conn_pool = ConnectionPool::with_init(
+        
+        // Use provided pool config or default
+        let pool_config = pool_config.unwrap_or_default();
+        let pragma_config = crate::config::SqlitePragmaConfig::default();
+        
+        let conn_pool = ConnectionPool::with_config(
             std::path::Path::new(db_path), 
-            10,
+            pool_config,
             Some(Arc::new(move |conn| {
                 Self::register_builtin_functions(conn, functions_init.clone(), sessions_init.clone())?;
                 // Note: PL/pgSQL wrappers need access to self.functions() which is 'functions'
                 // We'll register them manually or make a helper
                 Ok(())
-            }))
+            })),
+            pragma_config,
         )?;
 
         let handler = Self {

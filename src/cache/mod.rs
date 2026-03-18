@@ -1,48 +1,99 @@
-//! Query transpilation caching for improved performance.
-//!
-//! Provides an LRU cache for transpiled queries to avoid repeated
-//! parsing and transpilation of identical SQL statements.
-
 use std::sync::Mutex;
 use lru::LruCache;
 use std::num::NonZeroUsize;
+use std::time::{Duration, Instant};
 use crate::transpiler::TranspileResult;
 
 /// Default cache size (number of unique queries to cache)
 const DEFAULT_CACHE_SIZE: usize = 256;
 
-/// Cache for transpiled query results.
+/// Cache entry with optional expiration time
+struct CacheEntry<T> {
+    value: T,
+    expires_at: Option<Instant>,
+}
+
+impl<T> CacheEntry<T> {
+    fn new(value: T, ttl: Option<Duration>) -> Self {
+        Self {
+            value,
+            expires_at: ttl.map(|d| Instant::now() + d),
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        self.expires_at.map_or(false, |exp| Instant::now() > exp)
+    }
+}
+
+/// Cache for transpiled query results with optional TTL support.
 ///
 /// Uses an LRU (Least Recently Used) eviction policy to bound memory usage.
 /// Thread-safe via Mutex wrapping.
 pub struct TranspileCache {
-    cache: Mutex<LruCache<String, TranspileResult>>,
+    cache: Mutex<LruCache<String, CacheEntry<TranspileResult>>>,
+    ttl: Option<Duration>,
 }
 
 impl TranspileCache {
-    /// Create a new transpile cache with the default size.
+    /// Create a new transpile cache with the default size and no TTL.
     pub fn new() -> Self {
-        Self::with_size(DEFAULT_CACHE_SIZE)
+        Self::with_size_and_ttl(DEFAULT_CACHE_SIZE, None)
     }
 
     /// Create a new transpile cache with a specific size.
+    #[cfg(test)]
     pub fn with_size(size: usize) -> Self {
+        Self::with_size_and_ttl(size, None)
+    }
+
+    /// Create a new transpile cache with a specific size and TTL.
+    ///
+    /// # Arguments
+    /// * `size` - Maximum number of entries in the cache
+    /// * `ttl` - Optional time-to-live duration for cache entries
+    pub fn with_size_and_ttl(size: usize, ttl: Option<Duration>) -> Self {
         let cap = NonZeroUsize::new(size).unwrap_or(NonZeroUsize::new(64).unwrap());
         Self {
             cache: Mutex::new(LruCache::new(cap)),
+            ttl,
         }
     }
 
-    /// Get a cached transpile result if available.
+    /// Create a new transpile cache from configuration.
+    ///
+    /// # Arguments
+    /// * `size` - Maximum number of entries in the cache
+    /// * `ttl_secs` - TTL in seconds (0 means no TTL)
+    #[cfg(test)]
+    pub fn from_config(size: usize, ttl_secs: u64) -> Self {
+        let ttl = if ttl_secs > 0 {
+            Some(Duration::from_secs(ttl_secs))
+        } else {
+            None
+        };
+        Self::with_size_and_ttl(size, ttl)
+    }
+
+    /// Get a cached transpile result if available and not expired.
     pub fn get(&self, sql: &str) -> Option<TranspileResult> {
         let mut cache = self.cache.lock().unwrap();
-        cache.get(sql).cloned()
+        let entry = cache.get(sql)?;
+
+        if entry.is_expired() {
+            // Remove expired entry
+            cache.pop(sql);
+            return None;
+        }
+
+        Some(entry.value.clone())
     }
 
     /// Put a transpile result into the cache.
     pub fn put(&self, sql: String, result: TranspileResult) {
         let mut cache = self.cache.lock().unwrap();
-        cache.put(sql, result);
+        let entry = CacheEntry::new(result, self.ttl);
+        cache.put(sql, entry);
     }
 
     /// Get or compute a transpile result.
@@ -53,12 +104,10 @@ impl TranspileCache {
     where
         F: FnOnce() -> TranspileResult,
     {
-        // Check cache first
         if let Some(cached) = self.get(sql) {
             return cached;
         }
 
-        // Compute and cache
         let result = compute();
         self.put(sql.to_string(), result.clone());
         result
@@ -81,6 +130,12 @@ impl TranspileCache {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Get the configured TTL.
+    #[allow(dead_code)]
+    pub fn ttl(&self) -> Option<Duration> {
+        self.ttl
+    }
 }
 
 impl Default for TranspileCache {
@@ -89,10 +144,17 @@ impl Default for TranspileCache {
     }
 }
 
+// Re-export query result cache
+mod query_result;
+// QueryResultCache is available for future use when query result caching is implemented
+#[cfg(test)]
+pub use query_result::QueryResultCache;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transpiler::OperationType;
+    use std::thread::sleep;
 
     fn make_result(sql: &str) -> TranspileResult {
         TranspileResult {
@@ -111,9 +173,9 @@ mod tests {
     fn test_cache_put_get() {
         let cache = TranspileCache::new();
         let result = make_result("SELECT 1");
-        
+
         cache.put("SELECT 1".to_string(), result.clone());
-        
+
         let cached = cache.get("SELECT 1");
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().sql, "select 1");
@@ -129,19 +191,17 @@ mod tests {
     fn test_get_or_compute() {
         let cache = TranspileCache::new();
         let call_count = std::sync::atomic::AtomicUsize::new(0);
-        
-        // First call should compute
+
         let result1 = cache.get_or_compute("SELECT 1", || {
             call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             make_result("SELECT 1")
         });
-        
-        // Second call should use cache
+
         let result2 = cache.get_or_compute("SELECT 1", || {
             call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             make_result("SELECT 1")
         });
-        
+
         assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(result1.sql, result2.sql);
     }
@@ -149,13 +209,39 @@ mod tests {
     #[test]
     fn test_cache_eviction() {
         let cache = TranspileCache::with_size(2);
-        
+
         cache.put("a".to_string(), make_result("a"));
         cache.put("b".to_string(), make_result("b"));
-        cache.put("c".to_string(), make_result("c")); // Should evict "a"
-        
+        cache.put("c".to_string(), make_result("c"));
+
         assert!(cache.get("a").is_none());
         assert!(cache.get("b").is_some());
         assert!(cache.get("c").is_some());
+    }
+
+    #[test]
+    fn test_cache_ttl() {
+        let cache = TranspileCache::with_size_and_ttl(10, Some(Duration::from_millis(50)));
+
+        cache.put("SELECT 1".to_string(), make_result("SELECT 1"));
+
+        // Should be available immediately
+        assert!(cache.get("SELECT 1").is_some());
+
+        // Wait for TTL to expire
+        sleep(Duration::from_millis(100));
+
+        // Should be expired now
+        assert!(cache.get("SELECT 1").is_none());
+    }
+
+    #[test]
+    fn test_cache_from_config() {
+        let cache = TranspileCache::from_config(100, 60);
+        assert_eq!(cache.len(), 0);
+        assert!(cache.ttl().is_some());
+
+        let cache_no_ttl = TranspileCache::from_config(100, 0);
+        assert!(cache_no_ttl.ttl().is_none());
     }
 }
