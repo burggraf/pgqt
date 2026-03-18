@@ -801,7 +801,7 @@ impl CopyHandler {
         }
     }
 
-    /// Process text format data
+    /// Process text format data with transaction wrapping
     fn process_text_data(
         &self,
         data: &[u8],
@@ -809,85 +809,86 @@ impl CopyHandler {
         columns: &[String],
         options: &CopyOptions,
     ) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
-        let mut row_count = 0;
-        let mut line_number = 0;
+        self.with_transaction(|conn| {
+            let mut row_count = 0;
+            let mut line_number = 0;
 
-        // Convert from source encoding to UTF-8, then parse text format
-        let content = decode_to_utf8(data, &options.encoding)
-            .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
-        // Use split_inclusive to handle empty trailing fields and preserve row boundaries
-        let lines: Vec<&str> = content.split_inclusive('\n').collect();
+            // Convert from source encoding to UTF-8, then parse text format
+            let content = decode_to_utf8(data, &options.encoding)
+                .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
+            // Use split_inclusive to handle empty trailing fields and preserve row boundaries
+            let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
-        for line in lines {
-            line_number += 1;
-            let mut line = line;
-            if line.ends_with('\n') {
-                line = &line[..line.len() - 1];
+            for line in lines {
+                line_number += 1;
+                let mut line = line;
+                if line.ends_with('\n') {
+                    line = &line[..line.len() - 1];
+                }
+                if line.ends_with('\r') {
+                    line = &line[..line.len() - 1];
+                }
+                
+                if line.is_empty() || line == "\\." {
+                    continue;
+                }
+
+                // Split by delimiter
+                let values: Vec<&str> = line.split(options.delimiter).collect();
+
+                // Validate column count
+                if !columns.is_empty() && values.len() != columns.len() {
+                    return Err(anyhow!(
+                        "COPY {}: line {}, expected {} columns but got {}",
+                        table_name, line_number, columns.len(), values.len()
+                    ));
+                }
+
+                // Convert values, handling NULL
+                let converted_values: Vec<Option<String>> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(_col_idx, v)| {
+                        if v == &options.null_string {
+                            None
+                        } else {
+                            Some(unescape_text_value(v, options.escape))
+                        }
+                    })
+                    .collect();
+
+                // Build and execute INSERT statement
+                let sql = build_insert_sql(table_name, columns, converted_values.len())?;
+                let mut stmt = conn.prepare_cached(&sql)?;
+
+                // Convert params for rusqlite
+                let params: Vec<rusqlite::types::Value> = converted_values
+                    .into_iter()
+                    .map(|v| match v {
+                        Some(s) => rusqlite::types::Value::Text(s),
+                        None => rusqlite::types::Value::Null,
+                    })
+                    .collect();
+
+                let param_refs: Vec<&dyn rusqlite::ToSql> = params
+                    .iter()
+                    .map(|p| p as &dyn rusqlite::ToSql)
+                    .collect();
+
+                if let Err(e) = stmt.execute(rusqlite::params_from_iter(param_refs.iter())) {
+                    return Err(anyhow!(
+                        "COPY {}: line {}, column {}: {}",
+                        table_name, line_number, columns.get(0).unwrap_or(&"unknown".to_string()), e
+                    ));
+                }
+                row_count += 1;
             }
-            if line.ends_with('\r') {
-                line = &line[..line.len() - 1];
-            }
-            
-            if line.is_empty() || line == "\\." {
-                continue;
-            }
 
-            // Split by delimiter
-            let values: Vec<&str> = line.split(options.delimiter).collect();
-
-            // Validate column count
-            if !columns.is_empty() && values.len() != columns.len() {
-                return Err(anyhow!(
-                    "COPY {}: line {}, expected {} columns but got {}",
-                    table_name, line_number, columns.len(), values.len()
-                ));
-            }
-
-            // Convert values, handling NULL
-            let converted_values: Vec<Option<String>> = values
-                .iter()
-                .enumerate()
-                .map(|(_col_idx, v)| {
-                    if v == &options.null_string {
-                        None
-                    } else {
-                        Some(unescape_text_value(v, options.escape))
-                    }
-                })
-                .collect();
-
-            // Build and execute INSERT statement
-            let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-            let mut stmt = conn.prepare_cached(&sql)?;
-
-            // Convert params for rusqlite
-            let params: Vec<rusqlite::types::Value> = converted_values
-                .into_iter()
-                .map(|v| match v {
-                    Some(s) => rusqlite::types::Value::Text(s),
-                    None => rusqlite::types::Value::Null,
-                })
-                .collect();
-
-            let param_refs: Vec<&dyn rusqlite::ToSql> = params
-                .iter()
-                .map(|p| p as &dyn rusqlite::ToSql)
-                .collect();
-
-            if let Err(e) = stmt.execute(rusqlite::params_from_iter(param_refs.iter())) {
-                return Err(anyhow!(
-                    "COPY {}: line {}, column {}: {}",
-                    table_name, line_number, columns.get(0).unwrap_or(&"unknown".to_string()), e
-                ));
-            }
-            row_count += 1;
-        }
-
-        Ok(row_count)
+            Ok(row_count)
+        })
     }
 
-    /// Process CSV format data
+    /// Process CSV format data with transaction wrapping
     fn process_csv_data(
         &self,
         data: &[u8],
@@ -895,69 +896,70 @@ impl CopyHandler {
         columns: &[String],
         options: &CopyOptions,
     ) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
-        let mut row_count = 0;
+        self.with_transaction(|conn| {
+            let mut row_count = 0;
 
-        // Convert from source encoding to UTF-8, then parse CSV format
-        let content = decode_to_utf8(data, &options.encoding)
-            .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
-        let lines: Vec<&str> = content.lines().collect();
+            // Convert from source encoding to UTF-8, then parse CSV format
+            let content = decode_to_utf8(data, &options.encoding)
+                .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
+            let lines: Vec<&str> = content.lines().collect();
 
-        // Skip header if present
-        let start_idx = if options.header && !lines.is_empty() { 1 } else { 0 };
-        let mut line_number = start_idx;
+            // Skip header if present
+            let start_idx = if options.header && !lines.is_empty() { 1 } else { 0 };
+            let mut line_number = start_idx;
 
-        for line in &lines[start_idx..] {
-            line_number += 1;
-            
-            if line.is_empty() {
-                continue;
+            for line in &lines[start_idx..] {
+                line_number += 1;
+                
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Parse CSV line
+                let values = parse_csv_line(line, options.delimiter, options.quote)
+                    .map_err(|e| anyhow!("COPY {}: line {}: {}", table_name, line_number, e))?;
+
+                // Convert values, handling NULL
+                let converted_values: Vec<Option<String>> = values
+                    .into_iter()
+                    .map(|v| {
+                        if v.is_empty() && options.null_string.is_empty() {
+                            None
+                        } else if v == options.null_string {
+                            None
+                        } else {
+                            Some(v)
+                        }
+                    })
+                    .collect();
+
+                // Build and execute INSERT statement
+                let sql = build_insert_sql(table_name, columns, converted_values.len())?;
+                let mut stmt = conn.prepare_cached(&sql)?;
+
+                // Convert params for rusqlite
+                let params: Vec<rusqlite::types::Value> = converted_values
+                    .into_iter()
+                    .map(|v| match v {
+                        Some(s) => rusqlite::types::Value::Text(s),
+                        None => rusqlite::types::Value::Null,
+                    })
+                    .collect();
+
+                let param_refs: Vec<&dyn rusqlite::ToSql> = params
+                    .iter()
+                    .map(|p| p as &dyn rusqlite::ToSql)
+                    .collect();
+
+                stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
+                row_count += 1;
             }
 
-            // Parse CSV line
-            let values = parse_csv_line(line, options.delimiter, options.quote)
-                .map_err(|e| anyhow!("COPY {}: line {}: {}", table_name, line_number, e))?;
-
-            // Convert values, handling NULL
-            let converted_values: Vec<Option<String>> = values
-                .into_iter()
-                .map(|v| {
-                    if v.is_empty() && options.null_string.is_empty() {
-                        None
-                    } else if v == options.null_string {
-                        None
-                    } else {
-                        Some(v)
-                    }
-                })
-                .collect();
-
-            // Build and execute INSERT statement
-            let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-            let mut stmt = conn.prepare_cached(&sql)?;
-
-            // Convert params for rusqlite
-            let params: Vec<rusqlite::types::Value> = converted_values
-                .into_iter()
-                .map(|v| match v {
-                    Some(s) => rusqlite::types::Value::Text(s),
-                    None => rusqlite::types::Value::Null,
-                })
-                .collect();
-
-            let param_refs: Vec<&dyn rusqlite::ToSql> = params
-                .iter()
-                .map(|p| p as &dyn rusqlite::ToSql)
-                .collect();
-
-            stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
-            row_count += 1;
-        }
-
-        Ok(row_count)
+            Ok(row_count)
+        })
     }
 
-    /// Process binary format data
+    /// Process binary format data with transaction wrapping
     fn process_binary_data(
         &self,
         data: &[u8],
@@ -966,6 +968,8 @@ impl CopyHandler {
         _options: &CopyOptions,
     ) -> Result<usize> {
         use bytes::Buf;
+        
+        // Parse binary header outside of transaction (no DB access needed)
         let mut cursor = std::io::Cursor::new(data);
         
         // 1. Check signature (11 bytes)
@@ -996,69 +1000,80 @@ impl CopyHandler {
             cursor.advance(ext_len as usize);
         }
 
-        let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        // Get remaining data after header for processing within transaction
+        let remaining_data = {
+            let remaining = cursor.remaining();
+            let mut buf = vec![0u8; remaining];
+            cursor.copy_to_slice(&mut buf);
+            buf
+        };
         
-        // Get column names and types (if columns is empty, gets all table columns)
-        let (column_names, column_types) = self.get_column_type_oids(table_name, columns, &conn)?;
-        
-        let mut row_count = 0;
-
-        // 4. Process tuples
-        while cursor.remaining() >= 2 {
-            let field_count = cursor.get_i16();
+        // Process tuples within transaction
+        self.with_transaction(|conn| {
+            let mut cursor = std::io::Cursor::new(&remaining_data);
             
-            // Check for trailer (-1)
-            if field_count == -1 {
-                break;
-            }
+            // Get column names and types (if columns is empty, gets all table columns)
+            let (column_names, column_types) = self.get_column_type_oids(table_name, columns, conn)?;
+            
+            let mut row_count = 0;
 
-            if field_count < 0 {
-                return Err(anyhow!("Invalid field count in binary COPY: {}", field_count));
-            }
-
-            let mut values = Vec::new();
-            for col_idx in 0..field_count {
-                if cursor.remaining() < 4 {
-                    return Err(anyhow!("Binary COPY data too short (field length)"));
+            // 4. Process tuples
+            while cursor.remaining() >= 2 {
+                let field_count = cursor.get_i16();
+                
+                // Check for trailer (-1)
+                if field_count == -1 {
+                    break;
                 }
-                let len = cursor.get_i32();
-                if len == -1 {
-                    values.push(rusqlite::types::Value::Null);
-                } else if len < 0 {
-                    return Err(anyhow!("Invalid field length in binary COPY: {}", len));
-                } else {
-                    if cursor.remaining() < len as usize {
-                        return Err(anyhow!("Binary COPY data too short (field data)"));
+
+                if field_count < 0 {
+                    return Err(anyhow!("Invalid field count in binary COPY: {}", field_count));
+                }
+
+                let mut values = Vec::new();
+                for col_idx in 0..field_count {
+                    if cursor.remaining() < 4 {
+                        return Err(anyhow!("Binary COPY data too short (field length)"));
                     }
-                    let mut field_data = vec![0u8; len as usize];
-                    cursor.copy_to_slice(&mut field_data);
-                    
-                    // Get the type OID for this column
-                    let type_oid = column_types.get(col_idx as usize).copied().unwrap_or(TEXT_OID);
-                    
-                    // Convert binary data to SQLite value based on type
-                    let value = binary_to_sqlite_value(&field_data, type_oid)
-                        .map_err(|e| anyhow!("COPY {}: row {}, column {}: {}", 
-                            table_name, row_count + 1, col_idx + 1, e))?;
-                    values.push(value);
+                    let len = cursor.get_i32();
+                    if len == -1 {
+                        values.push(rusqlite::types::Value::Null);
+                    } else if len < 0 {
+                        return Err(anyhow!("Invalid field length in binary COPY: {}", len));
+                    } else {
+                        if cursor.remaining() < len as usize {
+                            return Err(anyhow!("Binary COPY data too short (field data)"));
+                        }
+                        let mut field_data = vec![0u8; len as usize];
+                        cursor.copy_to_slice(&mut field_data);
+                        
+                        // Get the type OID for this column
+                        let type_oid = column_types.get(col_idx as usize).copied().unwrap_or(TEXT_OID);
+                        
+                        // Convert binary data to SQLite value based on type
+                        let value = binary_to_sqlite_value(&field_data, type_oid)
+                            .map_err(|e| anyhow!("COPY {}: row {}, column {}: {}", 
+                                table_name, row_count + 1, col_idx + 1, e))?;
+                        values.push(value);
+                    }
                 }
+
+                // Build and execute INSERT statement (use column_names which may have been populated from catalog)
+                let sql = build_insert_sql(table_name, &column_names, values.len())?;
+                let mut stmt = conn.prepare_cached(&sql)?;
+
+                // Convert params for rusqlite
+                let param_refs: Vec<&dyn rusqlite::ToSql> = values
+                    .iter()
+                    .map(|p| p as &dyn rusqlite::ToSql)
+                    .collect();
+
+                stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
+                row_count += 1;
             }
 
-            // Build and execute INSERT statement (use column_names which may have been populated from catalog)
-            let sql = build_insert_sql(table_name, &column_names, values.len())?;
-            let mut stmt = conn.prepare_cached(&sql)?;
-
-            // Convert params for rusqlite
-            let param_refs: Vec<&dyn rusqlite::ToSql> = values
-                .iter()
-                .map(|p| p as &dyn rusqlite::ToSql)
-                .collect();
-
-            stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
-            row_count += 1;
-        }
-
-        Ok(row_count)
+            Ok(row_count)
+        })
     }
     
     /// Get column type OIDs from the catalog
