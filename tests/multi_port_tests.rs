@@ -291,7 +291,7 @@ fn test_environment_variable_in_help() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Check that environment variables are documented
-    assert!(stdout.contains("PGQT_CONFIG") || stdout.contains("PG_LITE_"), 
+    assert!(stdout.contains("PGQT_CONFIG") || stdout.contains("PGQT_HOST"), 
             "Should document environment variables");
 }
 

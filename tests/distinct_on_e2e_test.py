@@ -30,8 +30,8 @@ def proxy_server():
     
     # Start the proxy server
     env = os.environ.copy()
-    env["PG_LITE_DB"] = TEST_DB
-    env["PG_LITE_PORT"] = str(TEST_PORT)
+    env["PGQT_DB"] = TEST_DB
+    env["PGQT_PORT"] = str(TEST_PORT)
     
     proc = subprocess.Popen(
         ["./target/release/pgqt"],

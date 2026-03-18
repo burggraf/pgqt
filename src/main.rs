@@ -122,30 +122,30 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Host address to listen on (used when no config file)
-    #[arg(short = 'H', long, env = "PG_LITE_HOST", default_value = "127.0.0.1")]
+    #[arg(short = 'H', long, env = "PGQT_HOST", default_value = "127.0.0.1")]
     host: String,
 
     /// Port to listen on (used when no config file)
-    #[arg(short, long, env = "PG_LITE_PORT", default_value = "5432")]
+    #[arg(short, long, env = "PGQT_PORT", default_value = "5432")]
     port: u16,
 
     /// Path to the SQLite database file (used when no config file)
-    #[arg(short, long, env = "PG_LITE_DB", default_value = "test.db")]
+    #[arg(short, long, env = "PGQT_DB", default_value = "test.db")]
     database: String,
 
     /// Where to send server output (info messages, query logs).
     /// Options: STDOUT (default), STDERR, NULL (suppress), or a file path.
-    #[arg(short = 'o', long, env = "PG_LITE_OUTPUT", default_value = "STDOUT")]
+    #[arg(short = 'o', long, env = "PGQT_OUTPUT", default_value = "STDOUT")]
     output: OutputDest,
 
     /// Where to send server error output (errors, warnings).
     /// Options: STDERR, STDOUT, NULL (suppress), or a file path.
     /// Default: <database>.error.log (e.g., test.db.error.log)
-    #[arg(short = 'e', long, env = "PG_LITE_ERROR_OUTPUT")]
+    #[arg(short = 'e', long, env = "PGQT_ERROR_OUTPUT")]
     error_output: Option<OutputDest>,
 
     /// Enable debug output
-    #[arg(short = 'D', long, env = "PG_LITE_DEBUG")]
+    #[arg(short = 'D', long, env = "PGQT_DEBUG")]
     debug: bool,
 
     /// Disable password authentication (trust mode)

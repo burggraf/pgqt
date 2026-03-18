@@ -175,15 +175,15 @@ struct Cli {
     
     // ... existing args (host, port, database, etc.) marked as optional when config is used
     /// Host address to listen on (used when no config file)
-    #[arg(short = 'H', long, env = "PG_LITE_HOST", default_value = "127.0.0.1")]
+    #[arg(short = 'H', long, env = "PGQT_HOST", default_value = "127.0.0.1")]
     host: String,
 
     /// Port to listen on (used when no config file)
-    #[arg(short, long, env = "PG_LITE_PORT", default_value = "5432")]
+    #[arg(short, long, env = "PGQT_PORT", default_value = "5432")]
     port: u16,
 
     /// Path to the SQLite database file (used when no config file)
-    #[arg(short, long, env = "PG_LITE_DB", default_value = "test.db")]
+    #[arg(short, long, env = "PGQT_DB", default_value = "test.db")]
     database: String,
 
     // ... rest of existing args

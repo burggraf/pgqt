@@ -70,8 +70,8 @@ class ProxyManager:
             os.remove(self.db_path)
 
         env = os.environ.copy()
-        env["PG_LITE_DB"] = self.db_path
-        env["PG_LITE_PORT"] = str(self.port)
+        env["PGQT_DB"] = self.db_path
+        env["PGQT_PORT"] = str(self.port)
 
         # Start proxy using debug binary (release build may have linking issues)
         # First check if debug binary exists, fall back to cargo run if not
