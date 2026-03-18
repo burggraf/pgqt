@@ -31,7 +31,9 @@ use pgwire::api::query::SimpleQueryHandler;
 use pgwire::api::results::Response;
 use pgwire::api::{ClientInfo, PgWireServerHandlers};
 use pgwire::error::PgWireResult;
-use pgwire::tokio::{process_socket, process_socket_unix, TlsAcceptor};
+use pgwire::tokio::{process_socket, TlsAcceptor};
+#[cfg(unix)]
+use pgwire::tokio::process_socket_unix;
 use tokio::net::TcpListener;
 
 use crate::handler::errors::PgError;
