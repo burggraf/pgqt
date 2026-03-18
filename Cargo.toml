@@ -26,6 +26,7 @@ encoding_rs = "0.8"
 lazy_static = "1.4"
 md5 = "0.7"
 uuid = { version = "1.7", features = ["v4", "v7", "rng"] }
+lru = "0.12"
 
 [features]
 default = ["plpgsql"]

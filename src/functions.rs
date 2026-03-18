@@ -210,14 +210,14 @@ fn quote_value(value: &Value) -> String {
 
 /// Execute scalar function (returns single value)
 fn execute_scalar_function(conn: &Connection, sql: &str) -> Result<FunctionResult> {
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare_cached(sql)?;
     let result: Option<Value> = stmt.query_row([], |row| row.get(0)).optional()?;
     Ok(FunctionResult::Scalar(result))
 }
 
 /// Execute SETOF function (returns multiple rows of single type)
 fn execute_setof_function(conn: &Connection, sql: &str) -> Result<FunctionResult> {
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare_cached(sql)?;
     let rows: Vec<Value> = stmt
         .query_map([], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -226,7 +226,7 @@ fn execute_setof_function(conn: &Connection, sql: &str) -> Result<FunctionResult
 
 /// Execute TABLE function (returns multiple rows with columns)
 fn execute_table_function(conn: &Connection, sql: &str) -> Result<FunctionResult> {
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare_cached(sql)?;
     let column_count = stmt.column_count();
     
     let mut rows = Vec::new();

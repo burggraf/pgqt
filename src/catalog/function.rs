@@ -74,7 +74,7 @@ pub fn get_function(
 
     let arg_types_json = arg_types.map(|types| serde_json::to_string(types).unwrap());
 
-    let mut stmt = conn.prepare(query)?;
+    let mut stmt = conn.prepare_cached(query)?;
     
     let row_result = if let Some(json) = &arg_types_json {
         stmt.query_row([name, json], |row| {
@@ -181,7 +181,7 @@ pub fn drop_function(
 
     let arg_types_json = arg_types.map(|types| serde_json::to_string(types).unwrap());
 
-    let mut stmt = conn.prepare(query)?;
+    let mut stmt = conn.prepare_cached(query)?;
     
     let changes = if let Some(json) = &arg_types_json {
         stmt.execute([name, json])?
@@ -195,7 +195,7 @@ pub fn drop_function(
 /// Get function metadata by OID
 #[allow(dead_code)]
 pub fn get_function_by_oid(conn: &Connection, oid: i64) -> Result<Option<FunctionMetadata>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT oid, funcname, schema_name, arg_types, arg_names, arg_modes, 
                 return_type, return_type_kind, return_table_cols, function_body, 
                 language, volatility, strict, security_definer, parallel, owner_oid, created_at

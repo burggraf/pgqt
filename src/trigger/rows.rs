@@ -53,7 +53,7 @@ pub fn build_old_row(
     let sql = format!("SELECT * FROM {} WHERE {}", table_name, where_sql);
 
     // Execute query with primary key values
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
     let column_count = stmt.column_count();
 
     // Get column names
@@ -239,7 +239,7 @@ pub fn get_primary_key_columns(
 ) -> Result<Vec<String>> {
     // Query SQLite pragma to get primary key columns
     let sql = format!("PRAGMA table_info({})", table_name);
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
 
     let rows = stmt.query_map([], |row| {
         let name: String = row.get(1)?;
@@ -330,7 +330,7 @@ pub fn build_old_row_from_where(
         // No primary key - we need to fetch based on the WHERE clause
         // This is less efficient but necessary
         let sql = format!("SELECT * FROM {} WHERE {} LIMIT 1", table_name, where_clause);
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
 
         let column_count = stmt.column_count();
         let column_names: Vec<String> = (0..column_count)
@@ -358,7 +358,7 @@ pub fn build_old_row_from_where(
         // Try to extract primary key values from the WHERE clause
         // This is a simplified parser - it looks for patterns like "id = ?" or "id = 1"
         let sql = format!("SELECT * FROM {} WHERE {} LIMIT 1", table_name, where_clause);
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
 
         let column_count = stmt.column_count();
         let column_names: Vec<String> = (0..column_count)
@@ -591,7 +591,7 @@ pub fn fetch_inserted_row(
 ) -> Result<HashMap<String, Value>> {
     // Try to get by rowid first as it's most reliable in SQLite
     let sql = format!("SELECT * FROM {} WHERE rowid = last_insert_rowid()", table_name);
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
     let mut rows = stmt.query([])?;
     if let Some(row) = rows.next()? {
         return row_to_map(row);
@@ -605,7 +605,7 @@ pub fn fetch_inserted_row(
     
     let pk = &pk_columns[0];
     let sql = format!("SELECT * FROM {} WHERE {} = last_insert_rowid()", table_name, pk);
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
     let mut rows = stmt.query([])?;
     if let Some(row) = rows.next()? {
         return row_to_map(row);

@@ -14,6 +14,7 @@ use dashmap::DashMap;
 use futures::stream;
 
 use crate::catalog::FunctionMetadata;
+use crate::cache::TranspileCache;
 use crate::schema::SchemaManager;
 use crate::handler::SessionContext;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
@@ -25,6 +26,7 @@ pub trait HandlerUtils {
     fn sessions(&self) -> &Arc<DashMap<u32, SessionContext>>;
     fn schema_manager(&self) -> &SchemaManager;
     fn functions(&self) -> &Arc<DashMap<String, FunctionMetadata>>;
+    fn transpile_cache(&self) -> &Arc<TranspileCache>;
     
     /// Get or checkout a per-session connection for a client
     fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>>;
@@ -133,7 +135,7 @@ pub trait HandlerUtils {
         }
 
         // Get effective roles (including inherited) using prepare and query_map
-        let mut stmt = conn.prepare("
+        let mut stmt = conn.prepare_cached("
             WITH RECURSIVE effective_roles AS (
                 SELECT oid FROM __pg_authid__ WHERE rolname = ?1
                 UNION
@@ -1267,7 +1269,7 @@ pub trait HandlerUtils {
         // Execute the EXPLAIN query directly on SQLite
         let conn = self.conn().lock().unwrap();
 
-        let mut stmt = conn.prepare(&explain_sql)?;
+        let mut stmt = conn.prepare_cached(&explain_sql)?;
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
         let fields: Arc<Vec<FieldInfo>> = Arc::new(

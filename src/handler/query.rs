@@ -14,8 +14,30 @@ use crate::trigger::{TriggerExecutor, BeforeTriggerResult, extract_table_and_ope
 use crate::trigger::rows::{fetch_inserted_row};
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
 
+/// Fast check if SQL is likely a single statement.
+/// Returns true if there's no semicolon or only trailing semicolons.
+fn is_likely_single_statement(sql: &str) -> bool {
+    let trimmed = sql.trim();
+    if !trimmed.contains(';') {
+        return true;
+    }
+    
+    // Check if semicolon is only at the end (possibly multiple trailing semicolons)
+    let without_trailing = trimmed.trim_end_matches(';').trim();
+    !without_trailing.contains(';')
+}
+
 /// Helper to robustly split multiple SQL statements
 fn robust_split(sql: &str) -> Vec<String> {
+    // OPTIMIZATION: Fast path for single statements with only trailing semicolons
+    // This avoids calling pg_query::split_with_scanner for the common case
+    if is_likely_single_statement(sql) {
+        let trimmed = sql.trim().trim_end_matches(';');
+        if !trimmed.is_empty() {
+            return vec![trimmed.to_string()];
+        }
+    }
+    
     // Optimization: if it doesn't contain a semicolon, it's likely a single statement
     if !sql.contains(';') {
         return vec![sql.to_string()];
@@ -227,7 +249,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
         let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
         ctx.set_metadata_provider(self.as_metadata_provider());
-        let transpile_result = crate::transpiler::transpile_with_context(sql, &mut ctx);
+        
+        // Use transpilation cache for repeated queries
+        let transpile_result = self.transpile_cache().get_or_compute(sql, || {
+            crate::transpiler::transpile_with_context(sql, &mut ctx)
+        });
 
         if !transpile_result.errors.is_empty() {
             let error_msg = transpile_result.errors.join("; ");
@@ -599,6 +625,17 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 session_clone.transaction_status = crate::handler::TransactionStatus::InError;
                 self.sessions().insert(client_id, session_clone);
             }
+        } else {
+            // Clear transpilation cache on successful DDL operations
+            // This ensures subsequent queries see the updated schema
+            if transpile_result.operation_type == crate::transpiler::OperationType::DDL {
+                self.transpile_cache().clear();
+                // Clear SQLite prepared statement cache as well
+                // Note: We clear the main connection's cache; pooled connections will self-refresh
+                if let Ok(conn) = self.conn().lock() {
+                    conn.flush_prepared_statement_cache();
+                }
+            }
         }
 
         execute_result
@@ -644,7 +681,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
     }
 
     fn execute_select_with_params(&self, conn: &Connection, sql: &str, params: &[Option<String>], referenced_tables: &[String], column_aliases: &[String], column_types: &[Option<String>]) -> Result<Vec<Response>> {
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare_cached(sql)?;
         let col_count = stmt.column_count();
 
         let fields: Arc<Vec<FieldInfo>> = Arc::new(self.build_field_info(&stmt, referenced_tables, conn, column_aliases, column_types)?);
@@ -696,7 +733,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
             }
         }).collect();
 
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare_cached(sql)?;
         let changes = stmt.execute(rusqlite::params_from_iter(rusqlite_params))?;
 
         let upper_sql = sql.trim().to_uppercase();
@@ -943,7 +980,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
             let select_sql = format!("SELECT *, rowid FROM {} WHERE {}", table_name, where_sql);
             
             let rows_data = {
-                let mut stmt = conn.prepare(&select_sql)?;
+                let mut stmt = conn.prepare_cached(&select_sql)?;
                 let col_count = stmt.column_count();
                 let rowid_idx = col_count - 1; // rowid is the last column in "SELECT *, rowid"
                 let mut rows = stmt.query([])?;
@@ -988,7 +1025,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
             let select_sql = format!("SELECT *, rowid FROM {} WHERE {}", table_name, where_sql);
             
             let rows_data = {
-                let mut stmt = conn.prepare(&select_sql)?;
+                let mut stmt = conn.prepare_cached(&select_sql)?;
                 let col_count = stmt.column_count();
                 let rowid_idx = col_count - 1; // rowid is the last column in "SELECT *, rowid"
                 let mut rows = stmt.query([])?;

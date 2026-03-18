@@ -1,68 +1,96 @@
-Excellent! I've completed a comprehensive analysis of the postgres-compatibility-suite test failures. Here's what I've documented:
+# Code Context
 
-## Summary of Findings
+## Files Retrieved
+1. `src/handler/mod.rs` - Main PostgreSQL wire protocol handler, defines `SqliteHandler` and its implementation of `ExtendedQueryHandler`.
+2. `src/handler/transaction.rs` - Contains logic for identifying, parsing, and executing PostgreSQL transaction control commands (BEGIN, COMMIT, ROLLBACK, SAVEPOINT).
+3. `src/handler/query.rs` (lines 390-440) - Handles the execution of individual queries, including the early detection and processing of transaction control statements.
 
-**context.md** has been written to `/Users/markb/dev/pgqt/context.md` with a detailed 18,765-byte analysis containing:
+## Key Code
 
-### Test Results
-- **36 failed, 14 passed (28% pass rate)**
-- ✅ All 14 passes are **sqltest** (SQL-92 standard) tests
-- ❌ 35 of 36 PostgreSQL regression tests fail
+**`src/handler/transaction.rs` - `execute_transaction_command` function:**
+This function is responsible for executing `BEGIN` and `COMMIT` against the SQLite connection.
 
-### 12 Failure Categories Identified
+```rust
+pub fn execute_transaction_command(
+    cmd: TransactionCommand,
+    session: &mut SessionContext,
+    conn: &Connection,
+) -> Result<Vec<Response>> {
+    match cmd {
+        TransactionCommand::Begin => {
+            if session.transaction_status != TransactionStatus::Idle {
+                // If already in a transaction, just acknowledge
+                return Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))]);
+            }
+            // Execute SQLite BEGIN
+            conn.execute("BEGIN", [])?;
+            session.transaction_status = TransactionStatus::InTransaction;
+            Ok(vec![Response::TransactionStart(Tag::new("BEGIN"))])
+        }
 
-**High Severity (Critical):**
-1. **Type Validation Not Enforced** (10+ failures)
-   - VARCHAR/CHAR length ignored
-   - Numeric overflow accepted
-   - Invalid dates, timezones, UUIDs, JSON accepted
+        TransactionCommand::Commit => {
+            if session.transaction_status == TransactionStatus::Idle {
+                // If no active transaction, just acknowledge
+                return Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))]);
+            }
+            // Execute SQLite COMMIT
+            conn.execute("COMMIT", [])?;
+            session.transaction_status = TransactionStatus::Idle;
+            session.savepoints.clear();
+            Ok(vec![Response::TransactionEnd(Tag::new("COMMIT"))])
+        }
+        // ... (Rollback and Savepoint handling omitted)
+    }
+}
+```
 
-2. **Missing Built-in Functions** (8+ failures)
-   - `corr()`, `to_char()`, `generate_series()` missing
-   - System tables (`pg_class`, `pg_tables`) not accessible
+**`src/handler/query.rs` - `execute_single_query_params` (partial, around line 417):**
+This snippet shows the early interception of transaction control statements before full transpilation.
 
-3. **SQL Syntax/Semantic Errors** (12+ failures)
-   - Column reference ambiguity not rejected
-   - CASE expression aliases not preserved
-   - Array subscript type metadata incorrect
-   - INSERT column count not validated
+```rust
+        // ... (other special handling)
 
-**Medium Severity:**
-4. OFFSET without LIMIT semantics
-5. LATERAL subquery errors
-6. Set operation column naming (generates non-standard `?column?:1`)
-7. Window function limitations
-8. Recursive CTEs not supported
+        if crate::handler::transaction::is_transaction_control(original_sql) {
+            let mut session_clone = {
+                let session_ref = self.sessions().get(&client_id).unwrap_or_else(|| {
+                    self.sessions().insert(client_id, SessionContext::new("postgres".to_string()));
+                    self.sessions().get(&client_id).unwrap()
+                });
+                session_ref.clone()
+            };
 
-**Lower Severity:**
-9. PL/pgSQL syntax not validated
-10. Extension types (pgvector) not registered
-11. Incomplete SHOW command support
-12. Various function signature issues
+            if let Some(cmd) = crate::handler::transaction::parse_transaction_command(original_sql) {
+                let result = {
+                    let conn_guard = self.conn().lock().unwrap();
+                    crate::handler::transaction::execute_transaction_command(
+                        cmd,
+                        &mut session_clone,
+                        &conn_guard,
+                    )
+                };
 
-### Root Cause Analysis
+                self.sessions().insert(client_id, session_clone);
+                return result; // Short-circuits further processing
+            }
+        }
 
-**Top 5 Systemic Issues:**
-1. No input validation layer (VARCHAR/CHAR/numeric/date/UUID/JSON)
-2. Incomplete function registry (aggregates, formatting, set-generating)
-3. Column alias/metadata preservation broken
-4. Table/column reference validation missing
-5. System catalog not exposed
+        // ... (rest of query processing, including transpilation for non-transaction statements)
+```
 
-### Prioritized Recommendations
+## Architecture
 
-**Phase 1 (2-3 weeks, High Impact):**
-- Add input validation layer
-- Expand built-in function registry
-- Fix column alias preservation
+The `SqliteHandler` (in `src/handler/mod.rs`) acts as the main entry point for PostgreSQL client interactions, implementing the `pgwire::api::query::ExtendedQueryHandler` trait. When a query is received, it delegates to `execute_query_params` (in `src/handler/query.rs`).
 
-**Phase 2 (3-5 weeks):**
-- Expose system catalog
-- Add table/column reference validation
+The core transaction logic is centralized in `src/handler/transaction.rs`. Upon receiving a query, `execute_single_query_params` first checks if it's a transaction control statement (`BEGIN`, `COMMIT`, etc.) using `is_transaction_control`. If it is, the command is parsed, a clone of the `SessionContext` is created, and `execute_transaction_command` is called directly against the `rusqlite::Connection`. This allows `BEGIN`/`COMMIT` to bypass the heavy SQL transpilation step. The updated `SessionContext` is then stored, and the appropriate wire protocol response (`TransactionStart`/`TransactionEnd`) is returned.
 
-**Phase 3 (Advanced features):**
-- PL/pgSQL syntax validation
-- Recursive CTEs
-- Complete window function support
+For non-transaction control statements (`INSERT`, `UPDATE`), they proceed to the full transpilation pipeline (`crate::transpiler::transpile_with_context`) before execution against SQLite.
 
-The document includes specific SQL examples for each issue, reproducibility instructions, and files to modify.
+All interactions with the underlying `rusqlite::Connection` are protected by a `Mutex` (`conn.lock().unwrap()`), ensuring serialized access per session.
+
+## Start Here
+
+`src/handler/query.rs` specifically the `execute_single_query_params` function (around line 390) is the best place to start. This function orchestrates the initial processing of incoming SQL statements, including the critical early detection and handling of transaction control commands, and the subsequent dispatch to the transpilation pipeline for other queries.
+
+# Project Context
+
+(This section is automatically included from `AGENTS.md` and provides general project information for all agents.)

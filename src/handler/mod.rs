@@ -20,6 +20,7 @@ use futures::Sink;
 use async_trait::async_trait;
 
 use crate::debug;
+use crate::cache::TranspileCache;
 use crate::catalog::{init_catalog, init_system_views};
 use crate::connection_pool::{ConnectionHandle, ConnectionPool};
 use crate::schema::{SchemaManager, SearchPath};
@@ -191,12 +192,17 @@ pub struct SqliteHandler {
     pub schema_manager: SchemaManager,
     pub copy_handler: copy::CopyHandler,
     pub functions: Arc<DashMap<String, crate::catalog::FunctionMetadata>>,
+    /// LRU cache for transpiled queries
+    pub transpile_cache: Arc<crate::cache::TranspileCache>,
 }
 
 impl SqliteHandler {
     /// Create a new SqliteHandler with the given database path
     pub fn new(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path)?;
+
+        // Configure SQLite prepared statement cache (default is 16, increase to 64)
+        conn.set_prepared_statement_cache_capacity(64);
 
         init_catalog(&conn)?;
         init_system_views(&conn)?;
@@ -229,6 +235,7 @@ impl SqliteHandler {
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
             functions,
+            transpile_cache: Arc::new(TranspileCache::new()),
         };
 
         // Register PostgreSQL-compatible functions on the main connection too
@@ -2631,6 +2638,10 @@ impl HandlerUtils for SqliteHandler {
         &self.functions
     }
 
+    fn transpile_cache(&self) -> &Arc<crate::cache::TranspileCache> {
+        &self.transpile_cache
+    }
+
     fn get_session_connection(&self, client_id: u32) -> Result<Arc<Mutex<Connection>>> {
         // Check if client already has a connection
         if let Some(entry) = self.client_connections.get(&client_id) {
@@ -2878,7 +2889,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);
         
         let conn = self.conn().lock().unwrap();
-        if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
+        if let Ok(stmt) = conn.prepare_cached(&transpile_result.sql) {
             let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases, &transpile_result.column_types)
                 .unwrap_or_default();
             
@@ -2909,7 +2920,7 @@ impl ExtendedQueryHandler for SqliteHandler {
         let transpile_result = crate::transpiler::transpile_with_context(query, &mut ctx);
         
         let conn = self.conn().lock().unwrap();
-        if let Ok(stmt) = conn.prepare(&transpile_result.sql) {
+        if let Ok(stmt) = conn.prepare_cached(&transpile_result.sql) {
             let fields = self.build_field_info(&stmt, &transpile_result.referenced_tables, &conn, &transpile_result.column_aliases, &transpile_result.column_types)
                 .unwrap_or_default();
             debug!("Returning {} fields for Describe portal", fields.len());

@@ -190,7 +190,7 @@ impl ExecutionContext {
                 .collect::<Result<Vec<_>, _>>()?;
             
             let conn = conn2.lock().map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
-            let mut stmt = conn.prepare(&query).map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+            let mut stmt = conn.prepare_cached(&query).map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
             let column_count = stmt.column_count();
             
             // Collect column names before iterating

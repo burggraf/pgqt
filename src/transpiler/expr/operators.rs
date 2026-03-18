@@ -134,21 +134,21 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         pg_query::protobuf::AExprKind::AexprBetween => {
             // PostgreSQL allows BETWEEN x, y syntax (with comma)
             // SQLite requires BETWEEN x AND y
-            // The rexpr_sql contains both bounds, we need to replace comma with AND
-            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            // A single replace(',', " AND ") handles both "1, 2" and "1,2" cases
+            let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} BETWEEN {}", lexpr_sql, bounds);
         }
         pg_query::protobuf::AExprKind::AexprNotBetween => {
-            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
         }
         pg_query::protobuf::AExprKind::AexprBetweenSym => {
             // Symmetric BETWEEN - treat as regular BETWEEN for now
-            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} BETWEEN {}", lexpr_sql, bounds);
         }
         pg_query::protobuf::AExprKind::AexprNotBetweenSym => {
-            let bounds = rexpr_sql.replace(", ", " AND ").replace(",", " AND ");
+            let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
         }
         _ => {}

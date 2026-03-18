@@ -672,7 +672,7 @@ impl CopyHandler {
         // For COPY TO, we need to execute the query and stream results
         let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         
-        let mut stmt = conn.prepare(&query)?;
+        let mut stmt = conn.prepare_cached(&query)?;
         let col_count = stmt.column_count();
         let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         
@@ -859,7 +859,7 @@ impl CopyHandler {
 
             // Build and execute INSERT statement
             let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-            let mut stmt = conn.prepare(&sql)?;
+            let mut stmt = conn.prepare_cached(&sql)?;
 
             // Convert params for rusqlite
             let params: Vec<rusqlite::types::Value> = converted_values
@@ -934,7 +934,7 @@ impl CopyHandler {
 
             // Build and execute INSERT statement
             let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-            let mut stmt = conn.prepare(&sql)?;
+            let mut stmt = conn.prepare_cached(&sql)?;
 
             // Convert params for rusqlite
             let params: Vec<rusqlite::types::Value> = converted_values
@@ -1046,7 +1046,7 @@ impl CopyHandler {
 
             // Build and execute INSERT statement (use column_names which may have been populated from catalog)
             let sql = build_insert_sql(table_name, &column_names, values.len())?;
-            let mut stmt = conn.prepare(&sql)?;
+            let mut stmt = conn.prepare_cached(&sql)?;
 
             // Convert params for rusqlite
             let param_refs: Vec<&dyn rusqlite::ToSql> = values
@@ -1073,7 +1073,7 @@ impl CopyHandler {
         
         // If no columns specified, get all columns from the table
         let _columns_to_lookup: Vec<String> = if columns.is_empty() {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare_cached(
                 "SELECT column_name, original_type 
                  FROM __pg_meta__ 
                  WHERE table_name = ?1

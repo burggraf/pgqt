@@ -62,7 +62,7 @@ pub fn get_trigger(
     trigger_name: &str,
     table_oid: i64,
 ) -> Result<Option<TriggerMetadata>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT oid, tgname, tgrelid, tgtype, tgenabled, tgisinternal, 
                 tgconstraint, tgdeferrable, tginitdeferred, 
                 tgnargs, tgargs, function_oid, function_name
@@ -165,7 +165,7 @@ pub fn get_triggers_for_table(
     
     query.push_str(" ORDER BY oid");
     
-    let mut stmt = conn.prepare(&query)?;
+    let mut stmt = conn.prepare_cached(&query)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(_params.iter()), |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -221,7 +221,7 @@ pub fn drop_trigger(
     trigger_name: &str,
     table_oid: i64,
 ) -> Result<bool> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "DELETE FROM __pg_triggers__ WHERE tgname = ? AND tgrelid = ?"
     )?;
     
@@ -251,7 +251,7 @@ pub fn set_trigger_enabled(
     table_oid: i64,
     enabled: bool,
 ) -> Result<bool> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "UPDATE __pg_triggers__ SET tgenabled = ? WHERE tgname = ? AND tgrelid = ?"
     )?;
     

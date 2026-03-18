@@ -69,7 +69,7 @@ pub fn store_relation_metadata(
 #[allow(dead_code)]
 /// Retrieve all column metadata for a specific table
 pub fn get_table_metadata(conn: &Connection, table_name: &str) -> Result<Vec<ColumnMetadata>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT table_name, column_name, original_type, constraints
          FROM __pg_meta__
          WHERE table_name = ?1
@@ -139,7 +139,7 @@ pub fn delete_table_metadata(conn: &Connection, table_name: &str) -> Result<()> 
 /// Returns column information in the order they appear in the table,
 /// including default expressions from the catalog.
 pub fn get_table_columns_with_defaults(conn: &Connection, table_name: &str) -> Result<Vec<ColumnMetadata>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT table_name, column_name, original_type, constraints
          FROM __pg_meta__
          WHERE table_name = ?1
@@ -162,7 +162,7 @@ pub fn get_table_columns_with_defaults(conn: &Connection, table_name: &str) -> R
     
     // If no metadata in catalog, fall back to pragma_table_info
     if result.is_empty() {
-        let mut pragma_stmt = conn.prepare(
+        let mut pragma_stmt = conn.prepare_cached(
             "SELECT name, type, cid, dflt_value FROM pragma_table_info(?1) ORDER BY cid"
         )?;
         
@@ -227,7 +227,7 @@ pub fn populate_pg_attribute(conn: &Connection, table_name: &str) -> Result<()> 
     )?;
     
     
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT name, type, cid, \"notnull\", dflt_value 
          FROM pragma_table_info(?1)"
     )?;
@@ -271,7 +271,7 @@ pub fn populate_pg_index(conn: &Connection) -> Result<()> {
     
     conn.execute("DELETE FROM __pg_index__", [])?;
     
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT sm.rowid, sm.name, sm.sql, sm.tbl_name 
          FROM sqlite_master sm 
          WHERE sm.type = 'index' 
@@ -321,7 +321,7 @@ pub fn populate_pg_constraint(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM __pg_constraint__", [])?;
     
     
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__pg_%'"
     )?;
     
@@ -344,7 +344,7 @@ pub fn populate_pg_constraint(conn: &Connection) -> Result<()> {
         }
         
         
-        let mut pk_stmt = conn.prepare(
+        let mut pk_stmt = conn.prepare_cached(
             "SELECT name, cid FROM pragma_table_info(?1) WHERE pk > 0 ORDER BY pk"
         )?;
         
@@ -366,7 +366,7 @@ pub fn populate_pg_constraint(conn: &Connection) -> Result<()> {
         }
         
         
-        let mut fk_stmt = conn.prepare("SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete, match FROM pragma_foreign_key_list(?1)")?;
+        let mut fk_stmt = conn.prepare_cached("SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete, match FROM pragma_foreign_key_list(?1)")?;
         let fk_rows = fk_stmt.query_map([table], |row| {
             Ok((
                 row.get::<_, i64>(0)?,  
@@ -443,7 +443,7 @@ pub fn store_enum_value(conn: &Connection, type_name: &str, label: &str, sort_or
 
 /// Get all labels for an enum type
 pub fn get_enum_values(conn: &Connection, type_name: &str) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT e.enumlabel 
          FROM __pg_enum__ e
          JOIN __pg_type__ t ON e.enumtypid = t.oid

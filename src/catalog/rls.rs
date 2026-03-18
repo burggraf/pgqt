@@ -102,7 +102,7 @@ pub fn get_applicable_policies(
     command: &str, 
     user_roles: &[String],
 ) -> Result<Vec<RlsPolicy>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled
          FROM __pg_rls_policies__
          WHERE polrelid = ?1 
@@ -157,7 +157,7 @@ pub fn drop_rls_policy(conn: &Connection, policy_name: &str, table_name: &str) -
 /// Get all policies for a table (for admin/inspection)
 #[allow(dead_code)]
 pub fn get_table_policies(conn: &Connection, table_name: &str) -> Result<Vec<RlsPolicy>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT polname, polrelid, polcmd, polpermissive, polroles, polqual, polwithcheck, polenabled
          FROM __pg_rls_policies__
          WHERE polrelid = ?1"

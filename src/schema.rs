@@ -336,7 +336,7 @@ pub fn get_schema_owner(conn: &Connection, name: &str) -> Result<Option<i64>> {
 /// List all schemas
 #[allow(dead_code)]
 pub fn list_schemas(conn: &Connection) -> Result<Vec<SchemaMetadata>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT oid, nspname, nspowner, nspacl FROM __pg_namespace__ ORDER BY oid",
     )?;
 
@@ -395,7 +395,7 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let tables: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    let tables: Vec<String> = conn.prepare_cached(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
     drop(sql); // Explicitly drop the prepared statement
 
     // Drop each table (CASCADE is automatic in SQLite)
@@ -409,7 +409,7 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let views: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    let views: Vec<String> = conn.prepare_cached(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
     drop(sql);
 
     for view in views {
@@ -422,7 +422,7 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let indexes: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    let indexes: Vec<String> = conn.prepare_cached(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
     drop(sql);
 
     for index in indexes {
@@ -435,7 +435,7 @@ pub fn drop_schema_objects(conn: &Connection, schema_name: &str, schema_manager:
         "SELECT name FROM {}.sqlite_master WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%'",
         schema_name
     );
-    let triggers: Vec<String> = conn.prepare(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
+    let triggers: Vec<String> = conn.prepare_cached(&sql)?.query_map([], |row| row.get(0))?.filter_map(|r| r.ok()).collect();
     drop(sql);
 
     for trigger in triggers {
