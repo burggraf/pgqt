@@ -2,6 +2,40 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [0.7.1] - 2026-03-18
+
+### Fixed
+- **Environment Variable Names**: Fixed mismatch between documented and actual environment variable names
+  - Changed `PG_LITE_HOST` → `PGQT_HOST`
+  - Changed `PG_LITE_PORT` → `PGQT_PORT`
+  - Changed `PG_LITE_DB` → `PGQT_DB`
+  - Changed `PG_LITE_OUTPUT` → `PGQT_OUTPUT`
+  - Changed `PG_LITE_ERROR_OUTPUT` → `PGQT_ERROR_OUTPUT`
+  - Changed `PG_LITE_DEBUG` → `PGQT_DEBUG`
+  - Environment variables now work correctly (previously only CLI arguments worked)
+
+## [0.7.0] - 2026-03-17
+
+### Added
+- **Connection Pooling**: Full connection pooling implementation with configurable pool size, timeouts, and health checks
+- **Memory Management**: Buffer pool and memory monitoring with configurable thresholds
+- **Memory-Mapped I/O**: Mmap support for large values with configurable size limits
+- **Multi-Port Configuration**: JSON-based configuration for running multiple listeners on different ports
+- **TLS/SSL Support**: Full TLS encryption with certificate and ephemeral (self-signed) certificate options
+- **Unix Socket Support**: Unix domain socket listener alongside TCP
+- **Performance Tuning**: Extensive SQLite PRAGMA configuration options (journal mode, synchronous, cache size, etc.)
+- **Query Result Caching**: Optional result caching with TTL support
+- **Transpile Caching**: SQL statement transpilation cache with configurable size and TTL
+- **Output Redirection**: Configurable output destinations (stdout, stderr, file, null) per port
+- **Debug Mode**: Per-port debug output configuration
+- **Trust Mode**: Optional password-less authentication for development
+- **Auto User Creation**: Automatic user creation on first connection (development feature)
+
+### Infrastructure
+- **Configuration System**: New `src/config.rs` module with JSON and CLI configuration support
+- **TLS Module**: New `src/tls.rs` for certificate management and TLS handshake
+- **Handler Refactoring**: Restructured handler module for multi-port support
+
 ## [0.6.3] - 2026-03-17
 
 ### Documentation
