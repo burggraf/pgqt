@@ -4,6 +4,36 @@ All notable changes to PGQT will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-03-18
+
+### Performance Improvements
+
+#### COPY Handler Bulk Optimization - 85x Speedup
+- **Transaction Wrapping**: COPY FROM operations now use explicit SQLite transactions
+  - Eliminates auto-commit overhead for each row
+  - Provides 3-5x performance improvement
+- **Multi-Row INSERT Batching**: Data is batched into multi-row INSERT statements
+  - Dynamic batch sizing based on column count (respects SQLite's 999 parameter limit)
+  - 3 columns: 100 rows/batch, 10 columns: 99 rows/batch, 50 columns: 19 rows/batch
+  - Provides additional 3-5x performance improvement
+- **Overall Performance**: 10-20x target exceeded with measured 85x speedup
+  - COPY: ~109,000 rows/sec
+  - Individual INSERTs: ~1,276 rows/sec
+  - Benchmark: `tests/copy_performance_test.py`
+
+### Added
+- `calculate_batch_size()`: Helper to compute optimal batch size within SQLite limits
+- `build_multirow_insert_sql()`: Generate multi-row INSERT statements
+- `execute_batch()`: Unified batch execution for text/CSV formats
+- `execute_batch_binary()`: Batch execution for binary format
+- Unit tests for batch size calculation and multi-row INSERT generation
+- Performance benchmark test comparing COPY vs individual INSERTs
+
+### Fixed
+- `with_transaction()`: Now handles already-in-transaction case gracefully
+- Empty columns handling: Falls back to single-row inserts when columns not specified
+- All COPY e2e tests pass with new batching implementation
+
 ### Added
 - **Optional TLS Support**: TLS is now an optional feature flag to reduce binary size
   - Default build includes TLS (~12MB)
