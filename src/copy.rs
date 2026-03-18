@@ -58,6 +58,12 @@ const JSONB_OID: i32 = 3802;
 #[allow(dead_code)]
 const PG_EPOCH_MICROS: i64 = 946684800000000i64;
 
+/// Batch size for multi-row INSERT operations
+/// SQLite has a limit of 999 parameters per statement, so we calculate
+/// batch size dynamically based on column count: max(999 / columns, 1)
+const MAX_SQLITE_PARAMS: usize = 999;
+const DEFAULT_BATCH_SIZE: usize = 100;
+
 /// Read a boolean from binary format (1 byte: 0=false, 1=true)
 #[allow(dead_code)]
 fn read_bool_binary(data: &[u8]) -> Result<bool> {
@@ -801,7 +807,7 @@ impl CopyHandler {
         }
     }
 
-    /// Process text format data with transaction wrapping
+    /// Process text format data with transaction wrapping and batching
     fn process_text_data(
         &self,
         data: &[u8],
@@ -810,16 +816,20 @@ impl CopyHandler {
         options: &CopyOptions,
     ) -> Result<usize> {
         self.with_transaction(|conn| {
-            let mut row_count = 0;
+            let mut total_row_count = 0;
             let mut line_number = 0;
 
-            // Convert from source encoding to UTF-8, then parse text format
+            // Calculate batch size based on column count
+            let batch_size = calculate_batch_size(columns.len().max(1));
+
+            // Convert from source encoding to UTF-8
             let content = decode_to_utf8(data, &options.encoding)
                 .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
-            // Use split_inclusive to handle empty trailing fields and preserve row boundaries
-            let lines: Vec<&str> = content.split_inclusive('\n').collect();
 
-            for line in lines {
+            // Collect rows into batches
+            let mut current_batch: Vec<Vec<Option<String>>> = Vec::with_capacity(batch_size);
+
+            for line in content.split_inclusive('\n') {
                 line_number += 1;
                 let mut line = line;
                 if line.ends_with('\n') {
@@ -828,7 +838,7 @@ impl CopyHandler {
                 if line.ends_with('\r') {
                     line = &line[..line.len() - 1];
                 }
-                
+
                 if line.is_empty() || line == "\\." {
                     continue;
                 }
@@ -847,8 +857,7 @@ impl CopyHandler {
                 // Convert values, handling NULL
                 let converted_values: Vec<Option<String>> = values
                     .iter()
-                    .enumerate()
-                    .map(|(_col_idx, v)| {
+                    .map(|v| {
                         if v == &options.null_string {
                             None
                         } else {
@@ -857,38 +866,25 @@ impl CopyHandler {
                     })
                     .collect();
 
-                // Build and execute INSERT statement
-                let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-                let mut stmt = conn.prepare_cached(&sql)?;
+                current_batch.push(converted_values);
 
-                // Convert params for rusqlite
-                let params: Vec<rusqlite::types::Value> = converted_values
-                    .into_iter()
-                    .map(|v| match v {
-                        Some(s) => rusqlite::types::Value::Text(s),
-                        None => rusqlite::types::Value::Null,
-                    })
-                    .collect();
-
-                let param_refs: Vec<&dyn rusqlite::ToSql> = params
-                    .iter()
-                    .map(|p| p as &dyn rusqlite::ToSql)
-                    .collect();
-
-                if let Err(e) = stmt.execute(rusqlite::params_from_iter(param_refs.iter())) {
-                    return Err(anyhow!(
-                        "COPY {}: line {}, column {}: {}",
-                        table_name, line_number, columns.get(0).unwrap_or(&"unknown".to_string()), e
-                    ));
+                // Flush batch when full
+                if current_batch.len() >= batch_size {
+                    total_row_count += self.execute_batch(conn, table_name, columns, &current_batch)?;
+                    current_batch.clear();
                 }
-                row_count += 1;
             }
 
-            Ok(row_count)
+            // Flush remaining rows
+            if !current_batch.is_empty() {
+                total_row_count += self.execute_batch(conn, table_name, columns, &current_batch)?;
+            }
+
+            Ok(total_row_count)
         })
     }
 
-    /// Process CSV format data with transaction wrapping
+    /// Process CSV format data with transaction wrapping and batching
     fn process_csv_data(
         &self,
         data: &[u8],
@@ -897,9 +893,12 @@ impl CopyHandler {
         options: &CopyOptions,
     ) -> Result<usize> {
         self.with_transaction(|conn| {
-            let mut row_count = 0;
+            let mut total_row_count = 0;
 
-            // Convert from source encoding to UTF-8, then parse CSV format
+            // Calculate batch size based on column count
+            let batch_size = calculate_batch_size(columns.len().max(1));
+
+            // Convert from source encoding to UTF-8
             let content = decode_to_utf8(data, &options.encoding)
                 .map_err(|e| anyhow!("COPY {}: encoding error: {}", table_name, e))?;
             let lines: Vec<&str> = content.lines().collect();
@@ -908,9 +907,12 @@ impl CopyHandler {
             let start_idx = if options.header && !lines.is_empty() { 1 } else { 0 };
             let mut line_number = start_idx;
 
+            // Collect rows into batches
+            let mut current_batch: Vec<Vec<Option<String>>> = Vec::with_capacity(batch_size);
+
             for line in &lines[start_idx..] {
                 line_number += 1;
-                
+
                 if line.is_empty() {
                     continue;
                 }
@@ -933,33 +935,25 @@ impl CopyHandler {
                     })
                     .collect();
 
-                // Build and execute INSERT statement
-                let sql = build_insert_sql(table_name, columns, converted_values.len())?;
-                let mut stmt = conn.prepare_cached(&sql)?;
+                current_batch.push(converted_values);
 
-                // Convert params for rusqlite
-                let params: Vec<rusqlite::types::Value> = converted_values
-                    .into_iter()
-                    .map(|v| match v {
-                        Some(s) => rusqlite::types::Value::Text(s),
-                        None => rusqlite::types::Value::Null,
-                    })
-                    .collect();
-
-                let param_refs: Vec<&dyn rusqlite::ToSql> = params
-                    .iter()
-                    .map(|p| p as &dyn rusqlite::ToSql)
-                    .collect();
-
-                stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
-                row_count += 1;
+                // Flush batch when full
+                if current_batch.len() >= batch_size {
+                    total_row_count += self.execute_batch(conn, table_name, columns, &current_batch)?;
+                    current_batch.clear();
+                }
             }
 
-            Ok(row_count)
+            // Flush remaining rows
+            if !current_batch.is_empty() {
+                total_row_count += self.execute_batch(conn, table_name, columns, &current_batch)?;
+            }
+
+            Ok(total_row_count)
         })
     }
 
-    /// Process binary format data with transaction wrapping
+    /// Process binary format data with transaction wrapping and batching
     fn process_binary_data(
         &self,
         data: &[u8],
@@ -1015,7 +1009,12 @@ impl CopyHandler {
             // Get column names and types (if columns is empty, gets all table columns)
             let (column_names, column_types) = self.get_column_type_oids(table_name, columns, conn)?;
             
-            let mut row_count = 0;
+            // Calculate batch size based on column count
+            let batch_size = calculate_batch_size(column_names.len().max(1));
+            let mut total_row_count = 0;
+            
+            // Collect rows into batches
+            let mut current_batch: Vec<Vec<rusqlite::types::Value>> = Vec::with_capacity(batch_size);
 
             // 4. Process tuples
             while cursor.remaining() >= 2 {
@@ -1053,27 +1052,91 @@ impl CopyHandler {
                         // Convert binary data to SQLite value based on type
                         let value = binary_to_sqlite_value(&field_data, type_oid)
                             .map_err(|e| anyhow!("COPY {}: row {}, column {}: {}", 
-                                table_name, row_count + 1, col_idx + 1, e))?;
+                                table_name, total_row_count + 1, col_idx + 1, e))?;
                         values.push(value);
                     }
                 }
 
-                // Build and execute INSERT statement (use column_names which may have been populated from catalog)
-                let sql = build_insert_sql(table_name, &column_names, values.len())?;
-                let mut stmt = conn.prepare_cached(&sql)?;
+                current_batch.push(values);
+                
+                // Flush batch when full
+                if current_batch.len() >= batch_size {
+                    total_row_count += self.execute_batch_binary(conn, table_name, &column_names, &current_batch)?;
+                    current_batch.clear();
+                }
+            }
+            
+            // Flush remaining rows
+            if !current_batch.is_empty() {
+                total_row_count += self.execute_batch_binary(conn, table_name, &column_names, &current_batch)?;
+            }
 
-                // Convert params for rusqlite
-                let param_refs: Vec<&dyn rusqlite::ToSql> = values
+            Ok(total_row_count)
+        })
+    }
+    
+    /// Execute a batch of binary rows as a multi-row INSERT
+    fn execute_batch_binary(
+        &self,
+        conn: &Connection,
+        table_name: &str,
+        columns: &[String],
+        batch: &[Vec<rusqlite::types::Value>],
+    ) -> Result<usize> {
+        if batch.is_empty() {
+            return Ok(0);
+        }
+        
+        // When columns are empty, we can't use multi-row INSERT
+        // Fall back to individual INSERTs
+        if columns.is_empty() {
+            let mut count = 0;
+            for row in batch {
+                let sql = build_insert_sql(table_name, columns, row.len())?;
+                let mut stmt = conn.prepare_cached(&sql)?;
+                
+                let param_refs: Vec<&dyn rusqlite::ToSql> = row
                     .iter()
                     .map(|p| p as &dyn rusqlite::ToSql)
                     .collect();
-
+                
                 stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
-                row_count += 1;
+                count += 1;
             }
-
-            Ok(row_count)
-        })
+            return Ok(count);
+        }
+        
+        // For single row, use simple INSERT
+        if batch.len() == 1 {
+            let sql = build_insert_sql(table_name, columns, batch[0].len())?;
+            let mut stmt = conn.prepare_cached(&sql)?;
+            
+            let param_refs: Vec<&dyn rusqlite::ToSql> = batch[0]
+                .iter()
+                .map(|p| p as &dyn rusqlite::ToSql)
+                .collect();
+            
+            stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
+            return Ok(1);
+        }
+        
+        // For multiple rows, use multi-row INSERT
+        let sql = build_multirow_insert_sql(table_name, columns, batch.len())?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        
+        // Flatten all values into a single params vector
+        let params: Vec<&rusqlite::types::Value> = batch
+            .iter()
+            .flat_map(|row| row.iter())
+            .collect();
+        
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params
+            .iter()
+            .map(|p| *p as &dyn rusqlite::ToSql)
+            .collect();
+        
+        stmt.execute(rusqlite::params_from_iter(param_refs.iter()))?;
+        Ok(batch.len())
     }
     
     /// Get column type OIDs from the catalog
@@ -1164,7 +1227,8 @@ impl CopyHandler {
         Ok(*row_count)
     }
 
-    /// Execute a closure within an explicit transaction for bulk operations
+    /// Execute a closure with transaction management for bulk operations
+    /// If already in a transaction, just executes the closure without starting a new one
     fn with_transaction<F, R>(
         &self,
         f: F,
@@ -1175,25 +1239,109 @@ impl CopyHandler {
     {
         let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         
-        // Begin transaction
-        conn.execute("BEGIN", [])
-            .map_err(|e| anyhow!("Failed to begin transaction: {}", e))?;
+        // Check if we're already in a transaction by trying to BEGIN
+        // If it fails with "cannot start a transaction within a transaction", we're already in one
+        let already_in_transaction = match conn.execute("BEGIN", []) {
+            Ok(_) => false,
+            Err(e) => {
+                let err_msg = e.to_string();
+                if err_msg.contains("within a transaction") {
+                    true
+                } else {
+                    return Err(anyhow!("Failed to begin transaction: {}", e));
+                }
+            }
+        };
         
         // Execute the bulk operation
         let result = f(&conn);
         
-        // Commit or rollback based on result
-        match result {
-            Ok(ref r) => {
-                conn.execute("COMMIT", [])
-                    .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
-                Ok(r.clone())
+        // Only commit/rollback if we started the transaction
+        if !already_in_transaction {
+            match result {
+                Ok(ref r) => {
+                    conn.execute("COMMIT", [])
+                        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+                    Ok(r.clone())
+                }
+                Err(ref e) => {
+                    let _ = conn.execute("ROLLBACK", []);
+                    Err(anyhow!("Transaction rolled back due to error: {}", e))
+                }
             }
-            Err(ref e) => {
-                let _ = conn.execute("ROLLBACK", []);
-                Err(anyhow!("Transaction rolled back due to error: {}", e))
-            }
+        } else {
+            result
         }
+    }
+
+    /// Execute a batch of rows as a multi-row INSERT
+    fn execute_batch(
+        &self,
+        conn: &Connection,
+        table_name: &str,
+        columns: &[String],
+        batch: &[Vec<Option<String>>],
+    ) -> Result<usize> {
+        if batch.is_empty() {
+            return Ok(0);
+        }
+        
+        // When columns are empty, we can't use multi-row INSERT
+        // Fall back to individual INSERTs
+        if columns.is_empty() {
+            let mut count = 0;
+            for row in batch {
+                let sql = build_insert_sql(table_name, columns, row.len())?;
+                let mut stmt = conn.prepare_cached(&sql)?;
+                
+                let params: Vec<rusqlite::types::Value> = row
+                    .iter()
+                    .map(|v| match v {
+                        Some(s) => rusqlite::types::Value::Text(s.clone()),
+                        None => rusqlite::types::Value::Null,
+                    })
+                    .collect();
+                
+                stmt.execute(rusqlite::params_from_iter(params.iter()))?;
+                count += 1;
+            }
+            return Ok(count);
+        }
+        
+        // For single row, use simple INSERT
+        if batch.len() == 1 {
+            let sql = build_insert_sql(table_name, columns, batch[0].len())?;
+            let mut stmt = conn.prepare_cached(&sql)?;
+            
+            let params: Vec<rusqlite::types::Value> = batch[0]
+                .iter()
+                .map(|v| match v {
+                    Some(s) => rusqlite::types::Value::Text(s.clone()),
+                    None => rusqlite::types::Value::Null,
+                })
+                .collect();
+            
+            stmt.execute(rusqlite::params_from_iter(params.iter()))?;
+            return Ok(1);
+        }
+        
+        // For multiple rows, use multi-row INSERT
+        let sql = build_multirow_insert_sql(table_name, columns, batch.len())?;
+        let mut stmt = conn.prepare_cached(&sql)?;
+        
+        // Flatten all values into a single params vector
+        let params: Vec<rusqlite::types::Value> = batch
+            .iter()
+            .flat_map(|row| {
+                row.iter().map(|v| match v {
+                    Some(s) => rusqlite::types::Value::Text(s.clone()),
+                    None => rusqlite::types::Value::Null,
+                })
+            })
+            .collect();
+        
+        stmt.execute(rusqlite::params_from_iter(params.iter()))?;
+        Ok(batch.len())
     }
 }
 
@@ -1273,7 +1421,7 @@ impl PgWireCopyHandler for CopyHandler {
 }
 
 /// Build an INSERT SQL statement for COPY data
-    fn build_insert_sql(
+fn build_insert_sql(
     table_name: &str,
     columns: &[String],
     value_count: usize,
@@ -1299,6 +1447,56 @@ impl PgWireCopyHandler for CopyHandler {
             placeholders.join(", ")
         ))
     }
+}
+
+/// Build a multi-row INSERT SQL statement
+/// 
+/// Generates: INSERT INTO table (col1, col2) VALUES (?,?), (?,?), ...
+/// 
+/// # Arguments
+/// * `table_name` - Target table
+/// * `columns` - Column names
+/// * `row_count` - Number of rows to insert (determines parameter count)
+fn build_multirow_insert_sql(
+    table_name: &str,
+    columns: &[String],
+    row_count: usize,
+) -> Result<String> {
+    if columns.is_empty() {
+        return Err(anyhow!("Multi-row INSERT requires explicit column list"));
+    }
+    
+    // Build placeholders: (?,?), (?,?), ...
+    let col_count = columns.len();
+    let mut placeholders = Vec::with_capacity(row_count);
+    
+    for row_idx in 0..row_count {
+        let row_placeholders: Vec<String> = (0..col_count)
+            .map(|col_idx| {
+                let param_num = row_idx * col_count + col_idx + 1;
+                format!("?{}", param_num)
+            })
+            .collect();
+        placeholders.push(format!("({})", row_placeholders.join(", ")));
+    }
+    
+    Ok(format!(
+        "INSERT INTO {} ({}) VALUES {}",
+        table_name,
+        columns.join(", "),
+        placeholders.join(", ")
+    ))
+}
+
+/// Calculate optimal batch size based on column count
+/// Ensures we don't exceed SQLite's 999 parameter limit
+fn calculate_batch_size(column_count: usize) -> usize {
+    if column_count == 0 {
+        return DEFAULT_BATCH_SIZE;
+    }
+    
+    let max_rows = MAX_SQLITE_PARAMS / column_count;
+    max_rows.max(1).min(DEFAULT_BATCH_SIZE)
 }
 
 /// Unescape a text format value
@@ -1669,5 +1867,46 @@ mod tests {
         // SQLite type mappings
         assert_eq!(type_name_to_oid("INTEGER"), INT8_OID);
         assert_eq!(type_name_to_oid("REAL"), FLOAT8_OID);
+    }
+
+    #[test]
+    fn test_calculate_batch_size() {
+        // 3 columns: 999 / 3 = 333, capped at DEFAULT_BATCH_SIZE (100)
+        assert_eq!(calculate_batch_size(3), 100);
+        
+        // 10 columns: 999 / 10 = 99
+        assert_eq!(calculate_batch_size(10), 99);
+        
+        // 50 columns: 999 / 50 = 19
+        assert_eq!(calculate_batch_size(50), 19);
+        
+        // 1000 columns: 999 / 1000 = 0, but min is 1
+        assert_eq!(calculate_batch_size(1000), 1);
+        
+        // 0 columns: use default
+        assert_eq!(calculate_batch_size(0), 100);
+    }
+
+    #[test]
+    fn test_build_multirow_insert_sql() {
+        let columns = vec!["id".to_string(), "name".to_string()];
+        
+        // Single row
+        let sql = build_multirow_insert_sql("users", &columns, 1).unwrap();
+        assert_eq!(sql, "INSERT INTO users (id, name) VALUES (?1, ?2)");
+        
+        // Two rows
+        let sql = build_multirow_insert_sql("users", &columns, 2).unwrap();
+        assert_eq!(sql, "INSERT INTO users (id, name) VALUES (?1, ?2), (?3, ?4)");
+        
+        // Three rows
+        let sql = build_multirow_insert_sql("users", &columns, 3).unwrap();
+        assert_eq!(sql, "INSERT INTO users (id, name) VALUES (?1, ?2), (?3, ?4), (?5, ?6)");
+    }
+
+    #[test]
+    fn test_build_multirow_insert_sql_empty_columns() {
+        let result = build_multirow_insert_sql("users", &[], 2);
+        assert!(result.is_err());
     }
 }
