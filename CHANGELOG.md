@@ -2,6 +2,23 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Supabase Dump Compatibility**: Full support for `supabase db dump` files
+  - `CREATE EXTENSION` statements now handled gracefully (no-op with warning)
+  - Duplicate GRANT statements no longer cause UNIQUE constraint violations
+  - Use `supabase db dump --schema public -x "auth.*,storage.*"` for clean dumps
+
+### Fixed
+- **CREATE EXTENSION**: Now returns a no-op comment instead of syntax error
+  - Adds warning to transpilation result for logging/debugging
+  - Example: `-- CREATE EXTENSION 'pg_cron' ignored - extensions not supported in SQLite`
+- **GRANT Statement Duplicate Handling**: Changed INSERT to INSERT OR IGNORE
+  - Fixed `UNIQUE constraint failed: __pg_acl__` errors on duplicate grants
+  - Applied to table, schema, and function grants
+  - Applied to role membership grants (`__pg_auth_members__`)
+
 ## [0.7.1] - 2026-03-18
 
 ### Fixed

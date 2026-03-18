@@ -106,6 +106,7 @@ pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> Transpil
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
                 errors: ctx.errors.clone(),
+                warnings: ctx.warnings.clone(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             }
@@ -122,6 +123,7 @@ pub fn transpile_with_context(sql: &str, ctx: &mut TranspileContext) -> Transpil
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
                 errors: ctx.errors.clone(),
+                warnings: ctx.warnings.clone(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             }
@@ -149,6 +151,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::SELECT,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                     column_aliases,
                     column_types: Vec::new(),
                 }
@@ -160,6 +163,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -170,6 +174,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -180,6 +185,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -190,8 +196,24 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
+            },
+            NodeEnum::CreateExtensionStmt(ref ext_stmt) => {
+                let ext_name = ext_stmt.extname.clone();
+                ctx.add_warning(format!("CREATE EXTENSION '{}' is not supported - extension features may not work", ext_name));
+                TranspileResult {
+                    sql: format!("-- CREATE EXTENSION '{}' ignored - extensions not supported in SQLite", ext_name),
+                    create_table_metadata: None,
+                    copy_metadata: None,
+                    referenced_tables: Vec::new(),
+                    operation_type: OperationType::DDL,
+                    errors: Vec::new(),
+                warnings: Vec::new(),
+                    column_aliases: Vec::new(),
+                    column_types: Vec::new(),
+                }
             },
             NodeEnum::CreateStmt(ref create_stmt) => {
                 let mut res = ddl::reconstruct_create_stmt_with_metadata(create_stmt, ctx);
@@ -205,6 +227,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::INSERT,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -215,6 +238,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::UPDATE,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -225,6 +249,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: ctx.referenced_tables.clone(),
                 operation_type: OperationType::DELETE,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -242,6 +267,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                                         referenced_tables: Vec::new(),
                                         operation_type: OperationType::OTHER,
                                         errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                                     };
@@ -257,6 +283,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -287,6 +314,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::SELECT,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                     column_aliases: Vec::new(),
                     column_types: Vec::new(),
                 }
@@ -298,6 +326,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -308,6 +337,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -318,6 +348,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -328,6 +359,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -338,6 +370,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -348,6 +381,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -360,6 +394,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -373,6 +408,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -386,6 +422,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -400,6 +437,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                         referenced_tables: Vec::new(),
                         operation_type: OperationType::OTHER,
                         errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                     }
@@ -414,6 +452,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -427,6 +466,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -441,6 +481,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: ctx.referenced_tables.clone(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -454,6 +495,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -466,6 +508,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::OTHER,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -479,6 +522,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::SELECT,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -491,6 +535,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -502,6 +547,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::DDL,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -513,6 +559,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -531,6 +578,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::DDL,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -544,6 +592,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                     referenced_tables: Vec::new(),
                     operation_type: OperationType::SELECT,
                     errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
                 }
@@ -555,6 +604,7 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
                 referenced_tables: Vec::new(),
                 operation_type: OperationType::OTHER,
                 errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
             },
@@ -567,12 +617,14 @@ fn reconstruct_sql_with_metadata(node: &Node, ctx: &mut TranspileContext) -> Tra
             referenced_tables: Vec::new(),
             operation_type: OperationType::OTHER,
             errors: Vec::new(),
+                warnings: Vec::new(),
                 column_aliases: Vec::new(),
                 column_types: Vec::new(),
         }
     };
 
     result.errors.extend(ctx.errors.clone());
+    result.warnings.extend(ctx.warnings.clone());
     result
 }
 
@@ -884,7 +936,6 @@ VALUES
         assert!(result.sql.contains("update users"));
         assert!(result.sql.contains("from accounts"), "Should contain FROM clause: {}", result.sql);
     }
-}
 
     #[test]
     fn test_jsonb_contains_at_operator() {
@@ -913,3 +964,14 @@ VALUES
         println!("JSONB ->> transpilation: {}", result.sql);
         // The ->> operator is handled as AIndirection, not AExpr
     }
+
+    #[test]
+    fn test_create_extension() {
+        // Test CREATE EXTENSION is handled as a no-op with warning
+        let result = transpile_with_metadata("CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog");
+        assert!(result.sql.contains("-- CREATE EXTENSION"));
+        assert!(result.sql.contains("pg_cron"));
+        assert!(result.warnings.len() >= 1, "Should have a warning about extension not being supported");
+        assert!(result.warnings[0].contains("pg_cron"), "Warning should mention the extension name");
+    }
+}

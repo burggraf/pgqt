@@ -203,7 +203,7 @@ fn handle_table_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], g
             for priv_ in privileges {
                 for grantee in grantees {
                     inserts.push(format!(
-                        "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+                        "INSERT OR IGNORE INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
                          SELECT c.oid, 'relation', COALESCE(r.oid, 0), '{}', 10 \
                          FROM pg_class c LEFT JOIN pg_roles r ON r.rolname = '{}' \
                          WHERE c.relname = '{}'",
@@ -244,7 +244,7 @@ fn handle_schema_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String], 
         let priv_ = &privileges[0];
         let grantee = &grantees[0];
         format!(
-            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+            "INSERT OR IGNORE INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
              SELECT n.oid, 'schema', COALESCE(r.oid, 0), '{}', 10 \
              FROM pg_namespace n LEFT JOIN pg_roles r ON r.rolname = '{}' \
              WHERE n.nspname = '{}'",
@@ -287,7 +287,7 @@ fn handle_function_grant(stmt: &GrantStmt, is_grant: bool, privileges: &[String]
         let priv_ = &privileges[0];
         let grantee = &grantees[0];
         format!(
-            "INSERT INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
+            "INSERT OR IGNORE INTO __pg_acl__ (object_id, object_type, grantee_id, privilege, grantor_id) \
              SELECT p.oid, 'function', COALESCE(r.oid, 0), '{}', 10 \
              FROM pg_proc p LEFT JOIN pg_roles r ON r.rolname = '{}' \
              WHERE p.proname = '{}'",
@@ -340,7 +340,7 @@ pub fn reconstruct_grant_role_stmt(stmt: &GrantRoleStmt) -> String {
             return "SELECT 1".to_string();
         }
         format!(
-            "INSERT INTO __pg_auth_members__ (roleid, member, grantor) \
+            "INSERT OR IGNORE INTO __pg_auth_members__ (roleid, member, grantor) \
              SELECT r.oid, m.oid, 10 \
              FROM pg_roles r, pg_roles m \
              WHERE r.rolname = '{}' AND m.rolname = '{}'",

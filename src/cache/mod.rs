@@ -164,6 +164,7 @@ mod tests {
             referenced_tables: Vec::new(),
             operation_type: OperationType::SELECT,
             errors: Vec::new(),
+            warnings: Vec::new(),
             column_aliases: Vec::new(),
             column_types: Vec::new(),
         }

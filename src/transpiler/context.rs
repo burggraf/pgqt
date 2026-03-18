@@ -21,6 +21,7 @@ pub struct TranspileResult {
     pub referenced_tables: Vec<String>,
     pub operation_type: OperationType,
     pub errors: Vec<String>,
+    pub warnings: Vec<String>,
     /// Column aliases extracted from SELECT target_list (for result metadata preservation)
     pub column_aliases: Vec<String>,
     /// PostgreSQL type names for each result column (for accurate type metadata)
@@ -49,6 +50,7 @@ pub struct CreateTableMetadata {
 pub struct TranspileContext {
     pub referenced_tables: Vec<String>,
     pub errors: Vec<String>,
+    pub warnings: Vec<String>,
     pub functions: Option<Arc<DashMap<String, crate::catalog::FunctionMetadata>>>,
     pub registry: Arc<crate::transpiler::registry::Registry>,
     /// Column aliases for VALUES statements (when VALUES is used with AS alias (col1, col2))
@@ -84,6 +86,7 @@ impl TranspileContext {
         Self {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             functions: None,
             registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
@@ -103,6 +106,7 @@ impl TranspileContext {
         Self {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             functions: Some(functions),
             registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
@@ -124,6 +128,7 @@ impl TranspileContext {
         Self {
             referenced_tables: Vec::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             functions: None,
             registry: Arc::new(crate::transpiler::registry::Registry::default()),
             values_column_aliases: Vec::new(),
@@ -158,6 +163,10 @@ impl TranspileContext {
 
     pub fn add_error(&mut self, error: String) {
         self.errors.push(error);
+    }
+
+    pub fn add_warning(&mut self, warning: String) {
+        self.warnings.push(warning);
     }
 
     pub fn set_values_column_aliases(&mut self, aliases: Vec<String>) {
