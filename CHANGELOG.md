@@ -4,6 +4,19 @@ All notable changes to PGQT will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Optional TLS Support**: TLS is now an optional feature flag to reduce binary size
+  - Default build includes TLS (~12MB)
+  - Smaller build without TLS (~9.5MB, -2.5MB / -21%)
+  - Use `cargo build --release --no-default-features --features plpgsql` for smaller build
+  - New build scripts: `build-release.sh`, `build-release-small.sh`, `build-both.sh`
+  - See `docs/build-options.md` for detailed build configuration
+
+### Fixed
+- **Compilation error in `src/copy.rs`**: Fixed type mismatch in `with_transaction` method
+  - Added `R: Clone` bound to generic parameter
+  - Fixed `Ok(r.clone())` to `Ok(r)` to avoid reference cloning issues
+
 ## [0.7.2] - 2026-03-18
 
 ### Added

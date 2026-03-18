@@ -1148,6 +1148,38 @@ impl CopyHandler {
         let row_count = self.row_count.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         Ok(*row_count)
     }
+
+    /// Execute a closure within an explicit transaction for bulk operations
+    fn with_transaction<F, R>(
+        &self,
+        f: F,
+    ) -> Result<R>
+    where
+        F: FnOnce(&Connection) -> Result<R>,
+        R: Clone,
+    {
+        let conn = self.conn.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        
+        // Begin transaction
+        conn.execute("BEGIN", [])
+            .map_err(|e| anyhow!("Failed to begin transaction: {}", e))?;
+        
+        // Execute the bulk operation
+        let result = f(&conn);
+        
+        // Commit or rollback based on result
+        match result {
+            Ok(ref r) => {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+                Ok(r.clone())
+            }
+            Err(ref e) => {
+                let _ = conn.execute("ROLLBACK", []);
+                Err(anyhow!("Transaction rolled back due to error: {}", e))
+            }
+        }
+    }
 }
 
 #[async_trait]
