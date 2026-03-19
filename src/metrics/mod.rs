@@ -4,6 +4,12 @@ mod proxy;
 #[cfg(feature = "metrics")]
 pub use proxy::*;
 
+#[cfg(feature = "metrics")]
+mod server;
+
+#[cfg(feature = "metrics")]
+pub use server::*;
+
 /// Stub for non-metrics builds
 #[cfg(not(feature = "metrics"))]
 pub struct ProxyMetrics;
