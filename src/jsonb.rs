@@ -160,7 +160,112 @@ pub fn register_jsonb_functions(conn: &Connection) -> rusqlite::Result<()> {
         },
     )?;
 
+
+
+
+    register_json_constructor_functions(conn)?;
+
     Ok(())
+}
+
+/// Register JSON constructor functions (to_json, json_build_object, json_build_array, etc.)
+fn register_json_constructor_functions(conn: &Connection) -> rusqlite::Result<()> {
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    
+    // Register to_json
+    conn.create_scalar_function("to_json", 1, flags, |ctx| {
+        let json_val = value_to_json(ctx.get_raw(0))?;
+        Ok(json_val.to_string())
+    })?;
+    
+    // Register to_jsonb
+    conn.create_scalar_function("to_jsonb", 1, flags, |ctx| {
+        let json_val = value_to_json(ctx.get_raw(0))?;
+        Ok(json_val.to_string())
+    })?;
+    
+    // Register json_build_object with multiple arities (0-10 args, even numbers only)
+    for arity in [0, 2, 4, 6, 8, 10] {
+        conn.create_scalar_function("json_build_object", arity, flags, move |ctx| {
+            let mut map = serde_json::Map::new();
+            for i in (0..arity).step_by(2) {
+                let key: String = ctx.get(i as usize)?;
+                let val = value_to_json(ctx.get_raw(i as usize + 1))?;
+                map.insert(key, val);
+            }
+            Ok(JsonValue::Object(map).to_string())
+        })?;
+    }
+    
+    // Register jsonb_build_object
+    for arity in [0, 2, 4, 6, 8, 10] {
+        conn.create_scalar_function("jsonb_build_object", arity, flags, move |ctx| {
+            let mut map = serde_json::Map::new();
+            for i in (0..arity).step_by(2) {
+                let key: String = ctx.get(i as usize)?;
+                let val = value_to_json(ctx.get_raw(i as usize + 1))?;
+                map.insert(key, val);
+            }
+            Ok(JsonValue::Object(map).to_string())
+        })?;
+    }
+    
+    // Register json_build_array with multiple arities (0-10 args)
+    for arity in 0..=10 {
+        conn.create_scalar_function("json_build_array", arity, flags, move |ctx| {
+            let mut arr = Vec::new();
+            for i in 0..arity {
+                arr.push(value_to_json(ctx.get_raw(i as usize))?);
+            }
+            Ok(JsonValue::Array(arr).to_string())
+        })?;
+    }
+    
+    // Register jsonb_build_array
+    for arity in 0..=10 {
+        conn.create_scalar_function("jsonb_build_array", arity, flags, move |ctx| {
+            let mut arr = Vec::new();
+            for i in 0..arity {
+                arr.push(value_to_json(ctx.get_raw(i as usize))?);
+            }
+            Ok(JsonValue::Array(arr).to_string())
+        })?;
+    }
+    
+    // Register array_to_json
+    conn.create_scalar_function("array_to_json", 1, flags, |ctx| {
+        let json_val = value_to_json(ctx.get_raw(0))?;
+        Ok(json_val.to_string())
+    })?;
+    
+
+
+    Ok(())
+}
+
+/// Convert a SQLite value to a JSON value
+fn value_to_json(val: rusqlite::types::ValueRef) -> rusqlite::Result<JsonValue> {
+    match val {
+        rusqlite::types::ValueRef::Null => Ok(JsonValue::Null),
+        rusqlite::types::ValueRef::Integer(i) => Ok(JsonValue::Number(i.into())),
+        rusqlite::types::ValueRef::Real(f) => {
+            if let Some(num) = serde_json::Number::from_f64(f) {
+                Ok(JsonValue::Number(num))
+            } else {
+                Ok(JsonValue::Null)
+            }
+        }
+        rusqlite::types::ValueRef::Text(t) => {
+            if let Ok(json_val) = serde_json::from_str(std::str::from_utf8(t).unwrap_or("")) {
+                Ok(json_val)
+            } else {
+                Ok(JsonValue::String(std::str::from_utf8(t).unwrap_or("").to_string()))
+            }
+        }
+        rusqlite::types::ValueRef::Blob(b) => {
+            Ok(JsonValue::String(format!("\\x{}", hex::encode(b))))
+        }
+    }
 }
 
 /// Check if a JSON value contains another JSON value (PostgreSQL @> semantics)
@@ -324,12 +429,148 @@ pub fn validate_json_strict(json_str: &str) -> Result<(), String> {
     }
 }
 
-/// Register JSON aggregate functions (stub)
-/// 
-/// This function is a placeholder for JSON aggregate function registration.
-/// Full implementation will be added in a future phase.
-pub fn register_json_agg_functions(_conn: &Connection) -> rusqlite::Result<()> {
-    // TODO: Implement JSON aggregate functions (json_agg, jsonb_agg, etc.)
-    // This is a stub to satisfy the handler/mod.rs call
+use rusqlite::functions::{Aggregate, Context};
+
+/// State for json_agg aggregate
+#[derive(Debug, Clone)]
+pub struct JsonAggState {
+    values: Vec<serde_json::Value>,
+}
+
+impl Default for JsonAggState {
+    fn default() -> Self {
+        Self { values: Vec::new() }
+    }
+}
+
+/// json_agg aggregate implementation
+pub struct JsonAgg;
+
+impl Aggregate<JsonAggState, Option<String>> for JsonAgg {
+    fn init(&self, _ctx: &mut Context<'_>) -> rusqlite::Result<JsonAggState> {
+        Ok(JsonAggState::default())
+    }
+
+    fn step(&self, ctx: &mut Context<'_>, state: &mut JsonAggState) -> rusqlite::Result<()> {
+        // Get the value and convert to JSON
+        if let Ok(val_str) = ctx.get::<String>(0) {
+            // Try to parse as JSON first
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&val_str) {
+                state.values.push(json_val);
+            } else {
+                // Treat as string
+                state.values.push(serde_json::Value::String(val_str));
+            }
+        } else if let Ok(val_i64) = ctx.get::<i64>(0) {
+            state.values.push(serde_json::Value::Number(val_i64.into()));
+        } else if let Ok(val_f64) = ctx.get::<f64>(0) {
+            if let Some(num) = serde_json::Number::from_f64(val_f64) {
+                state.values.push(serde_json::Value::Number(num));
+            } else {
+                state.values.push(serde_json::Value::Null);
+            }
+        } else {
+            state.values.push(serde_json::Value::Null);
+        }
+
+
+
+    Ok(())
+    }
+
+    fn finalize(&self, _ctx: &mut Context<'_>, state: Option<JsonAggState>) -> rusqlite::Result<Option<String>> {
+        match state {
+            Some(s) => {
+                let json_array = serde_json::Value::Array(s.values);
+                Ok(Some(json_array.to_string()))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+/// State for json_object_agg aggregate
+#[derive(Debug, Clone)]
+pub struct JsonObjectAggState {
+    pairs: Vec<(String, serde_json::Value)>,
+}
+
+impl Default for JsonObjectAggState {
+    fn default() -> Self {
+        Self { pairs: Vec::new() }
+    }
+}
+
+/// json_object_agg aggregate implementation
+pub struct JsonObjectAgg;
+
+impl Aggregate<JsonObjectAggState, Option<String>> for JsonObjectAgg {
+    fn init(&self, _ctx: &mut Context<'_>) -> rusqlite::Result<JsonObjectAggState> {
+        Ok(JsonObjectAggState::default())
+    }
+
+    fn step(&self, ctx: &mut Context<'_>, state: &mut JsonObjectAggState) -> rusqlite::Result<()> {
+        let key: String = ctx.get(0)?;
+        
+        // Get the value
+        let json_val = if let Ok(val_str) = ctx.get::<String>(1) {
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&val_str) {
+                json_val
+            } else {
+                serde_json::Value::String(val_str)
+            }
+        } else if let Ok(val_i64) = ctx.get::<i64>(1) {
+            serde_json::Value::Number(val_i64.into())
+        } else if let Ok(val_f64) = ctx.get::<f64>(1) {
+            if let Some(num) = serde_json::Number::from_f64(val_f64) {
+                serde_json::Value::Number(num)
+            } else {
+                serde_json::Value::Null
+            }
+        } else {
+            serde_json::Value::Null
+        };
+        
+        state.pairs.push((key, json_val));
+
+
+
+    Ok(())
+    }
+
+    fn finalize(&self, _ctx: &mut Context<'_>, state: Option<JsonObjectAggState>) -> rusqlite::Result<Option<String>> {
+        match state {
+            Some(s) => {
+                let mut map = serde_json::Map::new();
+                for (key, value) in s.pairs {
+                    map.insert(key, value);
+                }
+                let json_obj = serde_json::Value::Object(map);
+                Ok(Some(json_obj.to_string()))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+/// Register JSON aggregate functions
+pub fn register_json_agg_functions(conn: &Connection) -> rusqlite::Result<()> {
+    let flags = FunctionFlags::SQLITE_UTF8;
+    
+    // Register json_agg
+    conn.create_aggregate_function("json_agg", 1, flags, JsonAgg)?;
+    
+    // Register jsonb_agg (same implementation)
+    conn.create_aggregate_function("jsonb_agg", 1, flags, JsonAgg)?;
+    
+    // Register json_object_agg
+    conn.create_aggregate_function("json_object_agg", 2, flags, JsonObjectAgg)?;
+    
+    // Register jsonb_object_agg (same implementation)
+    conn.create_aggregate_function("jsonb_object_agg", 2, flags, JsonObjectAgg)?;
+    
+
+
+
     Ok(())
 }
