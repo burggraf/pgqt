@@ -10,6 +10,12 @@ mod server;
 #[cfg(feature = "metrics")]
 pub use server::*;
 
+#[cfg(feature = "metrics")]
+mod global;
+
+#[cfg(feature = "metrics")]
+pub use global::*;
+
 /// Stub for non-metrics builds
 #[cfg(not(feature = "metrics"))]
 pub struct ProxyMetrics;

@@ -30,6 +30,14 @@ impl MetricsServer {
         &self.metrics
     }
 
+    /// Clone the metrics handle for global registration
+    ///
+    /// This allows registering the metrics with the global metrics instance
+    /// while keeping the server operational.
+    pub fn clone_metrics(&self) -> ProxyMetrics {
+        self.metrics.clone()
+    }
+
     /// Start the HTTP server in a background thread
     /// Returns a JoinHandle that can be used to wait for server completion
     pub fn start(self, port: u16) -> std::thread::JoinHandle<()> {

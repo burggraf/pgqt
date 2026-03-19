@@ -5,6 +5,11 @@ use prometheus_client::registry::Registry;
 
 use crate::metrics::QueryType;
 
+/// Metrics for the PostgreSQL proxy
+///
+/// This struct is cheap to clone since all metric types are internally
+/// reference-counted (Arc-based).
+#[derive(Clone)]
 pub struct ProxyMetrics {
     pub requests_total: Counter,
     pub requests_failed_total: Counter,
