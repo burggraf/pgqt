@@ -26,6 +26,7 @@
 pub mod config;
 pub mod debug;
 pub mod validation;
+pub mod metrics;
 pub mod array;
 pub mod array_agg;
 pub mod bool_aggregates;
