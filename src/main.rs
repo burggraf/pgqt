@@ -71,6 +71,8 @@ mod jsonb;
 mod cache;
 #[cfg(feature = "tls")]
 mod tls;
+#[cfg(feature = "metrics")]
+mod metrics;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};
@@ -315,6 +317,14 @@ struct Cli {
     /// Use ephemeral (self-signed) certificate for development
     #[arg(long, env = "PGQT_SSL_EPHEMERAL")]
     ssl_ephemeral: bool,
+
+    /// Enable Prometheus metrics endpoint
+    #[arg(long, env = "PGQT_METRICS_ENABLED")]
+    metrics_enabled: bool,
+
+    /// Port for metrics HTTP server
+    #[arg(long, env = "PGQT_METRICS_PORT", default_value = "9090")]
+    metrics_port: u16,
 }
 
 impl Cli {
@@ -493,6 +503,23 @@ async fn main() -> Result<()> {
         set_debug(true);
         println!("Debug mode enabled (at least one port has debug: true)");
     }
+
+    // Initialize metrics server if enabled (and feature is compiled)
+    #[cfg(feature = "metrics")]
+    let _metrics_handle = if cli.metrics_enabled {
+        let server = crate::metrics::MetricsServer::new();
+
+        // Register metrics globally so handler can access them
+        let metrics = server.clone_metrics();
+        if let Err(_) = crate::metrics::init_global_metrics(metrics) {
+            eprintln!("Warning: Metrics already initialized");
+        }
+
+        // Start the HTTP server in background
+        Some(server.start(cli.metrics_port))
+    } else {
+        None
+    };
 
     // Spawn listeners for each configured port
     let mut handles = Vec::new();
