@@ -1,7 +1,3 @@
-//! Lightweight Prometheus metrics for PGQT
-//!
-//! Uses prometheus-client for minimal overhead and binary size impact.
-
 #[cfg(feature = "metrics")]
 mod proxy;
 
@@ -14,6 +10,10 @@ pub struct ProxyMetrics;
 
 #[cfg(not(feature = "metrics"))]
 impl ProxyMetrics {
+    pub fn new(_registry: &mut ()) -> Self {
+        Self
+    }
+
     pub fn record_query(&self, _query_type: QueryType, _duration_secs: f64, _success: bool) {}
     pub fn inc_connections(&self) {}
     pub fn dec_connections(&self) {}
