@@ -63,6 +63,8 @@ pub fn validate_value(value: &str, column_type: &str) -> Result<(), ValidationEr
         "SMALLINT" | "INT2" => types::validate_int2(value),
         "INTEGER" | "INT" | "INT4" => types::validate_int4(value),
         "BIGINT" | "INT8" => types::validate_int8(value),
+        "INTERVAL" => types::validate_interval(value),
+        "JSON" | "JSONB" => types::validate_json(value),
         _ => Ok(()), 
     }
 }

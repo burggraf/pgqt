@@ -6,6 +6,7 @@ use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{Node, AConst, ColumnRef, TypeCast, BoolExpr};
 use crate::transpiler::context::TranspileContext;
 use crate::transpiler::utils::{extract_original_type, rewrite_type_for_sqlite};
+use crate::float_special::{get_special_float_function, validate_float_input};
 
 /// Reconstruct a constant value
 pub(crate) fn reconstruct_aconst(aconst: &AConst) -> String {
@@ -55,14 +56,14 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
 
     // Check if target type is numeric and argument is a string literal with whitespace
     let type_lower = original_type.to_lowercase();
-    let is_numeric = type_lower.contains("real") 
-        || type_lower.contains("double") 
+    let is_numeric = type_lower.contains("real")
+        || type_lower.contains("double")
         || type_lower.contains("float")
         || type_lower.contains("int")
         || type_lower.contains("numeric")
         || type_lower.contains("decimal")
         || type_lower.contains("number");
-    
+
     if is_numeric && arg_sql.starts_with('\'') && arg_sql.ends_with('\'') {
         // Extract inner value and trim whitespace
         let inner = &arg_sql[1..arg_sql.len()-1];
@@ -82,6 +83,11 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
     }
     if original_type.to_uppercase() == "REGPROC" || original_type.to_uppercase() == "REGPROCEDURE" {
         return format!("(SELECT oid FROM pg_proc WHERE proname = {0} OR oid = CAST({0} AS INTEGER) LIMIT 1)", arg_sql);
+    }
+
+    // Handle interval type casts - transform to parse_interval() and cast to TEXT for storage
+    if original_type.to_uppercase() == "INTERVAL" {
+        return format!("cast(parse_interval({}) as text)", arg_sql);
     }
 
     // Validate boolean literals
@@ -113,6 +119,25 @@ pub(crate) fn reconstruct_type_cast(type_cast: &TypeCast, ctx: &mut TranspileCon
         }
     }
 
+    // Handle special float values: 'NaN'::float8, 'infinity'::float4, etc.    
+    let is_float_type = type_lower.contains("float") || type_lower.contains("real") || type_lower.contains("double");
+    if is_float_type {
+        // Check for special float values first
+        if let Some(func) = get_special_float_function(&arg_sql) {
+            return func.to_string();
+        }
+        
+        // Validate string literal inputs for float casts
+        // PostgreSQL validates inputs like 'xyz'::float4 and rejects them
+        if arg_sql.starts_with('\'') && arg_sql.ends_with('\'') {
+            let inner = &arg_sql[1..arg_sql.len()-1];
+            if validate_float_input(inner).is_err() {
+                let error_msg = format!("invalid input syntax for type double precision: \"{}\"", inner);
+                ctx.add_error(error_msg);
+            }
+        }
+    }
+
     format!("cast({} as {})", arg_sql, sqlite_type.to_lowercase())
 }
 
@@ -135,14 +160,14 @@ pub(crate) fn reconstruct_bool_expr(bool_expr: &BoolExpr, ctx: &mut TranspileCon
 }
 
 /// Transform PostgreSQL default expressions to SQLite equivalents
-/// 
+///
 /// Handles common PostgreSQL default expressions like:
 /// - now() -> datetime('now')
 /// - current_timestamp -> datetime('now')
 /// - nextval('seq') -> NULL (SQLite handles autoincrement separately)
 pub(crate) fn transform_default_expression(expr: &str) -> String {
     let upper = expr.trim().to_uppercase();
-    
+
     match upper.as_str() {
         "NOW()" | "CURRENT_TIMESTAMP" | "CURRENT_TIMESTAMP()" => {
             "datetime(now)".to_string()

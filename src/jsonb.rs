@@ -234,4 +234,102 @@ mod tests {
         ).unwrap();
         assert_eq!(result, 3);
     }
+
+    #[test]
+    fn test_invalid_json_strict_validation() {
+        // Test that invalid JSON strings return PostgreSQL-compatible error messages
+        let invalid_cases = vec![
+            "{invalid json}",
+            "{\"key\": value}",           // unquoted value
+            "{\"key\": }",                 // missing value
+            "[1, 2,]",                     // trailing comma
+            "{\"key\": \"value\"",        // unclosed object
+            "\"unclosed string",           // unclosed string
+            "",                             // empty string
+            "   ",                         // whitespace only
+            "{key: value}",                // unquoted keys (JavaScript style)
+        ];
+
+        for input in invalid_cases {
+            let result = validate_json_strict(input);
+            assert!(result.is_err(), "Should reject invalid JSON: {}", input);
+            
+            let err_msg = result.unwrap_err();
+            assert!(
+                err_msg.contains("invalid input syntax for type json"),
+                "Error message should be PostgreSQL-compatible for '{}': got '{}'",
+                input,
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_valid_json_strict_validation() {
+        // Ensure valid JSON still passes
+        let valid_cases = vec![
+            "{}",
+            "[]",
+            "null",
+            "true",
+            "false",
+            "42",
+            "\"string\"",
+            "{\"key\": \"value\"}",
+            "[1, 2, 3]",
+            "{\"nested\": {\"key\": [1, 2, 3]}}",
+        ];
+
+        for input in valid_cases {
+            let result = validate_json_strict(input);
+            assert!(result.is_ok(), "Should accept valid JSON '{}': {:?}", input, result);
+        }
+    }
+}
+
+/// Validates a JSON string with strict parsing and PostgreSQL-compatible error messages
+/// 
+/// # Arguments
+/// * `json_str` - The string to validate as JSON
+/// 
+/// # Returns
+/// * `Ok(())` if the string is valid JSON
+/// * `Err(String)` with a PostgreSQL-compatible error message if invalid
+/// 
+/// # Examples
+/// 
+/// ```
+/// use pgqt::jsonb::validate_json_strict;
+/// 
+/// assert!(validate_json_strict("{\"key\": \"value\"}").is_ok());
+/// assert!(validate_json_strict("invalid").is_err());
+/// ```
+#[allow(dead_code)]
+pub fn validate_json_strict(json_str: &str) -> Result<(), String> {
+    let trimmed = json_str.trim();
+    
+    if trimmed.is_empty() {
+        return Err(format!(
+            "invalid input syntax for type json: \"{}\"",
+            json_str
+        ));
+    }
+    
+    match serde_json::from_str::<JsonValue>(trimmed) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(format!(
+            "invalid input syntax for type json: \"{}\"",
+            json_str
+        )),
+    }
+}
+
+/// Register JSON aggregate functions (stub)
+/// 
+/// This function is a placeholder for JSON aggregate function registration.
+/// Full implementation will be added in a future phase.
+pub fn register_json_agg_functions(_conn: &Connection) -> rusqlite::Result<()> {
+    // TODO: Implement JSON aggregate functions (json_agg, jsonb_agg, etc.)
+    // This is a stub to satisfy the handler/mod.rs call
+    Ok(())
 }

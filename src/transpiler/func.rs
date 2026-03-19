@@ -65,6 +65,11 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
         return reconstruct_generate_series(func_call, ctx);
     }
     
+    // Handle JSON processing functions (json_each, json_array_elements, etc.)
+    if let Some(json_func_result) = reconstruct_json_processing_function(func_call, ctx, &func_name_lower) {
+        return json_func_result;
+    }
+    
     // Special handling for timestamp functions with precision argument
     // PostgreSQL: current_timestamp(0), now(2), etc. -> ignore precision, return datetime('now')
     if matches!(func_name_lower.as_str(), "current_timestamp" | "current_time" | "current_date" | "now" | "clock_timestamp" | "statement_timestamp" | "transaction_timestamp") {
@@ -680,6 +685,40 @@ pub(crate) fn parse_return_type(
     } else {
         Ok(("VOID".to_string(), ReturnTypeKind::Void, None))
     }
+}
+
+/// Reconstruct JSON processing functions (json_each, json_array_elements, etc.)
+/// These functions return multiple rows in PostgreSQL. In SQLite, we implement them
+/// as scalar functions that return JSON arrays, which can then be used with SQLite's
+/// json_each() for iteration.
+/// 
+/// Returns Some(result) if the function was handled, None otherwise
+fn reconstruct_json_processing_function(
+    func_call: &FuncCall,
+    ctx: &mut TranspileContext,
+    func_name_lower: &str,
+) -> Option<String> {
+    
+    let impl_func_name = match func_name_lower {
+        "json_each" => "json_each_impl",
+        "jsonb_each" => "jsonb_each_impl",
+        "json_each_text" => "json_each_text_impl",
+        "jsonb_each_text" => "jsonb_each_text_impl",
+        "json_array_elements" => "json_array_elements_impl",
+        "jsonb_array_elements" => "jsonb_array_elements_impl",
+        "json_array_elements_text" => "json_array_elements_text_impl",
+        "jsonb_array_elements_text" => "jsonb_array_elements_text_impl",
+        "json_object_keys" => "json_object_keys_impl",
+        "jsonb_object_keys" => "jsonb_object_keys_impl",
+        _ => return None,
+    };
+    
+    if func_call.args.is_empty() {
+        return Some(format!("{}(/* invalid arguments */)", impl_func_name));
+    }
+    
+    let arg = reconstruct_node(&func_call.args[0], ctx);
+    Some(format!("{}({})", impl_func_name, arg))
 }
 
 /// Reconstruct generate_series function as a recursive CTE

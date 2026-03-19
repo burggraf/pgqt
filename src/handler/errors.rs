@@ -55,6 +55,8 @@ pub enum PgErrorCode {
     InvalidDatetimeFormat,
     /// Datetime field overflow
     DatetimeFieldOverflow,
+    /// Numeric value out of range
+    NumericValueOutOfRange,
     /// Feature not supported
     FeatureNotSupported,
     /// Invalid authorization specification
@@ -93,6 +95,7 @@ impl PgErrorCode {
             PgErrorCode::InvalidTextRepresentation => "22P02",
             PgErrorCode::InvalidDatetimeFormat => "22007",
             PgErrorCode::DatetimeFieldOverflow => "22008",
+            PgErrorCode::NumericValueOutOfRange => "22003",
             PgErrorCode::FeatureNotSupported => "0A000",
             PgErrorCode::InvalidAuthorizationSpecification => "28000",
             PgErrorCode::TransactionRollback => "40000",

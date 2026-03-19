@@ -900,6 +900,42 @@ VALUES
         assert!(result.sql.contains("returning *"), "Should contain RETURNING *: {}", result.sql);
     }
 
+    #[test]
+    fn test_insert_returning_expression() {
+        let sql = "INSERT INTO users (name) VALUES ('test') RETURNING id * 2";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+        assert!(result.sql.contains("*") || result.sql.contains("id"), "Should contain expression: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_returning_alias() {
+        let sql = "INSERT INTO users (name) VALUES ('test') RETURNING id AS new_id";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+        assert!(result.sql.contains("as \"new_id\""), "Should contain AS new_id alias: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_returning_function() {
+        let sql = "INSERT INTO users (name) VALUES ('test') RETURNING UPPER(name)";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_returning_complex_expression_with_alias() {
+        let sql = "INSERT INTO users (name) VALUES ('test') RETURNING id * 2 AS doubled_id, UPPER(name) AS upper_name";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+        assert!(result.sql.contains("as \"doubled_id\""), "Should contain AS doubled_id: {}", result.sql);
+        assert!(result.sql.contains("as \"upper_name\""), "Should contain AS upper_name: {}", result.sql);
+    }
+
     // Tests for ON CONFLICT (upsert) support
     #[test]
     fn test_insert_on_conflict_do_nothing() {
@@ -926,6 +962,91 @@ VALUES
         assert!(result.sql.contains("insert into users"));
         assert!(result.sql.contains("on conflict"));
         assert!(result.sql.contains("do update set"), "Should contain DO UPDATE SET: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_multiple_targets() {
+        let sql = "INSERT INTO users (id, email, name) VALUES (1, 'john@example.com', 'John') ON CONFLICT (id, email) DO NOTHING";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("(id, email)"), "Should contain multiple conflict targets: {}", result.sql);
+        assert!(result.sql.contains("do nothing"));
+    }
+
+    #[test]
+    fn test_insert_on_conflict_do_update_with_where() {
+        let sql = "INSERT INTO users (id, name, updated) VALUES (1, 'John', true) ON CONFLICT (id) DO UPDATE SET name = excluded.name WHERE users.name IS NULL";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("where"), "Should contain WHERE clause: {}", result.sql);
+        assert!(result.sql.contains("users.name is null"), "Should contain WHERE condition: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_do_update_with_complex_where() {
+        let sql = "INSERT INTO users (id, name, version) VALUES (1, 'John', 2) ON CONFLICT (id) DO UPDATE SET name = excluded.name, version = excluded.version WHERE users.version < excluded.version";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("where"), "Should contain WHERE clause: {}", result.sql);
+        assert!(result.sql.contains("users.version"), "Should reference users.version: {}", result.sql);
+        assert!(result.sql.contains("excluded.version"), "Should reference excluded.version: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_with_returning() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = excluded.name RETURNING *";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_with_returning_columns() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = excluded.name RETURNING id, name";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("returning"), "Should contain RETURNING: {}", result.sql);
+        assert!(result.sql.contains("id"), "Should contain id in RETURNING: {}", result.sql);
+        assert!(result.sql.contains("name"), "Should contain name in RETURNING: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_do_update_subquery() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = (SELECT 'Updated' FROM (VALUES (1)) AS t)";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("(select"), "Should contain subquery: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_excluded_case_insensitive() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id) DO UPDATE SET name = ExClUdEd.name";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.contains("do update set"));
+        assert!(result.sql.contains("excluded.name") || result.sql.contains("ExClUdEd.name"), 
+                "Should contain excluded reference: {}", result.sql);
+    }
+
+    #[test]
+    fn test_insert_on_conflict_constraint_target() {
+        let sql = "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT ON CONSTRAINT users_pkey DO NOTHING";
+        let result = transpile_with_metadata(sql);
+        assert!(result.sql.contains("insert into users"));
+        assert!(result.sql.contains("on conflict"));
+        assert!(result.sql.to_lowercase().contains("on constraint users_pkey"), "Should contain ON CONSTRAINT: {}", result.sql);
     }
 
     // Test for UPDATE with FROM clause (JOIN support)
@@ -973,5 +1094,72 @@ VALUES
         assert!(result.sql.contains("pg_cron"));
         assert!(result.warnings.len() >= 1, "Should have a warning about extension not being supported");
         assert!(result.warnings[0].contains("pg_cron"), "Warning should mention the extension name");
+}
+
+    #[test]
+    fn test_multi_row_insert_basic() {
+        let sql = "INSERT INTO test (id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c')";
+        let result = transpile_with_metadata(sql);
+        println!("Multi-row INSERT: {}", result.sql);
+        assert!(result.sql.contains("insert into test"));
+        // Multi-row INSERT is transpiled to INSERT ... SELECT ... UNION ALL format
+        assert!(result.sql.to_lowercase().contains("select") || result.sql.to_lowercase().contains("values"));
+        assert!(result.sql.contains("'a'") || result.sql.contains("1"));
+        assert!(result.sql.contains("'b'") || result.sql.contains("2"));
+        assert!(result.sql.contains("'c'") || result.sql.contains("3"));
+        assert!(result.errors.is_empty(), "Should have no errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_multi_row_insert_with_default() {
+        let sql = "INSERT INTO test (id, name) VALUES (1, DEFAULT), (2, 'a')";
+        let result = transpile_with_metadata(sql);
+        println!("Multi-row with DEFAULT: {}", result.sql);
+        assert!(result.sql.contains("insert into test"));
+        // DEFAULT becomes NULL when no column default is known
+        assert!(result.sql.contains("NULL"));
+        assert!(result.sql.contains("'a'"));
+    }
+
+    #[test]
+    fn test_multi_row_insert_with_expressions() {
+        let sql = "INSERT INTO test (id, name) VALUES (1+1, UPPER('a')), (2, 'b')";
+        let result = transpile_with_metadata(sql);
+        println!("Multi-row with expressions: {}", result.sql);
+        assert!(result.sql.contains("insert into test"));
+        assert!(result.sql.contains("1 + 1") || result.sql.contains("1+1"));
+        assert!(result.sql.contains("upper('a')") || result.sql.contains("UPPER('a')"));
+        assert!(result.sql.contains("'b'"));
+    }
+
+    #[test]
+    fn test_multi_row_insert_mixed_values() {
+        let sql = "INSERT INTO test (id, name) VALUES (1, 'a'), (DEFAULT, 'b')";
+        let result = transpile_with_metadata(sql);
+        println!("Multi-row mixed: {}", result.sql);
+        assert!(result.sql.contains("insert into test"));
+        assert!(result.sql.contains("'a'"));
+        assert!(result.sql.contains("'b'"));
+    }
+
+    #[test]
+    fn test_multi_row_insert_different_column_orders() {
+        // Test that column order in INSERT is respected
+        let sql = "INSERT INTO test (name, id) VALUES ('a', 1), ('b', 2)";
+        let result = transpile_with_metadata(sql);
+        println!("Different column order: {}", result.sql);
+        assert!(result.sql.contains("insert into test (name, id)"));
+        assert!(result.sql.contains("'a'") && result.sql.contains("1"));
+        assert!(result.sql.contains("'b'") && result.sql.contains("2"));
+    }
+
+    #[test]
+    fn test_multi_row_insert_with_returning() {
+        let sql = "INSERT INTO test (id, name) VALUES (1, 'a'), (2, 'b') RETURNING id";
+        let result = transpile_with_metadata(sql);
+        println!("Multi-row with RETURNING: {}", result.sql);
+        assert!(result.sql.contains("insert into test"));
+        assert!(result.sql.contains("returning"));
+        assert!(result.sql.contains("id"));
     }
 }

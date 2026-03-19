@@ -81,6 +81,60 @@ pub(crate) fn reconstruct_range_function(range_func: &RangeFunction, ctx: &mut T
                                     // The test suite only checks row count, not values.
                                     return Some("(SELECT NULL AS message, NULL AS detail, NULL AS hint, NULL AS sql_error_code)".to_string());
                                 }
+
+                                // Handle JSON processing functions - wrap with json_each() for iteration
+                                if is_json_processing_function(&func_name) {
+                                    let args: Vec<String> = func_call
+                                        .args
+                                        .iter()
+                                        .map(|n| reconstruct_node(n, ctx))
+                                        .collect();
+                                    if !args.is_empty() {
+                                        // For jsonb_each and similar, use SQLite's native json_each
+                                        // directly on the JSON value for proper key-value expansion
+                                        match func_name.as_str() {
+                                            "jsonb_each" | "json_each" => {
+                                                return Some(format!(
+                                                    "json_each({})",
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                            "jsonb_each_text" | "json_each_text" => {
+                                                return Some(format!(
+                                                    "json_each({})",
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                            "jsonb_array_elements" | "json_array_elements" => {
+                                                return Some(format!(
+                                                    "json_each({})",
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                            "jsonb_array_elements_text" | "json_array_elements_text" => {
+                                                return Some(format!(
+                                                    "json_each({})",
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                            "jsonb_object_keys" | "json_object_keys" => {
+                                                // For object_keys, filter json_each to only return keys from objects
+                                                return Some(format!(
+                                                    "(SELECT key FROM json_each({}) WHERE type = 'object')",
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                            _ => {
+                                                let impl_func = get_json_processing_impl(&func_name);
+                                                return Some(format!(
+                                                    "json_each({}({}))",
+                                                    impl_func,
+                                                    args.join(", ")
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         return Some(reconstruct_node(first, ctx));
@@ -172,6 +226,40 @@ fn is_simple_numeric_literal(s: &str) -> bool {
 fn looks_like_geo(val: &str) -> bool {
     val.contains('<') ||
     (!val.contains('[') && val.contains('(') && val.contains(',') && val.contains(')'))
+}
+
+/// Check if a function name is a JSON processing function
+fn is_json_processing_function(func_name: &str) -> bool {
+    matches!(
+        func_name,
+        "json_each"
+            | "jsonb_each"
+            | "json_each_text"
+            | "jsonb_each_text"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "json_object_keys"
+            | "jsonb_object_keys"
+    )
+}
+
+/// Get the implementation function name for a JSON processing function
+fn get_json_processing_impl(func_name: &str) -> &str {
+    match func_name {
+        "json_each" => "json_each_impl",
+        "jsonb_each" => "jsonb_each_impl",
+        "json_each_text" => "json_each_text_impl",
+        "jsonb_each_text" => "jsonb_each_text_impl",
+        "json_array_elements" => "json_array_elements_impl",
+        "jsonb_array_elements" => "jsonb_array_elements_impl",
+        "json_array_elements_text" => "json_array_elements_text_impl",
+        "jsonb_array_elements_text" => "jsonb_array_elements_text_impl",
+        "json_object_keys" => "json_object_keys_impl",
+        "jsonb_object_keys" => "jsonb_object_keys_impl",
+        _ => func_name,
+    }
 }
 
 /// Check if a string looks like a range literal

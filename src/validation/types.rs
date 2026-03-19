@@ -202,16 +202,48 @@ pub fn parse_date_with_era(input: &str) -> Result<String, ValidationError> {
 }
 
 /// Validates that a string is valid JSON
+/// 
+/// Uses strict JSON parsing with PostgreSQL-compatible error messages.
+/// Returns error code 22P02 (invalid_text_representation) for invalid JSON.
 #[allow(dead_code)]
 pub fn validate_json(value: &str) -> Result<(), ValidationError> {
     // Remove any quotes that might be present at the start/end
     let value = value.trim();
+    
+    // Empty strings are not valid JSON
+    if value.is_empty() {
+        return Err(ValidationError {
+            code: "22P02".to_string(),
+            message: format!("invalid input syntax for type json: \"{}\"", value),
+            position: None,
+        });
+    }
     
     match serde_json::from_str::<serde_json::Value>(value) {
         Ok(_) => Ok(()),
         Err(_) => Err(ValidationError {
             code: "22P02".to_string(),
             message: format!("invalid input syntax for type json: \"{}\"", value),
+            position: None,
+        }),
+    }
+}
+
+/// Validates that a string is a valid PostgreSQL interval
+/// 
+/// Uses strict interval parsing with PostgreSQL-compatible error messages.
+/// Returns error code 22007 (invalid_datetime_format) for invalid intervals.
+#[allow(dead_code)]
+pub fn validate_interval(value: &str) -> Result<(), ValidationError> {
+    use crate::interval::Interval;
+    
+    let trimmed = value.trim();
+    
+    match Interval::from_str(trimmed) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(ValidationError {
+            code: "22007".to_string(),
+            message: e.to_string(),
             position: None,
         }),
     }

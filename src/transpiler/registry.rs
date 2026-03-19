@@ -342,6 +342,12 @@ impl Registry {
             format!("json_array({})", args.join(", "))
         }));
 
+        // JSON constructor functions - pass through to SQLite custom functions
+        functions.register("to_json", FunctionMapping::Simple("to_json"));
+        functions.register("to_jsonb", FunctionMapping::Simple("to_jsonb"));
+        functions.register("array_to_json", FunctionMapping::Simple("array_to_json"));
+        functions.register("row_to_json", FunctionMapping::Simple("row_to_json"));
+
         functions.register("pg_input_is_valid", FunctionMapping::Complex(|_args| {
             "1".to_string()
         }));

@@ -37,8 +37,12 @@ pub(crate) fn is_node_jsonb(node: &Node) -> bool {
                     if let pg_query::protobuf::a_const::Val::Sval(sval) = val {
                         let s = sval.sval.trim();
                         // Check for JSON array: [1,2,3] or [{"a":1}]
+                        // But NOT simple string arrays like ["admin"] which are PostgreSQL text arrays
                         if s.starts_with("[") && s.ends_with("]") {
-                            return true;
+                            // Only detect as JSON if it contains objects, colons, or numbers
+                            // Simple string arrays should be treated as PostgreSQL arrays
+                            return s.contains("{") || s.contains(":") || 
+                                   (s.chars().any(|c| c.is_ascii_digit()) && s.contains(','));
                         }
                         // Check for JSON object: {"key":"value"} (has colon)
                         // PostgreSQL arrays are {"a","b"} (no colon, quoted elements)

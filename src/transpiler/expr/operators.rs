@@ -12,6 +12,51 @@ use super::ranges;
 use super::geo;
 use super::jsonb_ops;
 
+/// Convert PostgreSQL JSON path syntax {a,b,c} to SQLite JSON path syntax $.a.b.c
+/// Handles both string keys and numeric indices.
+fn convert_pg_path_to_sqlite(path: &str) -> String {
+    // Handle quoted paths like '{a,b}'
+    let trimmed = path.trim().trim_matches('\'').trim_matches('{').trim_matches('}');
+    if trimmed.is_empty() {
+        return "$".to_string();
+    }
+    
+    let parts: Vec<&str> = trimmed.split(',').collect();
+    let mut result = String::from("$");
+    
+    for part in parts {
+        let part = part.trim();
+        // Check if it's a numeric index (array access)
+        if part.parse::<i64>().is_ok() {
+            result.push_str(&format!("[{}]", part));
+        } else {
+            // It's a string key (object access)
+            // Remove quotes if present
+            let key = part.trim_matches('"');
+            result.push_str(&format!(".{}", key));
+        }
+    }
+    
+    result
+}
+
+/// Check if an expression looks like JSON (starts with { or [)
+fn is_json_expression(expr: &str) -> bool {
+    let trimmed = expr.trim();
+    // Check for cast to json/jsonb
+    if trimmed.contains("::json") || trimmed.contains("::jsonb") {
+        return true;
+    }
+    // Check for JSON object literals - must contain both { and } and a colon
+    // This should NOT match array literals like ARRAY[1,2] or '{1,2}' (no colon)
+    // But should match JSON objects like '{"a": 1}' (has colon)
+    // Also should NOT match JSON arrays like '["admin"]' (no colon, no braces)
+    if trimmed.starts_with("'{") && trimmed.contains("}") && trimmed.contains(":") {
+        return true;
+    }
+    false
+}
+
 /// Check if a SQL expression looks like an integer type or integer literal
 fn is_integer_expression(expr: &str) -> bool {
     let lower = expr.to_lowercase();
@@ -184,12 +229,13 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
             
-            if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
+            // Check for JSONB operations first (higher priority than geo)
+            if is_jsonb_op || (is_json_expression(&lexpr_sql) && is_json_expression(&rexpr_sql)) {
+                jsonb_ops::jsonb_contains(&lexpr_sql, &rexpr_sql)
+            } else if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_contains(&lexpr_sql, &rexpr_sql)
             } else if arrays::is_array_operation(lexpr_is_array, rexpr_is_array, &lexpr_sql, &rexpr_sql) {
                 arrays::array_contains(&lexpr_sql, &rexpr_sql)
-            } else if is_jsonb_op {
-                jsonb_ops::jsonb_contains(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_contains(&lexpr_sql, &rexpr_sql)
             } else {
@@ -200,12 +246,13 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             let lexpr_lower = lexpr_sql.to_lowercase();
             let rexpr_lower = rexpr_sql.to_lowercase();
             
-            if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
+            // Check for JSONB operations first (higher priority than geo)
+            if is_jsonb_op || (is_json_expression(&lexpr_sql) && is_json_expression(&rexpr_sql)) {
+                jsonb_ops::jsonb_contained(&lexpr_sql, &rexpr_sql)
+            } else if geo::is_geo_operation(&lexpr_lower, &rexpr_lower) {
                 geo::geo_contained(&lexpr_sql, &rexpr_sql)
             } else if arrays::is_array_operation(lexpr_is_array, rexpr_is_array, &lexpr_sql, &rexpr_sql) {
                 arrays::array_contained(&lexpr_sql, &rexpr_sql)
-            } else if is_jsonb_op {
-                jsonb_ops::jsonb_contained(&lexpr_sql, &rexpr_sql)
             } else if ranges::is_range_operation(&lexpr_sql, &rexpr_sql) {
                 ranges::range_contained(&lexpr_sql, &rexpr_sql)
             } else {
@@ -267,6 +314,49 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         "-|-" => ranges::range_adjacent(&lexpr_sql, &rexpr_sql),
         "&<" => ranges::range_no_extend_right(&lexpr_sql, &rexpr_sql),
         "&>" => ranges::range_no_extend_left(&lexpr_sql, &rexpr_sql),
+        // JSON operators (Phase 1.4)
+        "->" => {
+            // Get JSON object field / array element
+            // Convert to json_extract with appropriate path
+            let key = rexpr_sql.trim_matches('\'');
+            if key.parse::<i64>().is_ok() {
+                // Array index access
+                format!("json_extract({}, '$[{}]')", lexpr_sql, key)
+            } else {
+                // Object field access
+                format!("json_extract({}, '$.{}')", lexpr_sql, key)
+            }
+        }
+        "->>" => {
+            // Get JSON object field / array element as text
+            // Same as -> but returns text (SQLite json_extract already returns text)
+            let key = rexpr_sql.trim_matches('\'');
+            if key.parse::<i64>().is_ok() {
+                // Array index access
+                format!("json_extract({}, '$[{}]')", lexpr_sql, key)
+            } else {
+                // Object field access
+                format!("json_extract({}, '$.{}')", lexpr_sql, key)
+            }
+        }
+        "#>" => {
+            // Get JSON object at specified path
+            // Convert PostgreSQL {a,b,c} path to SQLite $.a.b.c
+            let path = convert_pg_path_to_sqlite(&rexpr_sql);
+            format!("json_extract({}, '{}')", lexpr_sql, path)
+        }
+        "#>>" => {
+            // Get JSON object at specified path as text
+            // Same as #> but returns text
+            let path = convert_pg_path_to_sqlite(&rexpr_sql);
+            format!("json_extract({}, '{}')", lexpr_sql, path)
+        }
+        "#-" => {
+            // Delete at path
+            // Convert PostgreSQL {a,b,c} path to SQLite $.a.b.c
+            let path = convert_pg_path_to_sqlite(&rexpr_sql);
+            format!("json_remove({}, '{}')", lexpr_sql, path)
+        }
         // JSONB operators (PostgreSQL compatibility)
         "?" => jsonb_ops::jsonb_key_exists(&lexpr_sql, &rexpr_sql),
         "?|" => jsonb_ops::jsonb_exists_any(&lexpr_sql, &rexpr_sql),
@@ -283,12 +373,13 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                lexpr_lower.contains("tsvector") || rexpr_lower.contains("tsvector") {
                 format!("tsvector_concat({}, {})", lexpr_sql, rexpr_sql)
             }
-            // Check for JSON context
-            else if lexpr_trimmed.starts_with("'{") || rexpr_trimmed.starts_with("'{") ||
+            // Check for JSON context - use json_concat for JSON merging
+            else if is_jsonb_op || 
+                    (is_json_expression(&lexpr_sql) && is_json_expression(&rexpr_sql)) ||
+                    lexpr_trimmed.starts_with("'{") || rexpr_trimmed.starts_with("'{") ||
                     lexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("'[") ||
-                    lexpr_lower.contains("json") || rexpr_lower.contains("json") ||
-                    lexpr_lower.contains("props") || rexpr_lower.contains("props") {
-                format!("json_patch({}, {})", lexpr_sql, rexpr_sql)
+                    lexpr_lower.contains("::json") || rexpr_lower.contains("::json") {
+                format!("json_concat({}, {})", lexpr_sql, rexpr_sql)
             }
             // Default to SQLite's string concatenation
             else {
@@ -320,23 +411,36 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
                 }
             }
             
-            // Handle array element removal: array - element
-            // Only treat as array removal if left operand is actually an array
-            let rexpr_trimmed = rexpr_sql.trim();
-            if rexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("[") {
-                let array_str = rexpr_trimmed.trim_matches(|c| c == '\'');
-                if let Ok(keys) = serde_json::from_str::<Vec<String>>(array_str) {
-                    let paths: Vec<String> = keys.iter().map(|k| format!("'$.{}'", k)).collect();
-                    format!("json_remove({}, {})", lexpr_sql, paths.join(", "))
+            // Check for JSONB key deletion: json - key
+            if is_jsonb_op || is_json_expression(&lexpr_sql) {
+                // JSON deletion - remove key from object or element from array
+                let key = rexpr_sql.trim_matches('\'');
+                if key.parse::<i64>().is_ok() {
+                    // Array index deletion
+                    format!("json_remove({}, '$[{}]')", lexpr_sql, key)
                 } else {
-                    format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+                    // Object key deletion
+                    format!("json_remove({}, '$.{}')", lexpr_sql, key)
                 }
-            } else if lexpr_is_array || lexpr_sql.trim().starts_with("'[") {
-                // Only treat as array removal if left operand is actually an array
-                format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
-            } else {
-                // Regular numeric subtraction
-                format!("{} - {}", lexpr_sql, rexpr_sql)
+            }
+            // Handle array element removal: array - element
+            else {
+                let rexpr_trimmed = rexpr_sql.trim();
+                if rexpr_trimmed.starts_with("'[") || rexpr_trimmed.starts_with("[") {
+                    let array_str = rexpr_trimmed.trim_matches(|c| c == '\'');
+                    if let Ok(keys) = serde_json::from_str::<Vec<String>>(array_str) {
+                        let paths: Vec<String> = keys.iter().map(|k| format!("'$.{}'", k)).collect();
+                        format!("json_remove({}, {})", lexpr_sql, paths.join(", "))
+                    } else {
+                        format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+                    }
+                } else if lexpr_is_array || lexpr_sql.trim().starts_with("'[") {
+                    // Only treat as array removal if left operand is actually an array
+                    format!("json_remove({}, '$.' || {})", lexpr_sql, rexpr_sql)
+                } else {
+                    // Regular numeric subtraction
+                    format!("{} - {}", lexpr_sql, rexpr_sql)
+                }
             }
         }
         // Vector distance operators (pgvector compatibility) and geometric distance

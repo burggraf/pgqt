@@ -4,6 +4,210 @@ All notable changes to PGQT will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Input Validation Improvements (Phase 7.1)**: Aligned input validation with PostgreSQL semantics
+  - **Interval Validation**: Stricter interval parsing with PostgreSQL-compatible error messages
+    - `Interval::from_str()` now rejects empty strings and invalid inputs
+    - Added `validate_interval()` function in `src/validation/types.rs`
+    - Returns error code 22007 (invalid_datetime_format) for invalid intervals
+    - Error messages: "invalid input syntax for type interval: \"{}\""
+    - Updated tests in `src/interval.rs`
+  - **JSON Validation**: Strict JSON parsing with proper PostgreSQL error messages
+    - Added `validate_json_strict()` function in `src/jsonb.rs`
+    - Empty strings rejected with proper error messages
+    - Returns error code 22P02 (invalid_text_representation) for invalid JSON
+    - Error messages: "invalid input syntax for type json: \"{}\""
+    - Updated validation in `src/validation/types.rs`
+  - **Numeric Range Validation**: Overflow detection for float values
+    - Added `validate_numeric_with_overflow_check()` in `src/float_special.rs`
+    - Detects overflow to infinity (e.g., "1e309")
+    - Returns error code 22003 (numeric_value_out_of_range)
+    - Error messages: "\"{}\" is out of range for type {}"
+    - Explicit "infinity" values still accepted
+  - **Error Code Mapping**: Added `NumericValueOutOfRange` to `PgErrorCode` enum
+    - SQLSTATE code 22003 for numeric value out of range errors
+    - Located in `src/handler/errors.rs`
+  - **Validation Module Updates**: Extended `validate_value()` function
+    - Added INTERVAL type validation
+    - Added JSON/JSONB type validation
+  - New tests: 15+ unit tests across `src/interval.rs`, `src/jsonb.rs`, `src/float_special.rs`
+
+### Added
+- **Float Input Validation (Phase 6.2)**: Implemented PostgreSQL-compatible float input validation
+  - `validate_float_input(s: &str) -> Result<f64, String>` function for validating float inputs
+  - `validate_float()` SQLite function for runtime validation
+  - Rejects invalid inputs matching PostgreSQL behavior:
+    - `'xyz'::float4` - invalid text
+    - `'5.0.0'::float4` - multiple decimal points
+    - `'5 . 0'::float4` - spaces in number
+    - `'     - 3.0'::float4` - spaces in negative number
+    - `''::float4` - empty string
+    - `'       '::float4` - whitespace only
+  - Returns PostgreSQL-compatible error messages: "invalid input syntax for type double precision: \"{}\""
+  - Preserves support for special values: NaN, infinity, -infinity
+  - 8 new unit tests in `src/float_special.rs`
+  - 9 new integration tests in `tests/float_tests.rs`
+
+### Added
+- **Special Float Value Handling (Phase 6.1)**: Implemented support for PostgreSQL's special float values
+  - `nan()` function - returns IEEE 754 NaN (Not a Number)
+  - `infinity()` function - returns positive infinity
+  - `neg_infinity()` function - returns negative infinity
+  - `float8_nan()` and `float8_infinity()` aliases for PostgreSQL compatibility
+  - Transpiler support for `'NaN'::float8`, `'infinity'::float8`, `'-infinity'::float8` casts
+  - Full arithmetic support: Infinity + 100 = Infinity, Infinity / Infinity = NaN, etc.
+  - 11 new integration tests in `tests/float_tests.rs`
+  - 5 new unit tests in `src/float_special.rs`
+
+### Added
+- **ON CONFLICT Enhancements (Phase 4.2)**: Fixed remaining ON CONFLICT (upsert) issues
+  - Multiple conflict targets (e.g., `ON CONFLICT (col1, col2)`)
+  - Complex WHERE clauses in DO UPDATE (e.g., `DO UPDATE SET ... WHERE ...`)
+  - Subqueries in DO UPDATE SET (e.g., `SET col = (SELECT ...)`)
+  - ON CONFLICT with RETURNING (SQLite 3.35.0+)
+  - EXCLUDED table reference support (case-insensitive)
+  - ON CONSTRAINT target support for named constraints
+  - 9 new integration tests in `tests/insert_tests_upsert.rs`
+  - 8 new unit tests in `src/transpiler/mod.rs`
+
+### Added
+- **RETURNING Clause Enhancements (Phase 4.1)**: Fixed remaining RETURNING clause issues for INSERT/UPDATE/DELETE statements
+  - Complex expressions in RETURNING (e.g., `RETURNING id * 2`, `RETURNING UPPER(name)`)
+  - Column aliases in RETURNING (e.g., `RETURNING id AS new_id`)
+  - Subqueries in RETURNING (e.g., `RETURNING (SELECT COUNT(*) FROM other)`)
+  - Aggregate functions in RETURNING supported via existing transpilation pipeline
+  - Verified compatibility with triggers that modify NEW rows
+  - SQLite 3.35.0+ native RETURNING support passes through complex expressions
+  - 13 new integration tests in `tests/insert_tests.rs`
+  - 4 new unit tests in `src/transpiler/mod.rs`
+
+### Added
+- **Statistical Aggregate Functions (Phase 3.3)**: Implemented internal statistical accumulator functions
+  - `float8_accum(real[], real)` - Accumulates values for statistical computation [n, sum, sum_sqr]
+  - `float8_combine(real[], real[])` - Combines two accumulators element-wise for parallel aggregation
+  - `float8_regr_accum(real[], real, real)` - Accumulates for regression analysis [n, sum_x, sum_x2, sum_y, sum_y2, sum_xy]
+  - `float8_regr_combine(real[], real[])` - Combines two regression accumulators element-wise
+  - Accumulators stored as JSON strings in SQLite for compatibility
+  - Supports parallel aggregation pattern via combine functions
+  - Full unit tests in `src/stats_accum.rs` (15 new tests)
+  - Integration tests in `tests/stats_accum_tests.rs` (12 new tests)
+  - Documentation in `docs/AGGREGATES.md`
+
+### Added
+- **Bitwise Aggregate Functions (Phase 3.2)**: Implemented PostgreSQL-compatible bitwise aggregate functions
+  - `bit_and(integer)` - Bitwise AND of all non-null values, returns NULL for empty set
+  - `bit_or(integer)` - Bitwise OR of all non-null values, returns NULL for empty set
+  - `bit_xor(integer)` - Bitwise XOR of all non-null values, returns NULL for empty set
+  - NULL values are skipped during aggregation
+  - Full unit tests in `src/bool_aggregates.rs` (16 new tests)
+  - Integration tests in `tests/bool_aggregate_tests.rs` (6 new tests)
+  - Documentation in `docs/AGGREGATES.md`
+
+### Added
+- **Boolean Aggregate Functions (Phase 3.1)**: Implemented PostgreSQL-compatible boolean aggregate functions
+  - `bool_and(boolean)` - AND of all non-null values, returns true for empty set
+  - `bool_or(boolean)` - OR of all non-null values, returns false for empty set
+  - `every(boolean)` - SQL standard alias for bool_and
+  - `booland_statefunc(boolean, boolean)` - State transition function for bool_and
+  - `boolor_statefunc(boolean, boolean)` - State transition function for bool_or
+  - NULL values are skipped during aggregation
+  - Full unit tests in `src/bool_aggregates.rs`
+  - Integration tests in `tests/bool_aggregate_tests.rs`
+  - Documentation in `docs/AGGREGATES.md`
+
+### Added
+- **Interval Input Parsing (Phase 2.1)**: Implemented PostgreSQL interval type support
+  - `Interval` struct in `src/interval.rs` with `months`, `days`, `microseconds` fields
+  - Support for standard format: `'1 day 2 hours'`, `'1 year 6 months'`
+  - Support for ISO 8601 format: `'P1Y2M3DT4H5M6S'`
+  - Support for at-style format: `'@ 1 minute'`
+  - Support for special values: `'infinity'`, `'-infinity'`
+  - Fractional unit support: `'1.5 weeks'` converts to days and microseconds
+  - Negative interval support: `'-1 day'`, `'1 day ago'`
+  - Storage format: `months|days|microseconds` (delimited string)
+  - `parse_interval()` function for SQL casts: `'1 day'::interval`
+  - `parse_interval_storage()` for parsing storage format
+  - Interval arithmetic functions: `interval_add`, `interval_sub`, `interval_mul`, `interval_div`, `interval_neg`
+  - Interval comparison functions: `interval_eq`, `interval_lt`, `interval_le`, `interval_gt`, `interval_ge`, `interval_ne`
+  - `extract_from_interval()` for EXTRACT functionality
+  - Transpiler support for `::interval` casts in `src/transpiler/expr/utils.rs`
+  - Functions registered in `src/handler/mod.rs`
+  - Comprehensive unit tests in `src/interval.rs`
+  - Integration tests in `tests/interval_tests.rs`
+  - Documentation in `docs/INTERVAL.md`
+
+### Added
+- **JSON Operators (Phase 1.4)**: Implemented PostgreSQL-compatible JSON operators
+  - `->` - Get JSON object field or array element (maps to `json_extract`)
+  - `->>` - Get JSON object field or array element as text (maps to `json_extract`)
+  - `#>` - Get JSON object at specified path (converts `{a,b}` to `$.a.b`)
+  - `#>>` - Get JSON object at specified path as text
+  - `@>` - JSON contains (uses `jsonb_contains` function)
+  - `<@` - JSON is contained by (uses `jsonb_contained` function)
+  - `?` - Does key exist? (uses `jsonb_exists` function)
+  - `?\|` - Does any key exist? (uses `jsonb_exists_any` function)
+  - `?&` - Do all keys exist? (uses `jsonb_exists_all` function)
+  - `\|\|` - Concatenate JSON (uses new `json_concat` function)
+  - `-` - Delete key/array element (uses `json_remove`)
+  - `#-` - Delete at path (uses `json_remove` with path conversion)
+  - Path conversion: PostgreSQL `{a,b,c}` → SQLite `$.a.b.c`
+  - New `json_concat`, `json_delete`, `json_delete_path` functions in `src/jsonb.rs`
+  - Operator handling in `src/transpiler/expr/operators.rs`
+  - Integration tests in `tests/json_operator_tests.rs`
+  - Documentation updated in `docs/JSON.md`
+
+### Added
+- **JSON Type Casting & Validation Functions (Phase 1.5)**: Implemented PostgreSQL-compatible JSON validation functions
+  - `json_typeof(json)` - Returns type of JSON value (null, boolean, number, string, array, object)
+  - `jsonb_typeof(jsonb)` - Returns type of JSONB value
+  - `json_strip_nulls(json)` - Removes object fields with null values (recursively)
+  - `jsonb_strip_nulls(jsonb)` - Removes object fields with null values from JSONB
+  - `json_pretty(json)` - Pretty-prints JSON with indentation
+  - `jsonb_pretty(jsonb)` - Pretty-prints JSONB with indentation
+  - `jsonb_set(target, path, new_value)` - Updates value at path (creates if missing)
+  - `jsonb_insert(target, path, new_value)` - Inserts value at path (error if exists)
+  - Path format conversion: PostgreSQL `{a,b,c}` syntax supported
+  - Support for nested path navigation in set/insert operations
+  - Support for array index access in paths
+  - New helper functions: `strip_nulls()`, `set_value_at_path()`, `parse_pg_path()`
+  - Added `PathPart` enum for path component representation
+  - Unit tests in `src/jsonb.rs` for all new functions
+  - Integration tests in `tests/json_validation_tests.rs`
+  - Documentation updated in `docs/JSON.md`
+
+### Added
+- **JSON Processing Functions (Phase 1.2)**: Implemented PostgreSQL-compatible JSON processing functions
+  - `json_each(json)` - Expand JSON object/array to row set (key-value or index-value pairs)
+  - `jsonb_each(jsonb)` - Expand JSONB object/array to row set
+  - `json_each_text(json)` - Like json_each but returns text values
+  - `jsonb_each_text(jsonb)` - Like jsonb_each but returns text values
+  - `json_array_elements(json)` - Expand JSON array to row set (just elements)
+  - `jsonb_array_elements(jsonb)` - Expand JSONB array to row set
+  - `json_array_elements_text(json)` - Like json_array_elements but text
+  - `jsonb_array_elements_text(jsonb)` - Like jsonb_array_elements but text
+  - `json_object_keys(json)` - Return keys of JSON object as row set
+  - `jsonb_object_keys(jsonb)` - Return keys of JSONB object as row set
+  - Implemented as scalar functions returning JSON arrays, used with SQLite's json_each()
+  - Transpiler support in `src/transpiler/func.rs` for automatic function transformation
+  - Comprehensive unit tests in `src/jsonb.rs`
+  - Integration tests in `tests/json_processing_tests.rs`
+  - Documentation updated in `docs/JSON.md`
+
+### Added
+- **JSON Constructor Functions (Phase 1.1)**: Implemented PostgreSQL-compatible JSON constructor functions
+  - `to_json(anyelement)` - Convert any value to JSON
+  - `to_jsonb(anyelement)` - Convert any value to JSONB
+  - `array_to_json(anyarray)` - Convert array to JSON array
+  - `json_build_object(VARIADIC "any")` - Build JSON object from variadic args (0-10 args)
+  - `jsonb_build_object(VARIADIC "any")` - Build JSONB object from variadic args (0-10 args)
+  - `json_build_array(VARIADIC "any")` - Build JSON array from variadic args (0-10 args)
+  - `jsonb_build_array(VARIADIC "any")` - Build JSONB array from variadic args (0-10 args)
+  - Functions registered in `src/jsonb.rs` with SQLite custom function API
+  - Transpiler mappings added in `src/transpiler/registry.rs`
+  - Comprehensive unit tests in `src/jsonb.rs`
+  - Integration tests in `tests/json_constructor_tests.rs`
+  - Documentation in `docs/JSON.md`
+
 ## [0.7.3] - 2026-03-18
 
 ### Performance Improvements
