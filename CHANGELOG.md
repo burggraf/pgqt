@@ -2,7 +2,27 @@
 
 All notable changes to PGQT will be documented in this file.
 
-## [Unreleased]
+## [0.8.0] - 2025-03-20
+
+### Changed
+- **Default Features**: Observability features are now enabled by default
+  - `cargo build --release` now includes: plpgsql + tls + observability
+  - Default binary size increased from ~12MB to ~14-15MB
+  - Previous behavior: use `cargo build --release --no-default-features --features plpgsql,tls` for smaller build
+
+### Changed
+- **CLI**: Metrics are now enabled by default
+  - `--metrics-enabled` flag removed (now default behavior)
+  - Added `--metrics-disabled` flag to opt-out of metrics
+  - Default metrics port is now 9090 (was previously required to specify)
+  - Can override port with `--metrics-port <PORT>` (default: 9090)
+
+### Added
+- **New Build Scripts**
+  - `build-minimal.sh` - Core only, no extras (~8-9MB)
+  - `build-custom.sh` - Interactive feature selection
+  - `build-release.sh` - Now builds ALL features (was: TLS only)
+  - `build-release-small.sh` - Now explicitly excludes observability
 
 ### Added
 - **Observability Stack**: Full Prometheus-compatible metrics and monitoring
