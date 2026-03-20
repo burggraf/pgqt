@@ -429,11 +429,11 @@ pub fn extract_old_row_from_dml(
 }
 
 /// Deparse a WHERE clause node back to SQL
+/// 
+/// Handles:
+/// - AExpr: Simple binary expressions like "id = 1", "name > 'test'"
+/// - BoolExpr: AND/OR expressions like "id = 1 AND name = 'test'"
 fn deparse_where_clause(where_clause: &pg_query::protobuf::Node) -> Result<String> {
-    // pg_query::deparse can deparse a Node back to SQL, but it requires
-    // the node to be wrapped in a RawStmt or similar in some versions.
-    // However, let's try a direct approach by looking at the node type.
-    
     use pg_query::protobuf::node::Node as NodeEnum;
     
     match &where_clause.node {
@@ -459,12 +459,28 @@ fn deparse_where_clause(where_clause: &pg_query::protobuf::Node) -> Result<Strin
                 
             Ok(format!("{} {} {}", left, op, right))
         }
+        Some(NodeEnum::BoolExpr(bool_expr)) => {
+            // Handle AND/OR expressions
+            let op = match bool_expr.boolop() {
+                pg_query::protobuf::BoolExprType::AndExpr => "AND",
+                pg_query::protobuf::BoolExprType::OrExpr => "OR",
+                pg_query::protobuf::BoolExprType::NotExpr => "NOT",
+                _ => "AND",
+            };
+            
+            let args: Vec<String> = bool_expr.args.iter()
+                .map(|n| deparse_where_clause(n))
+                .collect::<Result<Vec<String>>>()?;
+            
+            if bool_expr.boolop() == pg_query::protobuf::BoolExprType::NotExpr {
+                Ok(format!("NOT ({})", args.join(" ")))
+            } else {
+                Ok(format!("({})", args.join(&format!(" {} ", op))))
+            }
+        }
         _ => {
-            // For more complex expressions, we really need a proper deparser.
-            // Let's try to use pg_query's deparse if we can.
-            // Since we don't have a full deparser for individual nodes easily,
-            // we'll fall back to a placeholder for very complex cases.
-            Err(anyhow!("Complex WHERE clause deparsing not yet fully implemented"))
+            // For unsupported node types, try deparse_node as a fallback
+            deparse_node(where_clause)
         }
     }
 }
@@ -823,5 +839,153 @@ mod tests {
         // Should have the updated name
         assert_eq!(new_row.get("name"), Some(&Value::Text("Alice Updated".to_string())));
         // Note: This only extracts SET clause values, not the full row
+    }
+
+    #[test]
+    fn test_deparse_where_clause_simple() {
+        // Test parsing and deparsing a simple WHERE clause: "WHERE id = 1"
+        let sql = "SELECT * FROM users WHERE id = 1";
+        let result = pg_query::parse(sql).unwrap();
+        
+        // Extract the WHERE clause from the parsed statement
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::SelectStmt(stmt)) = &stmt_node.node {
+                    if let Some(where_clause) = &stmt.where_clause {
+                        let where_sql = deparse_where_clause(where_clause).unwrap();
+                        assert_eq!(where_sql, "id = 1");
+                    } else {
+                        panic!("No WHERE clause found");
+                    }
+                } else {
+                    panic!("Not a SELECT statement");
+                }
+            } else {
+                panic!("No statement node");
+            }
+        } else {
+            panic!("No statements found");
+        }
+    }
+
+    #[test]
+    fn test_deparse_where_clause_complex() {
+        // Test parsing and deparsing a complex WHERE clause: "WHERE id = 1 AND name = 'test'"
+        let sql = "SELECT * FROM users WHERE id = 1 AND name = 'test'";
+        let result = pg_query::parse(sql).unwrap();
+        
+        // Extract the WHERE clause from the parsed statement
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::SelectStmt(stmt)) = &stmt_node.node {
+                    if let Some(where_clause) = &stmt.where_clause {
+                        let where_sql = deparse_where_clause(where_clause).unwrap();
+                        // The BoolExpr wraps the AND conditions
+                        assert_eq!(where_sql, "(id = 1 AND name = 'test')");
+                    } else {
+                        panic!("No WHERE clause found");
+                    }
+                } else {
+                    panic!("Not a SELECT statement");
+                }
+            } else {
+                panic!("No statement node");
+            }
+        } else {
+            panic!("No statements found");
+        }
+    }
+
+    #[test]
+    fn test_deparse_where_clause_with_or() {
+        // Test parsing and deparsing a WHERE clause with OR: "WHERE id = 1 OR id = 2"
+        let sql = "SELECT * FROM users WHERE id = 1 OR id = 2";
+        let result = pg_query::parse(sql).unwrap();
+        
+        // Extract the WHERE clause from the parsed statement
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::SelectStmt(stmt)) = &stmt_node.node {
+                    if let Some(where_clause) = &stmt.where_clause {
+                        let where_sql = deparse_where_clause(where_clause).unwrap();
+                        assert_eq!(where_sql, "(id = 1 OR id = 2)");
+                    } else {
+                        panic!("No WHERE clause found");
+                    }
+                } else {
+                    panic!("Not a SELECT statement");
+                }
+            } else {
+                panic!("No statement node");
+            }
+        } else {
+            panic!("No statements found");
+        }
+    }
+
+    #[test]
+    fn test_deparse_where_clause_string_literal() {
+        // Test WHERE clause with string literal: "WHERE name = 'Alice'"
+        let sql = "SELECT * FROM users WHERE name = 'Alice'";
+        let result = pg_query::parse(sql).unwrap();
+        
+        if let Some(raw_stmt) = result.protobuf.stmts.first() {
+            if let Some(ref stmt_node) = raw_stmt.stmt {
+                use pg_query::protobuf::node::Node as NodeEnum;
+                if let Some(NodeEnum::SelectStmt(stmt)) = &stmt_node.node {
+                    if let Some(where_clause) = &stmt.where_clause {
+                        let where_sql = deparse_where_clause(where_clause).unwrap();
+                        assert_eq!(where_sql, "name = 'Alice'");
+                    } else {
+                        panic!("No WHERE clause found");
+                    }
+                } else {
+                    panic!("Not a SELECT statement");
+                }
+            } else {
+                panic!("No statement node");
+            }
+        } else {
+            panic!("No statements found");
+        }
+    }
+
+    #[test]
+    fn test_deparse_where_clause_comparison_operators() {
+        // Test various comparison operators
+        let test_cases = vec![
+            ("SELECT * FROM users WHERE id > 5", "id > 5"),
+            ("SELECT * FROM users WHERE id < 10", "id < 10"),
+            ("SELECT * FROM users WHERE id >= 5", "id >= 5"),
+            ("SELECT * FROM users WHERE id <= 10", "id <= 10"),
+            ("SELECT * FROM users WHERE id <> 0", "id <> 0"),
+        ];
+        
+        for (sql, expected) in test_cases {
+            let result = pg_query::parse(sql).unwrap();
+            
+            if let Some(raw_stmt) = result.protobuf.stmts.first() {
+                if let Some(ref stmt_node) = raw_stmt.stmt {
+                    use pg_query::protobuf::node::Node as NodeEnum;
+                    if let Some(NodeEnum::SelectStmt(stmt)) = &stmt_node.node {
+                        if let Some(where_clause) = &stmt.where_clause {
+                            let where_sql = deparse_where_clause(where_clause).unwrap();
+                            assert_eq!(where_sql, expected, "Failed for SQL: {}", sql);
+                        } else {
+                            panic!("No WHERE clause found for: {}", sql);
+                        }
+                    } else {
+                        panic!("Not a SELECT statement: {}", sql);
+                    }
+                } else {
+                    panic!("No statement node for: {}", sql);
+                }
+            } else {
+                panic!("No statements found for: {}", sql);
+            }
+        }
     }
 }

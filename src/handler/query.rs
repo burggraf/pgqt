@@ -973,37 +973,35 @@ pub trait QueryExecution: HandlerUtils + Clone {
                 Ok(vec![Response::Execution(Tag::new("OK"))])
             }
             BeforeTriggerResult::Continue(modified_new_row) => {
-                let result = self.execute_statement(conn, sqlite_sql)?;
-
-                if let Some(modified) = &modified_new_row {
-                    let columns_to_update: Vec<(String, rusqlite::types::Value)> = if let Some(ref original) = new_row_clone {
-                        modified
-                            .iter()
-                            .filter(|(col, val)| {
-                                original.get(*col) != Some(&(*val).clone())
-                            })
-                            .map(|(col, val)| (col.clone(), val.clone()))
-                            .collect()
+                // Check if trigger modified the NEW row
+                let was_modified = if let Some(ref modified) = modified_new_row {
+                    if let Some(ref original) = new_row_clone {
+                        modified.iter().any(|(col, val)| {
+                            original.get(col) != Some(&(*val).clone())
+                        })
                     } else {
-                        modified.iter().map(|(col, val)| (col.clone(), val.clone())).collect()
-                    };
-                    
-                    if !columns_to_update.is_empty() {
-                        let rowid: i64 = conn.last_insert_rowid();
-                        let updates: Vec<String> = columns_to_update
-                            .iter()
-                            .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
-                            .collect();
-                        
-                        let update_sql = format!(
-                            "UPDATE {} SET {} WHERE rowid = {}",
-                            table_name,
-                            updates.join(", "),
-                            rowid
-                        );
-                        let _ = conn.execute(&update_sql, []);
+                        !modified.is_empty()
                     }
-                }
+                } else {
+                    false
+                };
+                
+                // If modified, rebuild the SQL with new values
+                let sql_to_execute = if was_modified {
+                    match trigger_op {
+                        OperationType::Insert => {
+                            match rebuild_insert_sql(original_sql, modified_new_row.as_ref().unwrap()) {
+                                Ok(new_sql) => new_sql,
+                                Err(_) => sqlite_sql.to_string(),
+                            }
+                        }
+                        _ => sqlite_sql.to_string(),
+                    }
+                } else {
+                    sqlite_sql.to_string()
+                };
+                
+                let result = self.execute_statement(conn, &sql_to_execute)?;
 
                 let after_new_row = fetch_inserted_row(conn, &table_name).ok();
                 trigger_executor.execute_after_triggers(
@@ -1095,6 +1093,7 @@ pub trait QueryExecution: HandlerUtils + Clone {
                             m
                         });
 
+                        // Build UPDATE statement with modified values
                         let set_clauses: Vec<String> = final_row.iter()
                             .filter(|(k, _)| *k != "rowid")
                             .map(|(k, v)| format!("{} = {}", k, value_to_sql(v)))
@@ -1157,6 +1156,118 @@ fn value_to_sql(val: &rusqlite::types::Value) -> String {
     }
 }
 
+/// Rebuild an INSERT SQL statement with modified values from a trigger
+fn rebuild_insert_sql(
+    original_sql: &str,
+    modified_row: &std::collections::HashMap<String, rusqlite::types::Value>,
+) -> Result<String> {
+    let parsed = pg_query::parse(original_sql)?;
+    let stmt = parsed.protobuf.stmts.first()
+        .and_then(|s| s.stmt.as_ref())
+        .ok_or_else(|| anyhow!("Failed to parse INSERT statement"))?;
+    
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    let insert_stmt = match &stmt.node {
+        Some(NodeEnum::InsertStmt(insert)) => insert,
+        _ => return Err(anyhow!("Not an INSERT statement")),
+    };
+    
+    // Get table name
+    let table_name = insert_stmt.relation.as_ref()
+        .and_then(|r| Some(r.relname.clone()))
+        .ok_or_else(|| anyhow!("Failed to extract table name"))?;
+    
+    // Get column names - use columns from modified row, or from original statement
+    let column_names: Vec<String> = if !modified_row.is_empty() {
+        modified_row.keys().cloned().collect()
+    } else {
+        insert_stmt.cols.iter()
+            .filter_map(|n| n.node.as_ref())
+            .filter_map(|node| match node {
+                NodeEnum::ResTarget(rt) => Some(rt.name.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    
+    if column_names.is_empty() {
+        return Err(anyhow!("No columns found for INSERT"));
+    }
+    
+    // Build VALUES clause from modified row
+    let values: Vec<String> = column_names.iter()
+        .map(|col| {
+            modified_row.get(col)
+                .map(|val| value_to_sql(val))
+                .unwrap_or_else(|| "NULL".to_string())
+        })
+        .collect();
+    
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        table_name,
+        column_names.join(", "),
+        values.join(", ")
+    );
+    
+    Ok(sql)
+}
+
+/// Rebuild an UPDATE SQL statement with modified values from a trigger
+#[allow(dead_code)]
+fn rebuild_update_sql(
+    original_sql: &str,
+    modified_row: &std::collections::HashMap<String, rusqlite::types::Value>,
+) -> Result<String> {
+    let parsed = pg_query::parse(original_sql)?;
+    let stmt = parsed.protobuf.stmts.first()
+        .and_then(|s| s.stmt.as_ref())
+        .ok_or_else(|| anyhow!("Failed to parse UPDATE statement"))?;
+    
+    use pg_query::protobuf::node::Node as NodeEnum;
+    
+    let update_stmt = match &stmt.node {
+        Some(NodeEnum::UpdateStmt(update)) => update,
+        _ => return Err(anyhow!("Not an UPDATE statement")),
+    };
+    
+    // Get table name
+    let table_name = update_stmt.relation.as_ref()
+        .and_then(|r| Some(r.relname.clone()))
+        .ok_or_else(|| anyhow!("Failed to extract table name"))?;
+    
+    // Build SET clause from modified row (exclude rowid if present)
+    let set_clauses: Vec<String> = modified_row.iter()
+        .filter(|(k, _)| *k != "rowid")
+        .map(|(col, val)| format!("{} = {}", col, value_to_sql(val)))
+        .collect();
+    
+    if set_clauses.is_empty() {
+        return Err(anyhow!("No columns to update"));
+    }
+    
+    // Extract WHERE clause from original SQL
+    let lower_sql = original_sql.to_lowercase();
+    let sql = if let Some(where_pos) = lower_sql.find(" where ") {
+        let where_clause = &original_sql[where_pos + 7..];
+        format!(
+            "UPDATE {} SET {} WHERE {}",
+            table_name,
+            set_clauses.join(", "),
+            where_clause
+        )
+    } else {
+        format!(
+            "UPDATE {} SET {}",
+            table_name,
+            set_clauses.join(", ")
+        )
+    };
+    
+    Ok(sql)
+}
+
 #[cfg(test)]
 mod split_tests {
     use super::*;
@@ -1213,5 +1324,105 @@ mod split_tests {
         let result = split_sql("   ;   ");
         assert!(result.is_single);
         assert!(result.statements.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod trigger_rebuild_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use rusqlite::types::Value;
+
+    #[test]
+    fn test_rebuild_insert_sql_basic() {
+        let original = "INSERT INTO users (id, name, email) VALUES (1, 'John', 'john@example.com')";
+        let mut modified = HashMap::new();
+        modified.insert("id".to_string(), Value::Integer(1));
+        modified.insert("name".to_string(), Value::Text("Jane".to_string()));
+        modified.insert("email".to_string(), Value::Text("jane@example.com".to_string()));
+
+        let result = rebuild_insert_sql(original, &modified).unwrap();
+        assert!(result.contains("INSERT INTO users"));
+        assert!(result.contains("id"));
+        assert!(result.contains("name"));
+        assert!(result.contains("email"));
+    }
+
+    #[test]
+    fn test_rebuild_insert_sql_with_quotes() {
+        let original = "INSERT INTO users (name) VALUES ('test')";
+        let mut modified = HashMap::new();
+        modified.insert("name".to_string(), Value::Text("O'Brien".to_string()));
+
+        let result = rebuild_insert_sql(original, &modified).unwrap();
+        assert!(result.contains("O''Brien"));
+    }
+
+    #[test]
+    fn test_rebuild_insert_sql_partial_columns() {
+        let original = "INSERT INTO users (id, name) VALUES (1, 'John')";
+        let mut modified = HashMap::new();
+        modified.insert("id".to_string(), Value::Integer(1));
+        // name not in modified - only id should be in output
+
+        let result = rebuild_insert_sql(original, &modified).unwrap();
+        assert!(result.contains("INSERT INTO users"));
+        assert!(result.contains("(id)"));
+        assert!(result.contains("VALUES (1)"));
+    }
+
+    #[test]
+    fn test_rebuild_insert_sql_not_insert() {
+        let original = "SELECT 1";
+        let modified = HashMap::new();
+
+        let result = rebuild_insert_sql(original, &modified);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rebuild_update_sql_basic() {
+        let original = "UPDATE users SET name = 'John' WHERE id = 1";
+        let mut modified = HashMap::new();
+        modified.insert("name".to_string(), Value::Text("Jane".to_string()));
+        modified.insert("email".to_string(), Value::Text("jane@example.com".to_string()));
+
+        let result = rebuild_update_sql(original, &modified).unwrap();
+        assert!(result.contains("UPDATE users SET"));
+        assert!(result.contains("name = 'Jane'"));
+        assert!(result.contains("email = 'jane@example.com'"));
+        assert!(result.contains("WHERE id = 1"));
+    }
+
+    #[test]
+    fn test_rebuild_update_sql_excludes_rowid() {
+        let original = "UPDATE users SET name = 'John' WHERE id = 1";
+        let mut modified = HashMap::new();
+        modified.insert("name".to_string(), Value::Text("Jane".to_string()));
+        modified.insert("rowid".to_string(), Value::Integer(1));
+
+        let result = rebuild_update_sql(original, &modified).unwrap();
+        assert!(!result.contains("rowid"));
+        assert!(result.contains("name = 'Jane'"));
+    }
+
+    #[test]
+    fn test_rebuild_update_sql_no_where() {
+        let original = "UPDATE users SET name = 'John'";
+        let mut modified = HashMap::new();
+        modified.insert("name".to_string(), Value::Text("Jane".to_string()));
+
+        let result = rebuild_update_sql(original, &modified).unwrap();
+        assert!(!result.contains("WHERE"));
+        assert!(result.contains("UPDATE users SET name = 'Jane'"));
+    }
+
+    #[test]
+    fn test_rebuild_update_sql_not_update() {
+        let original = "SELECT 1";
+        let modified = HashMap::new();
+
+        let result = rebuild_update_sql(original, &modified);
+        assert!(result.is_err());
     }
 }

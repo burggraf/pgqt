@@ -952,7 +952,7 @@ pub trait HandlerUtils {
 
         // Create references for the closure
         let func_name = metadata.name.clone();
-        let func_name_for_closure = func_name.clone(); // Clone for the closure
+        let _func_name_for_closure = func_name.clone(); // Clone for the closure
         let full_name_for_closure = full_name.clone(); // Clone for the closure
         let arg_count = num_params;
         let is_strict = metadata.strict;
