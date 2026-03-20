@@ -413,6 +413,9 @@ impl SimpleQueryHandler for SqliteHandler {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Store database path for later use (before cli is consumed)
+    let database_path = cli.database.clone();
+
     // Determine configuration source
     let app_config = if let Some(config_path) = cli.config {
         // User specified config file
@@ -520,6 +523,12 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // Initialize system metrics refresh task if enabled
+    #[cfg(feature = "system-metrics")]
+    if cli.metrics_enabled {
+        spawn_system_metrics_refresh(database_path);
+    }
 
     // Spawn listeners for each configured port
     let mut handles = Vec::new();
@@ -821,6 +830,23 @@ fn log_output(msg: &str) {
 /// Log an error message to the configured error output destination
 fn log_error(msg: &str) {
     eprintln!("{}", msg);
+}
+
+/// Spawn a background thread to periodically refresh system metrics
+#[cfg(feature = "system-metrics")]
+fn spawn_system_metrics_refresh(db_path: String) {
+    use prometheus_client::registry::Registry;
+    use pgqt::metrics::SystemMetrics;
+
+    std::thread::spawn(move || {
+        let mut registry = Registry::default();
+        let mut sys_metrics = SystemMetrics::new(&mut registry);
+
+        loop {
+            sys_metrics.refresh(&db_path);
+            std::thread::sleep(std::time::Duration::from_secs(15));
+        }
+    });
 }
 
 #[cfg(test)]

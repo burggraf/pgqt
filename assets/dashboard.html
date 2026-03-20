@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGQT Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            line-height: 1.6;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: #00d9ff; margin-bottom: 1rem; }
+        .card {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #0f3460;
+        }
+        .card h2 { color: #e94560; margin-bottom: 0.5rem; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .metric {
+            background: #0f3460;
+            padding: 1rem;
+            border-radius: 4px;
+        }
+        .metric-label { font-size: 0.875rem; color: #a0a0a0; }
+        .metric-value { font-size: 1.5rem; font-weight: bold; color: #00d9ff; }
+        a { color: #00d9ff; }
+        .links { margin-top: 1rem; }
+        .links a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔭 PGQT Dashboard</h1>
+        
+        <div class="card">
+            <h2>Quick Links</h2>
+            <div class="links">
+                <a href="/metrics">📊 Prometheus Metrics</a>
+                <a href="/health">🏥 Health Check</a>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>About</h2>
+            <p>PostgreSQL-compatible proxy translating queries to SQLite.</p>
+            <p>Metrics are available at <code>/metrics</code> in Prometheus format.</p>
+        </div>
+        
+        <div class="card">
+            <h2>Metrics Preview</h2>
+            <p>Key metrics exposed:</p>
+            <ul>
+                <li><code>pgqt_requests_total</code> - Total requests</li>
+                <li><code>pgqt_query_duration_seconds</code> - Query latency histogram</li>
+                <li><code>pgqt_connections_active</code> - Active connections</li>
+                <li><code>pgqt_queries_*_total</code> - Query type breakdown</li>
+            </ul>
+            <p>For full metrics, visit <a href="/metrics">/metrics</a>.</p>
+        </div>
+    </div>
+</body>
+</html>

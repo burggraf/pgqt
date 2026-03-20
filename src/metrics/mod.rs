@@ -10,6 +10,9 @@ mod server;
 #[cfg(feature = "metrics")]
 pub use server::*;
 
+#[cfg(feature = "web-config")]
+pub use server::WebInterface;
+
 #[cfg(feature = "metrics")]
 mod global;
 
