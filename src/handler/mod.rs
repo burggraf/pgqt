@@ -228,11 +228,21 @@ impl SqliteHandler {
     /// Create a new SqliteHandler with the given database path
     #[allow(dead_code)]
     pub fn new(db_path: &str) -> Result<Self> {
-        Self::with_pool_config(db_path, None)
+        Self::with_configs(db_path, None, None)
     }
 
     /// Create a new SqliteHandler with pool configuration
+    #[allow(dead_code)]
     pub fn with_pool_config(db_path: &str, pool_config: Option<PoolConfig>) -> Result<Self> {
+        Self::with_configs(db_path, pool_config, None)
+    }
+
+    /// Create a new SqliteHandler with pool and cache configuration
+    pub fn with_configs(
+        db_path: &str,
+        pool_config: Option<PoolConfig>,
+        cache_config: Option<crate::config::CacheConfig>,
+    ) -> Result<Self> {
         let conn = Connection::open(db_path)?;
 
         // Configure SQLite prepared statement cache (default is 16, increase to 64)
@@ -245,7 +255,9 @@ impl SqliteHandler {
         let copy_handler = crate::copy::CopyHandler::new(conn_arc.clone());
 
         let sessions = Arc::new(DashMap::new());
-        let functions = Arc::new(DashMap::new());
+        
+        // Load existing functions from catalog into memory cache
+        let functions = crate::catalog::load_functions(&conn_arc.lock().unwrap())?;
 
         // Create connection pool with an initialization function that registers UDFs
         let sessions_init = sessions.clone();
@@ -260,12 +272,26 @@ impl SqliteHandler {
             pool_config,
             Some(Arc::new(move |conn| {
                 Self::register_builtin_functions(conn, functions_init.clone(), sessions_init.clone())?;
-                // Note: PL/pgSQL wrappers need access to self.functions() which is 'functions'
-                // We'll register them manually or make a helper
+                // Register PL/pgSQL wrappers for this connection
+                Self::register_plpgsql_wrappers_static(conn, functions_init.clone())?;
                 Ok(())
             })),
             pragma_config,
         )?;
+
+        // Initialize transpile cache with configured size
+        let cache_config = cache_config.unwrap_or_default();
+        let transpile_cache = if cache_config.transpile_cache_ttl > 0 {
+            Arc::new(TranspileCache::with_size_and_ttl(
+                cache_config.transpile_cache_size,
+                Some(std::time::Duration::from_secs(cache_config.transpile_cache_ttl)),
+            ))
+        } else {
+            Arc::new(TranspileCache::with_size_and_ttl(
+                cache_config.transpile_cache_size,
+                None,
+            ))
+        };
 
         let handler = Self {
             conn: conn_arc,
@@ -275,7 +301,7 @@ impl SqliteHandler {
             schema_manager: SchemaManager::new(std::path::Path::new(db_path)),
             copy_handler,
             functions,
-            transpile_cache: Arc::new(TranspileCache::new()),
+            transpile_cache,
         };
 
         // Register PostgreSQL-compatible functions on the main connection too
@@ -289,10 +315,14 @@ impl SqliteHandler {
 
     /// Register PL/pgSQL call wrappers
     pub fn register_plpgsql_wrappers(&self, conn: &Connection) -> Result<()> {
+        Self::register_plpgsql_wrappers_static(conn, self.functions().clone())
+    }
+
+    /// Static version for use in connection pool initialization
+    pub fn register_plpgsql_wrappers_static(conn: &Connection, functions_cache: Arc<DashMap<String, crate::catalog::FunctionMetadata>>) -> Result<()> {
         use rusqlite::functions::FunctionFlags;
 
         // pgqt_plpgsql_call_scalar - Execute PL/pgSQL function and return scalar
-        let functions_cache = self.functions().clone();
         conn.create_scalar_function("pgqt_plpgsql_call_scalar", -1, FunctionFlags::SQLITE_UTF8, move |ctx| {
             let func_name: String = ctx.get(0)?;
             let mut args = Vec::new();

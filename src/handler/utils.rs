@@ -934,7 +934,13 @@ pub trait HandlerUtils {
         let num_params = metadata.arg_types.len();
 
         // Store metadata in the in-memory cache for fast lookup
-        self.functions().insert(metadata.name.clone(), metadata.clone());
+        // Store with both simple name and schema-qualified name
+        self.functions().insert(metadata.name.clone().to_lowercase(), metadata.clone());
+        let full_name = format!("{}.{}", metadata.schema, metadata.name).to_lowercase();
+        self.functions().insert(full_name, metadata.clone());
+        
+        // Note: We insert both simple and full name, but the transpiler prioritizes
+        // schema-qualified lookups over simple name lookups to avoid conflicts.
 
         // Create references for the closure
         let func_name = metadata.name.clone();

@@ -31,6 +31,39 @@ fn is_likely_single_statement(sql: &str) -> bool {
     !without_trailing.contains(';')
 }
 
+
+/// Result of splitting SQL statements.
+#[derive(Clone)]
+struct SplitResult {
+    statements: Vec<String>,
+    is_single: bool,
+}
+
+/// Split SQL into statements, with fast path for single statements.
+fn split_sql(sql: &str) -> SplitResult {
+    if is_likely_single_statement(sql) {
+        // Fast path: single statement, no need for expensive splitting
+        let trimmed = sql.trim().trim_end_matches(';');
+        if trimmed.is_empty() {
+            return SplitResult {
+                statements: vec![],
+                is_single: true,
+            };
+        }
+        return SplitResult {
+            statements: vec![trimmed.to_string()],
+            is_single: true,
+        };
+    }
+
+    // Slow path: multiple statements, use robust_split
+    let statements = robust_split(sql);
+    SplitResult {
+        statements,
+        is_single: false,
+    }
+}
+
 /// Helper to robustly split multiple SQL statements
 fn robust_split(sql: &str) -> Vec<String> {
     // OPTIMIZATION: Fast path for single statements with only trailing semicolons
@@ -237,10 +270,10 @@ pub trait QueryExecution: HandlerUtils + Clone {
     
     /// Internal method to execute a SQL query with parameters without metrics
     fn execute_query_params_internal(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
-        let statements = robust_split(sql);
-        if statements.len() > 1 {
+        let split = split_sql(sql);
+        if !split.is_single {
             let mut all_responses = Vec::new();
-            for stmt_sql in statements {
+            for stmt_sql in split.statements {
                 let responses = self.execute_single_query_params(client_id, &stmt_sql, params)?;
                 all_responses.extend(responses);
             }
@@ -286,10 +319,10 @@ pub trait QueryExecution: HandlerUtils + Clone {
             let error_msg = transpile_result.errors.join("; ");
             // Retry if multiple statements are found during parsing
             if error_msg.contains("Multiple statements provided") {
-                let statements = robust_split(sql);
-                if statements.len() > 1 {
+                let split = split_sql(sql);
+                if !split.is_single {
                     let mut all_responses = Vec::new();
-                    for stmt in statements {
+                    for stmt in split.statements {
                         let responses = self.execute_single_query_params(client_id, &stmt, params)?;
                         all_responses.extend(responses);
                     }
@@ -300,11 +333,11 @@ pub trait QueryExecution: HandlerUtils + Clone {
         }
 
         let transpiled_out = transpile_result.sql.clone();
-        
-        let trans_statements = robust_split(&transpiled_out);
-        if trans_statements.len() > 1 {
+
+        let trans_split = split_sql(&transpiled_out);
+        if !trans_split.is_single {
             let mut all_responses = Vec::new();
-            for t_stmt in trans_statements {
+            for t_stmt in trans_split.statements {
                 let responses = self.execute_transpiled_stmt_params(client_id, &t_stmt, sql, params, &transpile_result)?;
                 all_responses.extend(responses);
             }
@@ -339,17 +372,17 @@ pub trait QueryExecution: HandlerUtils + Clone {
     
     /// Internal method to execute a SQL query without metrics
     fn execute_query_internal(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
-        let statements = robust_split(sql);
+        let split = split_sql(sql);
 
-        if statements.len() > 1 {
+        if !split.is_single {
             let mut all_responses = Vec::new();
-            for stmt_sql in statements {
+            for stmt_sql in split.statements {
                 let responses = self.execute_single_query(client_id, &stmt_sql)?;
                 all_responses.extend(responses);
             }
             return Ok(all_responses);
         }
-        
+
         self.execute_single_query(client_id, sql)
     }
 
@@ -392,14 +425,18 @@ pub trait QueryExecution: HandlerUtils + Clone {
             return self.handle_drop_trigger(client_id, sql);
         }
 
-        let result = crate::transpiler::transpile_with_metadata(sql);
+        let result = {
+        let mut ctx = crate::transpiler::TranspileContext::with_functions(self.functions().clone());
+        ctx.set_metadata_provider(self.as_metadata_provider());
+        crate::transpiler::transpile_with_context(sql, &mut ctx)
+    };
         if !result.errors.is_empty() {
             let error_msg = result.errors.join("; ");
             if error_msg.contains("Multiple statements provided") {
-                let statements = robust_split(sql);
-                if statements.len() > 1 {
+                let split = split_sql(sql);
+                if !split.is_single {
                     let mut all_responses = Vec::new();
-                    for stmt in statements {
+                    for stmt in split.statements {
                         let responses = self.execute_single_query(client_id, &stmt)?;
                         all_responses.extend(responses);
                     }
@@ -408,16 +445,16 @@ pub trait QueryExecution: HandlerUtils + Clone {
             }
             return Err(anyhow::anyhow!(error_msg));
         }
-        
+
         let transpiled = result.sql.clone();
         debug!("Original: {}", sql);
         debug!("Transpiled: {}", transpiled);
 
-        let trans_statements = robust_split(&transpiled);
-        
-        if trans_statements.len() > 1 {
+        let trans_split = split_sql(&transpiled);
+
+        if !trans_split.is_single {
             let mut all_responses = Vec::new();
-            for t_stmt in trans_statements {
+            for t_stmt in trans_split.statements {
                 let responses = self.execute_transpiled_stmt(client_id, &t_stmt, sql, &result)?;
                 all_responses.extend(responses);
             }
@@ -1117,5 +1154,64 @@ fn value_to_sql(val: &rusqlite::types::Value) -> String {
         rusqlite::types::Value::Real(f) => f.to_string(),
         rusqlite::types::Value::Text(s) => format!("'{}'", s.replace('\'', "''")),
         rusqlite::types::Value::Blob(b) => format!("X'{}'", hex::encode(b)),
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn test_single_statement_no_semicolon() {
+        assert!(is_likely_single_statement("SELECT 1"));
+        assert!(is_likely_single_statement("  SELECT 1  "));
+    }
+
+    #[test]
+    fn test_single_statement_trailing_semicolon() {
+        assert!(is_likely_single_statement("SELECT 1;"));
+        assert!(is_likely_single_statement("SELECT 1;;"));
+        assert!(is_likely_single_statement("  SELECT 1;  "));
+    }
+
+    #[test]
+    fn test_multiple_statements() {
+        assert!(!is_likely_single_statement("SELECT 1; SELECT 2"));
+        assert!(!is_likely_single_statement("SELECT 1; SELECT 2;"));
+    }
+
+    #[test]
+    fn test_semicolon_in_string() {
+        // Semicolon inside string - fast path will detect as potentially multi
+        // robust_split will handle this correctly
+        assert!(!is_likely_single_statement("SELECT 'a;b'"));
+    }
+
+    #[test]
+    fn test_split_sql_single() {
+        let result = split_sql("SELECT 1");
+        assert!(result.is_single);
+        assert_eq!(result.statements, vec!["SELECT 1"]);
+    }
+
+    #[test]
+    fn test_split_sql_single_trailing_semicolon() {
+        let result = split_sql("SELECT 1;");
+        assert!(result.is_single);
+        assert_eq!(result.statements, vec!["SELECT 1"]);
+    }
+
+    #[test]
+    fn test_split_sql_multiple() {
+        let result = split_sql("SELECT 1; SELECT 2");
+        assert!(!result.is_single);
+        assert_eq!(result.statements.len(), 2);
+    }
+
+    #[test]
+    fn test_split_sql_empty_after_trim() {
+        let result = split_sql("   ;   ");
+        assert!(result.is_single);
+        assert!(result.statements.is_empty());
     }
 }

@@ -12,6 +12,8 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use serde_json;
+use dashmap::DashMap;
+use std::sync::Arc;
 
 use super::{FunctionMetadata, ParamMode, ReturnTypeKind};
 
@@ -316,4 +318,90 @@ pub fn format_function_arguments(metadata: &FunctionMetadata) -> String {
         }
     }
     parts.join(", ")
+}
+
+/// Load all functions from the catalog into a DashMap
+/// Keys are stored as both "funcname" and "schema.funcname" for lookup
+pub fn load_functions(conn: &Connection) -> Result<Arc<DashMap<String, FunctionMetadata>>> {
+    let functions = Arc::new(DashMap::new());
+    
+    let mut stmt = conn.prepare_cached(
+        "SELECT oid, funcname, schema_name, arg_types, arg_names, arg_modes,
+                return_type, return_type_kind, return_table_cols,
+                function_body, language, volatility, strict, security_definer, 
+                parallel, owner_oid, created_at
+         FROM __pg_functions__"
+    )?;
+    
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, String>(10)?,
+            row.get::<_, String>(11)?,
+            row.get::<_, bool>(12)?,
+            row.get::<_, bool>(13)?,
+            row.get::<_, String>(14)?,
+            row.get::<_, i64>(15)?,
+            row.get::<_, Option<String>>(16)?,
+        ))
+    })?;
+    
+    for row_result in rows {
+        let (oid, funcname, schema_name, arg_types_json, arg_names_json, arg_modes_json,
+             return_type, return_type_kind_str, return_table_cols_json,
+             function_body, language, volatility, strict, security_definer,
+             parallel, owner_oid, created_at) = row_result?;
+        
+        let arg_types: Vec<String> = serde_json::from_str(&arg_types_json)?;
+        let arg_names: Vec<String> = serde_json::from_str(&arg_names_json)?;
+        let arg_modes: Vec<ParamMode> = serde_json::from_str(&arg_modes_json)?;
+        let return_type_kind: ReturnTypeKind = match return_type_kind_str.as_str() {
+            "Scalar" => ReturnTypeKind::Scalar,
+            "SetOf" => ReturnTypeKind::SetOf,
+            "Table" => ReturnTypeKind::Table,
+            "Void" => ReturnTypeKind::Void,
+            _ => ReturnTypeKind::Scalar,
+        };
+        let return_table_cols: Option<Vec<(String, String)>> = 
+            return_table_cols_json.as_ref()
+                .and_then(|s| serde_json::from_str(s).ok());
+        
+        let metadata = FunctionMetadata {
+            oid,
+            name: funcname.clone(),
+            schema: schema_name.clone(),
+            arg_types,
+            arg_names,
+            arg_modes,
+            return_type,
+            return_type_kind,
+            return_table_cols,
+            function_body,
+            language,
+            volatility,
+            strict,
+            security_definer,
+            parallel,
+            owner_oid,
+            created_at,
+        };
+        
+        // Store with schema-qualified name as key
+        let full_name = format!("{}.{}", schema_name, funcname);
+        functions.insert(full_name.to_lowercase(), metadata.clone());
+        
+        // Also store with just the function name for fallback lookup
+        functions.insert(funcname.to_lowercase(), metadata);
+    }
+    
+    Ok(functions)
 }

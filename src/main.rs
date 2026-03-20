@@ -611,7 +611,11 @@ async fn run_listener(config: PortConfig) -> Result<()> {
     };
 
     // Create handler for this port's database
-    let handler = Arc::new(SqliteHandler::with_pool_config(&config.database, Some(config.pool.clone()))?);
+    let handler = Arc::new(SqliteHandler::with_configs(
+        &config.database,
+        Some(config.pool.clone()),
+        Some(config.cache.clone()),
+    )?);
     let factory = Arc::new(HandlerFactory {
         handler: handler.clone(),
         trust_mode: config.trust_mode,

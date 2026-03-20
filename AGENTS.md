@@ -446,6 +446,10 @@ This ensures:
 - Access to stdout/stderr outputs via `process(action="output", id=...)`
 - Integration with pi's process lifecycle management
 
+### Query Splitting Optimization
+
+The `split_sql()` function in `src/handler/query.rs` provides a fast path for single-statement queries, avoiding the overhead of `pg_query::split_with_scanner()` for the common case. The `is_likely_single_statement()` check uses a simple semicolon detection that handles most cases correctly; complex cases with multiple statements fall back to `robust_split()`.
+
 ## Dependencies
 
 **Core**:

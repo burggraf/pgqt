@@ -100,6 +100,9 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
 
     let full_func_name = func_parts.join(".");
     let func_name = func_parts.last().map(|s| s.as_str()).unwrap_or("");
+    
+    // Determine if the call was schema-qualified (more than one part)
+    let is_schema_qualified = func_parts.len() > 1;
 
     // Detect hypothetical-set aggregates (rank, dense_rank, percent_rank, cume_dist)
     if func_call.agg_within_group {
@@ -134,8 +137,15 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
     // Try to inline user-defined functions (SQL language) or call PL/pgSQL functions
     let functions_registry = ctx.functions.clone();
     if let Some(ref functions) = functions_registry {
-        // Try looking up by full name then by short name
-        if let Some(metadata) = functions.get(&full_func_name).or_else(|| functions.get(func_name)) {
+        // Try looking up by full name first, then by short name only if not schema-qualified
+        let metadata_lookup = if is_schema_qualified {
+            let result = functions.get(&full_func_name);
+            result
+        } else {
+            functions.get(&full_func_name).or_else(|| functions.get(func_name))
+        };
+        
+        if let Some(metadata) = metadata_lookup {
             let metadata = metadata.value();
             
             if metadata.language.to_lowercase() == "sql" {
@@ -160,6 +170,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
                 // Note: We avoid infinite recursion by not passing the functions registry
                 let mut inner_ctx = TranspileContext::new();
                 inner_ctx.referenced_tables = ctx.referenced_tables.clone();
+                inner_ctx.functions = ctx.functions.clone();  // Pass functions cache for nested function calls
                 let transpiled_body = transpile_with_context(&inlined, &mut inner_ctx);
                 
                 // Update referenced tables in outer context
