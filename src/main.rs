@@ -318,9 +318,9 @@ struct Cli {
     #[arg(long, env = "PGQT_SSL_EPHEMERAL")]
     ssl_ephemeral: bool,
 
-    /// Enable Prometheus metrics endpoint
-    #[arg(long, env = "PGQT_METRICS_ENABLED")]
-    metrics_enabled: bool,
+    /// Disable Prometheus metrics endpoint
+    #[arg(long, env = "PGQT_METRICS_DISABLED")]
+    metrics_disabled: bool,
 
     /// Port for metrics HTTP server
     #[arg(long, env = "PGQT_METRICS_PORT", default_value = "9090")]
@@ -510,7 +510,7 @@ async fn main() -> Result<()> {
 
     // Initialize metrics server if enabled (and feature is compiled)
     #[cfg(feature = "metrics")]
-    let _metrics_handle = if cli.metrics_enabled {
+    let _metrics_handle = if !cli.metrics_disabled {
         let server = crate::metrics::MetricsServer::new();
 
         // Register metrics globally so handler can access them
@@ -527,7 +527,7 @@ async fn main() -> Result<()> {
 
     // Initialize system metrics refresh task if enabled
     #[cfg(feature = "system-metrics")]
-    if cli.metrics_enabled {
+    if !cli.metrics_disabled {
         spawn_system_metrics_refresh(database_path);
     }
 

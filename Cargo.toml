@@ -35,7 +35,7 @@ tiny_http = { version = "0.12", optional = true }
 sysinfo = { version = "0.30", default-features = false, optional = true }
 
 [features]
-default = ["plpgsql", "tls"]
+default = ["plpgsql", "tls", "observability"]
 plpgsql = ["pg_parse"]
 tls = ["rustls", "tokio-rustls", "rcgen"]
 metrics = ["dep:prometheus-client", "dep:tiny_http"]

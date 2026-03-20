@@ -11,10 +11,10 @@ echo "Building PGQT - All Variants"
 echo "=========================================="
 echo ""
 
-# Build with TLS (default)
-echo "Building with TLS support (default)..."
+# Build with ALL features (default)
+echo "Building with ALL features (TLS + Observability, default)..."
 cargo build --release
-cp target/release/pgqt target/release/pgqt-tls
+cp target/release/pgqt target/release/pgqt-full
 echo "✓ Built: target/release/pgqt-tls"
 ls -lh target/release/pgqt-tls | awk '{print "  Size: " $5}'
 echo ""

@@ -9,7 +9,7 @@ echo "Building PGQT release with ALL features..."
 echo "Features included: plpgsql, tls, metrics, system-metrics, web-config"
 echo ""
 
-cargo build --release --features "plpgsql,tls,observability"
+cargo build --release
 
 echo ""
 echo "Build complete!"
