@@ -20,7 +20,9 @@ pub struct SystemMetrics {
     last_cpu_refresh: std::time::Instant,
 }
 
+#[allow(dead_code)]
 impl SystemMetrics {
+    #[cfg(feature = "system-metrics")]
     pub fn new(registry: &mut Registry) -> Self {
         let cpu_usage_percent = Gauge::default();
         registry.register(
@@ -108,11 +110,6 @@ impl SystemMetrics {
         self.disk_total_bytes.set(total_disk as i64);
     }
 
-    /// No-op when system-metrics feature is disabled
-    #[cfg(not(feature = "system-metrics"))]
-    pub fn refresh(&mut self, _db_path: &str) {
-        // No-op
-    }
 }
 
 #[cfg(test)]
