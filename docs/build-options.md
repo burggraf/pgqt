@@ -4,14 +4,17 @@ This document describes the different build configurations available for PGQT an
 
 ## Overview
 
-PGQT supports two main build configurations:
+PGQT supports multiple build configurations based on feature flags:
 
-1. **Full Build (with TLS)** - Default, includes TLS/SSL support (~12MB)
-2. **Small Build (without TLS)** - Smaller binary for local development (~9.5MB)
+| Build | Features | Size | Use Case |
+|-------|----------|------|----------|
+| **Small** | plpgsql only | ~9.5MB | Local development |
+| **Default** | plpgsql + tls | ~12MB | Production (TLS) |
+| **Full** | plpgsql + tls + observability | ~14-15MB | Production with monitoring |
 
 ## Build Scripts
 
-We provide three convenience scripts in the project root:
+We provide four convenience scripts in the project root:
 
 ### `build-release.sh` - Standard Release Build
 
@@ -29,6 +32,40 @@ Builds PGQT with full TLS support (default configuration).
 - TLS/SSL encryption is required
 - Running in cloud environments
 
+### `build-full.sh` - Full Build with Observability
+
+Builds PGQT with **all features** including TLS and observability (metrics, system metrics, web dashboard).
+
+```bash
+./build-full.sh
+```
+
+**Output:** `target/release/pgqt` (~14-15MB)
+
+**Features included:**
+- ✓ plpgsql - PL/pgSQL stored procedure support
+- ✓ tls - TLS/SSL encryption
+- ✓ metrics - Prometheus metrics endpoint
+- ✓ system-metrics - CPU, memory, disk monitoring
+- ✓ web-config - Web dashboard at `/`
+
+**Use this when:**
+- Production deployments requiring monitoring
+- You need Prometheus metrics scraping
+- You want the built-in web dashboard
+- System resource monitoring is required
+
+**Running with observability:**
+```bash
+./target/release/pgqt --metrics-enabled --metrics-port 9090
+```
+
+**Endpoints:**
+- PostgreSQL: `localhost:5432`
+- Metrics: `http://localhost:9090/metrics`
+- Health: `http://localhost:9090/health`
+- Dashboard: `http://localhost:9090/`
+
 ### `build-release-small.sh` - Small Release Build
 
 Builds PGQT without TLS support for a smaller binary size.
@@ -45,9 +82,9 @@ Builds PGQT without TLS support for a smaller binary size.
 - TLS is not needed (localhost-only access)
 - Running in resource-constrained environments
 
-### `build-both.sh` - Build Both Variants
+### `build-both.sh` - Build All Variants
 
-Builds both variants and creates three binaries with a size comparison.
+Builds all three variants with a size comparison.
 
 ```bash
 ./build-both.sh
@@ -57,6 +94,7 @@ Builds both variants and creates three binaries with a size comparison.
 - `target/release/pgqt` - Default build (with TLS, ~12MB)
 - `target/release/pgqt-tls` - Explicitly with TLS (~12MB)
 - `target/release/pgqt-small` - Without TLS (~9.5MB)
+- `target/release/pgqt-full` - With TLS + Observability (~14-15MB)
 
 ## Manual Build Commands
 
@@ -72,12 +110,33 @@ cargo build --release
 cargo build --release --no-default-features --features plpgsql
 ```
 
+### With Observability (All Features)
+```bash
+cargo build --release --features "plpgsql,tls,observability"
+```
+
+Or build specific observability features:
+```bash
+# Metrics only (no system metrics or web UI)
+cargo build --release --features "plpgsql,tls,metrics"
+
+# Metrics + System metrics (no web UI)
+cargo build --release --features "plpgsql,tls,system-metrics"
+
+# Metrics + Web UI (no system metrics)
+cargo build --release --features "plpgsql,tls,web-config"
+```
+
 ### Feature Flags
 
-| Feature | Description | Default |
-|---------|-------------|---------|
-| `tls` | TLS/SSL support via rustls | ✓ |
-| `plpgsql` | PL/pgSQL stored procedure support | ✓ |
+| Feature | Description | Default | Size Impact |
+|---------|-------------|---------|-------------|
+| `tls` | TLS/SSL support via rustls | ✓ | ~2.5MB |
+| `plpgsql` | PL/pgSQL stored procedure support | ✓ | ~500KB |
+| `metrics` | Prometheus metrics endpoint | | ~1.5-2MB |
+| `system-metrics` | CPU, memory, disk monitoring | | ~300-500KB |
+| `web-config` | Web dashboard at `/` | | ~0KB |
+| `observability` | All metrics features combined | | ~2-2.5MB |
 
 ### Custom Feature Combinations
 
@@ -131,10 +190,11 @@ The server will start but without TLS encryption.
 
 ## Size Comparison
 
-| Build | Size | Difference |
-|-------|------|------------|
-| Without TLS | ~9.5MB | Baseline |
-| With TLS | ~12MB | +2.5MB (+26%) |
+| Build | Features | Size | Difference |
+|-------|----------|------|------------|
+| Small | plpgsql | ~9.5MB | Baseline |
+| Default | plpgsql + tls | ~12MB | +2.5MB (+26%) |
+| Full | plpgsql + tls + observability | ~14-15MB | +4.5-5.5MB (+47-58%) |
 
 ## When to Use Each Build
 
@@ -146,6 +206,14 @@ The server will start but without TLS encryption.
 - **Docker containers** - Running in containerized environments
 - **CI/CD pipelines** - Testing against production-like configs
 - **Shared development servers** - Multiple developers connect remotely
+
+### Use Full Build with Observability When:
+
+- **Production monitoring required** - You need Prometheus metrics
+- **Performance analysis** - Query latency tracking and profiling
+- **Resource monitoring** - CPU, memory, disk usage tracking
+- **Operational visibility** - Health checks and dashboards
+- **Long-running services** - Services that need continuous monitoring
 
 ### Use Small Build (without TLS) When:
 
@@ -186,6 +254,27 @@ The server will start but without TLS encryption.
 # Distribute appropriate version
 # - Developers get pgqt-small
 # - Servers get pgqt-tls
+# - Monitored servers get pgqt-full
+```
+
+### Production Deployment with Observability
+
+```bash
+# Build with observability
+./build-full.sh
+
+# Deploy with TLS and metrics
+./target/release/pgqt \
+  --database prod.db \
+  --ssl --ssl-ephemeral \
+  --metrics-enabled \
+  --metrics-port 9090
+
+# Access endpoints:
+# - PostgreSQL: localhost:5432
+# - Metrics:    http://localhost:9090/metrics
+# - Health:     http://localhost:9090/health
+# - Dashboard:  http://localhost:9090/
 ```
 
 ## Troubleshooting
