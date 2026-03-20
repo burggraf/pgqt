@@ -71,6 +71,8 @@ mod jsonb;
 mod cache;
 #[cfg(feature = "tls")]
 mod tls;
+#[cfg(feature = "metrics")]
+mod metrics;
 
 use debug::set_debug;
 use handler::{SqliteHandler, SessionContext};
@@ -315,6 +317,14 @@ struct Cli {
     /// Use ephemeral (self-signed) certificate for development
     #[arg(long, env = "PGQT_SSL_EPHEMERAL")]
     ssl_ephemeral: bool,
+
+    /// Enable Prometheus metrics endpoint
+    #[arg(long, env = "PGQT_METRICS_ENABLED")]
+    metrics_enabled: bool,
+
+    /// Port for metrics HTTP server
+    #[arg(long, env = "PGQT_METRICS_PORT", default_value = "9090")]
+    metrics_port: u16,
 }
 
 impl Cli {
@@ -402,6 +412,9 @@ impl SimpleQueryHandler for SqliteHandler {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Store database path for later use (before cli is consumed)
+    let database_path = cli.database.clone();
 
     // Determine configuration source
     let app_config = if let Some(config_path) = cli.config {
@@ -492,6 +505,29 @@ async fn main() -> Result<()> {
     if any_debug {
         set_debug(true);
         println!("Debug mode enabled (at least one port has debug: true)");
+    }
+
+    // Initialize metrics server if enabled (and feature is compiled)
+    #[cfg(feature = "metrics")]
+    let _metrics_handle = if cli.metrics_enabled {
+        let server = crate::metrics::MetricsServer::new();
+
+        // Register metrics globally so handler can access them
+        let metrics = server.clone_metrics();
+        if let Err(_) = crate::metrics::init_global_metrics(metrics) {
+            eprintln!("Warning: Metrics already initialized");
+        }
+
+        // Start the HTTP server in background
+        Some(server.start(cli.metrics_port))
+    } else {
+        None
+    };
+
+    // Initialize system metrics refresh task if enabled
+    #[cfg(feature = "system-metrics")]
+    if cli.metrics_enabled {
+        spawn_system_metrics_refresh(database_path);
     }
 
     // Spawn listeners for each configured port
@@ -794,6 +830,23 @@ fn log_output(msg: &str) {
 /// Log an error message to the configured error output destination
 fn log_error(msg: &str) {
     eprintln!("{}", msg);
+}
+
+/// Spawn a background thread to periodically refresh system metrics
+#[cfg(feature = "system-metrics")]
+fn spawn_system_metrics_refresh(db_path: String) {
+    use prometheus_client::registry::Registry;
+    use pgqt::metrics::SystemMetrics;
+
+    std::thread::spawn(move || {
+        let mut registry = Registry::default();
+        let mut sys_metrics = SystemMetrics::new(&mut registry);
+
+        loop {
+            sys_metrics.refresh(&db_path);
+            std::thread::sleep(std::time::Duration::from_secs(15));
+        }
+    });
 }
 
 #[cfg(test)]

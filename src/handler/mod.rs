@@ -31,6 +31,33 @@ use crate::copy;
 use crate::interval;
 use crate::jsonb;
 
+#[cfg(feature = "metrics")]
+use std::time::Instant;
+
+/// Classify a SQL query into its type for metrics
+#[cfg(feature = "metrics")]
+pub fn classify_query(query: &str) -> crate::metrics::QueryType {
+    let trimmed = query.trim();
+    let upper = trimmed.to_uppercase();
+    
+    if upper.starts_with("SELECT") {
+        crate::metrics::QueryType::Select
+    } else if upper.starts_with("INSERT") {
+        crate::metrics::QueryType::Insert
+    } else if upper.starts_with("UPDATE") {
+        crate::metrics::QueryType::Update
+    } else if upper.starts_with("DELETE") {
+        crate::metrics::QueryType::Delete
+    } else if upper.starts_with("CREATE") 
+           || upper.starts_with("ALTER") 
+           || upper.starts_with("DROP") 
+           || upper.starts_with("TRUNCATE") {
+        crate::metrics::QueryType::Ddl
+    } else {
+        crate::metrics::QueryType::Other
+    }
+}
+
 // Thread-local storage for the current user during query execution
 thread_local! {
     static CURRENT_USER: RefCell<String> = RefCell::new("postgres".to_string());
@@ -2892,6 +2919,14 @@ impl HandlerUtils for SqliteHandler {
         // Checkout a new connection from the pool
         let (conn, handle) = self.conn_pool.checkout(client_id)?;
         self.client_connections.insert(client_id, (conn.clone(), handle));
+        
+        // Record connection metrics
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = crate::metrics::get_metrics() {
+            metrics.inc_connections();
+            metrics.connections_total.inc();
+        }
+        
         Ok(conn)
     }
 }
