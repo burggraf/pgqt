@@ -7,7 +7,7 @@ All notable changes to PGQT will be documented in this file.
 ### Changed
 - **Default Features**: Observability features are now enabled by default
   - `cargo build --release` now includes: plpgsql + tls + observability
-  - Default binary size increased from ~12MB to ~14-15MB
+  - Default binary size: ~12MB (observability adds ~0-0.5MB when combined with other features)
   - Previous behavior: use `cargo build --release --no-default-features --features plpgsql,tls` for smaller build
 
 ### Changed
