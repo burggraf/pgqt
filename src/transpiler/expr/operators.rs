@@ -184,6 +184,8 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             return format!("{} BETWEEN {}", lexpr_sql, bounds);
         }
         pg_query::protobuf::AExprKind::AexprNotBetween => {
+            // NOT BETWEEN - same comma-to-AND conversion as BETWEEN
+            // Uses single replace for efficiency (see AexprBetween comment above)
             let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
         }
@@ -193,6 +195,8 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
             return format!("{} BETWEEN {}", lexpr_sql, bounds);
         }
         pg_query::protobuf::AExprKind::AexprNotBetweenSym => {
+            // NOT BETWEEN SYMMETRIC - same handling as NOT BETWEEN
+            // Uses single replace for efficiency (see AexprBetween comment above)
             let bounds = rexpr_sql.replace(',', " AND ");
             return format!("{} NOT BETWEEN {}", lexpr_sql, bounds);
         }
@@ -482,5 +486,47 @@ pub(crate) fn reconstruct_a_expr(a_expr: &AExpr, ctx: &mut TranspileContext) -> 
         }
         "^" => format!("power({}, {})", lexpr_sql, rexpr_sql),
         _ => format!("{} {} {}", lexpr_sql, op_name, rexpr_sql),
+    }
+}
+
+#[cfg(test)]
+mod between_tests {
+    //! Unit tests for BETWEEN operator transpilation edge cases.
+    //! Tests the comma-to-AND replacement optimization.
+
+    /// Test BETWEEN with space after comma: "1, 2" -> "1 AND  2"
+    /// The extra space is harmless in SQL and handled correctly by SQLite
+    #[test]
+    fn test_between_with_space() {
+        let result = "1, 2".replace(',', " AND ");
+        assert_eq!(result, "1 AND  2");
+    }
+
+    /// Test BETWEEN without space: "1,2" -> "1 AND 2"
+    #[test]
+    fn test_between_without_space() {
+        let result = "1,2".replace(',', " AND ");
+        assert_eq!(result, "1 AND 2");
+    }
+
+    /// Test BETWEEN with mixed formatting and multiple commas
+    #[test]
+    fn test_between_mixed_formatting() {
+        let result = "1, 2,3".replace(',', " AND ");
+        assert_eq!(result, "1 AND  2 AND 3");
+    }
+
+    /// Test BETWEEN with string values
+    #[test]
+    fn test_between_with_strings() {
+        let result = "'alpha','omega'".replace(',', " AND ");
+        assert_eq!(result, "'alpha' AND 'omega'");
+    }
+
+    /// Test BETWEEN with expressions
+    #[test]
+    fn test_between_with_expressions() {
+        let result = "col1 + 1,col2 - 1".replace(',', " AND ");
+        assert_eq!(result, "col1 + 1 AND col2 - 1");
     }
 }

@@ -397,10 +397,7 @@ pub fn load_functions(conn: &Connection) -> Result<Arc<DashMap<String, FunctionM
         
         // Store with schema-qualified name as key
         let full_name = format!("{}.{}", schema_name, funcname);
-        functions.insert(full_name.to_lowercase(), metadata.clone());
-        
-        // Also store with just the function name for fallback lookup
-        functions.insert(funcname.to_lowercase(), metadata);
+        functions.insert(full_name.to_lowercase(), metadata);
     }
     
     Ok(functions)

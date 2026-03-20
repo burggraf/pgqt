@@ -887,6 +887,13 @@ pub trait HandlerUtils {
         // Also register as a SQLite custom function for runtime interception
         self.register_sqlite_function(conn, &metadata)?;
 
+        
+        let full_name = format!("{}.{}", metadata.schema, metadata.name);
+        self.functions().insert(full_name.to_lowercase(), metadata);
+
+        
+        self.transpile_cache().clear();
+
         Ok(vec![Response::Execution(Tag::new("CREATE FUNCTION"))])
     }
 
@@ -935,9 +942,10 @@ pub trait HandlerUtils {
 
         // Store metadata in the in-memory cache for fast lookup
         // Store with both simple name and schema-qualified name
-        self.functions().insert(metadata.name.clone().to_lowercase(), metadata.clone());
         let full_name = format!("{}.{}", metadata.schema, metadata.name).to_lowercase();
-        self.functions().insert(full_name, metadata.clone());
+        let simple_name = metadata.name.to_lowercase();
+        self.functions().insert(full_name.clone(), metadata.clone());
+        self.functions().insert(simple_name, metadata.clone());
         
         // Note: We insert both simple and full name, but the transpiler prioritizes
         // schema-qualified lookups over simple name lookups to avoid conflicts.
@@ -945,6 +953,7 @@ pub trait HandlerUtils {
         // Create references for the closure
         let func_name = metadata.name.clone();
         let func_name_for_closure = func_name.clone(); // Clone for the closure
+        let full_name_for_closure = full_name.clone(); // Clone for the closure
         let arg_count = num_params;
         let is_strict = metadata.strict;
         let return_type_kind = metadata.return_type_kind.clone();
@@ -952,7 +961,7 @@ pub trait HandlerUtils {
 
         // Register as a scalar function
         conn.create_scalar_function(
-            func_name.as_str(),
+            full_name.as_str(),
             arg_count as i32,
             FunctionFlags::SQLITE_UTF8,
             move |ctx| {
@@ -969,7 +978,7 @@ pub trait HandlerUtils {
                 }
 
                 // Look up function metadata from cache
-                let _func_metadata = match functions_cache.get(&func_name_for_closure) {
+                let _func_metadata = match functions_cache.get(&full_name_for_closure) {
                     Some(metadata) => metadata.clone(),
                     None => return Ok(Value::Null), // Function not found
                 };
@@ -1039,8 +1048,8 @@ pub trait HandlerUtils {
         use pg_query::protobuf::node::Node as NodeEnum;
         use rusqlite::types::Value;
 
-        // Extract function name
-        let func_name = func_call
+        // Extract function name parts
+        let func_parts: Vec<String> = func_call
             .funcname
             .iter()
             .filter_map(|n| {
@@ -1051,13 +1060,19 @@ pub trait HandlerUtils {
                 }
                 None
             })
-            .last()
+            .collect();
+        
+        let func_name = func_parts.last()
             .ok_or_else(|| anyhow!("Could not extract function name"))?;
+        
+        let full_func_name = func_parts.join(".");
 
-
-        // Look up function
-        let metadata = crate::catalog::get_function(conn, &func_name, None)?
-            .ok_or_else(|| anyhow!("Function {} not found", func_name))?;
+        // Look up function - use in-memory cache for schema-qualified names
+        let metadata = if func_parts.len() > 1 {
+            self.functions().get(&full_func_name).map(|m| m.clone())
+        } else {
+            crate::catalog::get_function(conn, &func_name, None).ok().flatten()
+        }.ok_or_else(|| anyhow!("Function {} not found", full_func_name))?;
 
 
         // Extract arguments (only handle simple literals for now)

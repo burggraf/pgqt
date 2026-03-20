@@ -139,8 +139,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
     if let Some(ref functions) = functions_registry {
         // Try looking up by full name first, then by short name only if not schema-qualified
         let metadata_lookup = if is_schema_qualified {
-            let result = functions.get(&full_func_name);
-            result
+            functions.get(&full_func_name)
         } else {
             functions.get(&full_func_name).or_else(|| functions.get(func_name))
         };
@@ -215,7 +214,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
                 }
 
                 // Special handling for different return types
-                return match metadata.return_type_kind {
+                let result = match metadata.return_type_kind {
                     ReturnTypeKind::Void => {
                         // For VOID functions, we want to return NULL but still execute the body if it's a SELECT
                         // If it's a side-effect (INSERT/UPDATE/DELETE), SQLite won't allow it in an expression anyway
@@ -230,6 +229,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
                         format!("({})", sql_body)
                     }
                 };
+                return result;
             } else if metadata.language.to_lowercase() == "plpgsql" {
                 // For PL/pgSQL functions, generate a call to our runtime wrapper
                 // The wrapper will look up the function and execute it in the Lua runtime
@@ -243,7 +243,7 @@ pub(crate) fn reconstruct_func_call(func_call: &FuncCall, ctx: &mut TranspileCon
                 // Generate a call to pgqt_plpgsql_call with function name and args
                 // This will be handled by a custom SQLite function in main.rs
                 let args_str = arg_exprs.join(", ");
-                let func_name_literal = func_name.replace("'", "''");
+                let func_name_literal = full_func_name.replace("'", "''");
                 
                 return match metadata.return_type_kind {
                     ReturnTypeKind::Void => {
