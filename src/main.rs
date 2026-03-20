@@ -414,6 +414,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Store database path for later use (before cli is consumed)
+    #[cfg(feature = "system-metrics")]
     let database_path = cli.database.clone();
 
     // Determine configuration source

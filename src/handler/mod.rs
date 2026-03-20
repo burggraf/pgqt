@@ -31,9 +31,6 @@ use crate::copy;
 use crate::interval;
 use crate::jsonb;
 
-#[cfg(feature = "metrics")]
-use std::time::Instant;
-
 /// Classify a SQL query into its type for metrics
 #[cfg(feature = "metrics")]
 pub fn classify_query(query: &str) -> crate::metrics::QueryType {

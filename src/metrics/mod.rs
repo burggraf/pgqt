@@ -11,6 +11,7 @@ mod server;
 pub use server::*;
 
 #[cfg(feature = "web-config")]
+#[allow(unused_imports)]
 pub use server::WebInterface;
 
 #[cfg(feature = "metrics")]
@@ -23,6 +24,7 @@ pub use global::*;
 mod system;
 
 #[cfg(feature = "system-metrics")]
+#[allow(unused_imports)]
 pub use system::*;
 
 /// Stub for non-metrics builds

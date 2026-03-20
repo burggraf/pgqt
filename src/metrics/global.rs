@@ -23,6 +23,7 @@ pub fn get_metrics() -> Option<&'static ProxyMetrics> {
 }
 
 /// Check if global metrics have been initialized
+#[allow(dead_code)]
 pub fn is_initialized() -> bool {
     GLOBAL_METRICS.get().is_some()
 }

@@ -164,6 +164,7 @@ impl ProxyMetrics {
     }
 
     /// Decrement active connections gauge
+    #[allow(dead_code)]
     pub fn dec_connections(&self) {
         self.connections_active.dec();
     }

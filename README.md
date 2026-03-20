@@ -505,6 +505,82 @@ SELECT setting FROM pg_settings WHERE name = 'server_version';
 
 For complete documentation, see [docs/PG_CATALOG.md](./docs/PG_CATALOG.md).
 
+## Observability
+
+PGQT includes built-in Prometheus-compatible metrics for monitoring query performance and system health.
+
+### Features
+
+- **Prometheus Metrics Endpoint** (`/metrics`) - Exports standard Prometheus metrics
+- **Health Check** (`/health`) - JSON health status endpoint
+- **Web Dashboard** (`/`) - Built-in dashboard (with `web-config` feature)
+- **System Metrics** - CPU, memory, and disk usage (with `system-metrics` feature)
+
+### Building with Observability
+
+```bash
+# Minimal build (no observability)
+cargo build --release --no-default-features --features plpgsql
+
+# With Prometheus metrics
+cargo build --release --features plpgsql,tls,metrics
+
+# With system metrics (CPU, memory, disk)
+cargo build --release --features plpgsql,tls,system-metrics
+
+# Full observability stack (metrics + web dashboard)
+cargo build --release --features plpgsql,tls,web-config
+```
+
+### Running with Metrics
+
+```bash
+# Enable metrics on port 9090 (default)
+./pgqt --metrics-enabled
+
+# Use custom port
+./pgqt --metrics-enabled --metrics-port 8080
+
+# Or via environment variables
+PGQT_METRICS_ENABLED=1 PGQT_METRICS_PORT=9090 ./pgqt
+```
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `pgqt_requests_total` | Counter | Total requests processed |
+| `pgqt_requests_failed_total` | Counter | Total failed requests |
+| `pgqt_query_duration_seconds` | Histogram | Query execution latency |
+| `pgqt_connections_active` | Gauge | Currently active connections |
+| `pgqt_connections_total` | Counter | Total connections accepted |
+| `pgqt_queries_select_total` | Counter | SELECT query count |
+| `pgqt_queries_insert_total` | Counter | INSERT query count |
+| `pgqt_queries_update_total` | Counter | UPDATE query count |
+| `pgqt_queries_delete_total` | Counter | DELETE query count |
+| `pgqt_queries_ddl_total` | Counter | DDL query count |
+| `pgqt_transpile_cache_hits_total` | Counter | Transpile cache hits |
+| `pgqt_transpile_cache_misses_total` | Counter | Transpile cache misses |
+
+With `system-metrics` feature:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `pgqt_system_cpu_usage_percent` | Gauge | CPU usage percentage |
+| `pgqt_system_memory_used_bytes` | Gauge | Memory used |
+| `pgqt_system_memory_total_bytes` | Gauge | Total memory |
+| `pgqt_system_disk_used_bytes` | Gauge | Database file size |
+| `pgqt_system_disk_total_bytes` | Gauge | Total disk space |
+
+### Feature Flags
+
+| Feature | Description | Binary Impact |
+|---------|-------------|---------------|
+| `metrics` | Prometheus metrics endpoint | +1.5-2 MB |
+| `system-metrics` | CPU/memory/disk metrics | +0.3-0.5 MB |
+| `web-config` | Web dashboard at `/` | ~0 KB |
+| `observability` | All features combined | +2-2.5 MB |
+
 ## Architecture
 
 ```

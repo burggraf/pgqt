@@ -5,6 +5,26 @@ All notable changes to PGQT will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Observability Stack**: Full Prometheus-compatible metrics and monitoring
+  - **Prometheus Metrics Endpoint** (`/metrics`): 13+ metrics for monitoring
+    - Request counters: `pgqt_requests_total`, `pgqt_requests_failed_total`
+    - Query latency histogram: `pgqt_query_duration_seconds` (1ms to 10s buckets)
+    - Connection metrics: `pgqt_connections_active`, `pgqt_connections_total`
+    - Query type breakdown: `pgqt_queries_select_total`, `pgqt_queries_insert_total`, etc.
+    - Cache metrics: `pgqt_transpile_cache_hits_total`, `pgqt_transpile_cache_misses_total`
+  - **System Metrics** (with `system-metrics` feature): CPU, memory, disk usage
+    - `pgqt_system_cpu_usage_percent`: CPU usage across all cores
+    - `pgqt_system_memory_used_bytes` / `pgqt_system_memory_total_bytes`
+    - `pgqt_system_disk_used_bytes` / `pgqt_system_disk_total_bytes`
+  - **Web Dashboard** (with `web-config` feature): Built-in HTML dashboard at `/`
+  - **Health Check Endpoint** (`/health`): JSON health status
+  - **Feature Flags**: `metrics`, `system-metrics`, `web-config`, `observability`
+  - **CLI Flags**: `--metrics-enabled`, `--metrics-port` (env: `PGQT_METRICS_ENABLED`, `PGQT_METRICS_PORT`)
+  - **Documentation**: `docs/metrics.md` with complete metrics reference and PromQL examples
+  - **Examples**: `examples/prometheus.yml`, `examples/grafana-dashboard.json`
+  - Binary impact: +2-2.5 MB with full observability
+
+### Added
 - **Input Validation Improvements (Phase 7.1)**: Aligned input validation with PostgreSQL semantics
   - **Interval Validation**: Stricter interval parsing with PostgreSQL-compatible error messages
     - `Interval::from_str()` now rejects empty strings and invalid inputs

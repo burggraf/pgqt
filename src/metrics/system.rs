@@ -6,6 +6,7 @@ use prometheus_client::registry::Registry;
 #[cfg(feature = "system-metrics")]
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
+#[allow(dead_code)]
 pub struct SystemMetrics {
     pub cpu_usage_percent: Gauge,
     pub memory_used_bytes: Gauge,

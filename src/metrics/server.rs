@@ -72,7 +72,7 @@ impl MetricsServer {
         }
     }
 
-    /// Get a reference to the proxy metrics for recording
+        #[allow(dead_code)]
     pub fn metrics(&self) -> &ProxyMetrics {
         &self.metrics
     }
