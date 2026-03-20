@@ -16,6 +16,12 @@ mod global;
 #[cfg(feature = "metrics")]
 pub use global::*;
 
+#[cfg(feature = "system-metrics")]
+mod system;
+
+#[cfg(feature = "system-metrics")]
+pub use system::*;
+
 /// Stub for non-metrics builds
 #[cfg(not(feature = "metrics"))]
 pub struct ProxyMetrics;
