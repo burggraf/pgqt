@@ -1,4 +1,6 @@
 use std::sync::Arc;
+#[cfg(feature = "metrics")]
+use std::time::Instant;
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 use futures::stream;
@@ -12,6 +14,8 @@ use crate::transpiler::metadata::MetadataProvider;
 use crate::copy;
 use crate::trigger::{TriggerExecutor, BeforeTriggerResult, extract_table_and_operation};
 use crate::trigger::rows::{fetch_inserted_row};
+#[cfg(feature = "metrics")]
+use crate::handler::classify_query;
 use pgwire::api::results::{DataRowEncoder, FieldInfo, QueryResponse, Response, Tag};
 
 /// Fast check if SQL is likely a single statement.
@@ -210,6 +214,29 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a SQL query with optional parameters and return the results
     fn execute_query_params(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let query_type = classify_query(sql);
+        
+        let result = self.execute_query_params_internal(client_id, sql, params);
+        
+        // Record metrics
+        #[cfg(feature = "metrics")]
+        {
+            let duration = start.elapsed().as_secs_f64();
+            let success = result.is_ok();
+            
+            if let Some(metrics) = crate::metrics::get_metrics() {
+                metrics.record_query(query_type, duration, success);
+            }
+        }
+        
+        result
+    }
+    
+    /// Internal method to execute a SQL query with parameters without metrics
+    fn execute_query_params_internal(&self, client_id: u32, sql: &str, params: &[Option<String>]) -> Result<Vec<Response>> {
         let statements = robust_split(sql);
         if statements.len() > 1 {
             let mut all_responses = Vec::new();
@@ -289,6 +316,29 @@ pub trait QueryExecution: HandlerUtils + Clone {
 
     /// Execute a SQL query and return the results
     fn execute_query(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+        #[cfg(feature = "metrics")]
+        let query_type = classify_query(sql);
+        
+        let result = self.execute_query_internal(client_id, sql);
+        
+        // Record metrics
+        #[cfg(feature = "metrics")]
+        {
+            let duration = start.elapsed().as_secs_f64();
+            let success = result.is_ok();
+            
+            if let Some(metrics) = crate::metrics::get_metrics() {
+                metrics.record_query(query_type, duration, success);
+            }
+        }
+        
+        result
+    }
+    
+    /// Internal method to execute a SQL query without metrics
+    fn execute_query_internal(&self, client_id: u32, sql: &str) -> Result<Vec<Response>> {
         let statements = robust_split(sql);
 
         if statements.len() > 1 {
