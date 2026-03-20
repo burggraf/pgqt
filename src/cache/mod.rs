@@ -4,6 +4,9 @@ use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 use crate::transpiler::TranspileResult;
 
+#[cfg(feature = "metrics")]
+use crate::metrics::get_metrics;
+
 /// Default cache size (number of unique queries to cache)
 const DEFAULT_CACHE_SIZE: usize = 256;
 
@@ -105,7 +108,16 @@ impl TranspileCache {
         F: FnOnce() -> TranspileResult,
     {
         if let Some(cached) = self.get(sql) {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = get_metrics() {
+                metrics.transpile_cache_hits.inc();
+            }
             return cached;
+        }
+
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = get_metrics() {
+            metrics.transpile_cache_misses.inc();
         }
 
         let result = compute();

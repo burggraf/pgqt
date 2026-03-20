@@ -22,6 +22,8 @@ pub struct ProxyMetrics {
     pub queries_delete_total: Counter,
     pub queries_ddl_total: Counter,
     pub queries_other_total: Counter,
+    pub transpile_cache_hits: Counter,
+    pub transpile_cache_misses: Counter,
 }
 
 impl ProxyMetrics {
@@ -104,6 +106,20 @@ impl ProxyMetrics {
             queries_other_total.clone(),
         );
 
+        let transpile_cache_hits = Counter::default();
+        registry.register(
+            "pgqt_transpile_cache_hits_total",
+            "Total transpile cache hits",
+            transpile_cache_hits.clone(),
+        );
+
+        let transpile_cache_misses = Counter::default();
+        registry.register(
+            "pgqt_transpile_cache_misses_total",
+            "Total transpile cache misses",
+            transpile_cache_misses.clone(),
+        );
+
         Self {
             requests_total,
             requests_failed_total,
@@ -116,6 +132,8 @@ impl ProxyMetrics {
             queries_delete_total,
             queries_ddl_total,
             queries_other_total,
+            transpile_cache_hits,
+            transpile_cache_misses,
         }
     }
 
