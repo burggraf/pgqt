@@ -2,6 +2,29 @@
 
 All notable changes to PGQT will be documented in this file.
 
+## [0.9.0] - 2026-03-21
+
+### Documentation
+- **Post-PL/pgSQL Plan Phase 6**: Final feature freeze and documentation consolidation
+  - **ENUMS.md**: Enhanced with:
+    - Catalog tables documentation (`__pg_type__`, `__pg_enum__`)
+    - Comprehensive limitations section
+    - PostgreSQL compatibility table
+  - **SETTINGS.md**: Enhanced with:
+    - Default parameters table with all common settings
+    - Common settings examples (timezone, application_name, search_path)
+    - Limitations section
+    - PostgreSQL compatibility table
+  - **README.md**: Updated main feature list with:
+    - Enum Type Support
+    - Session Configuration
+    - COMMENT ON Support
+  - **TODO-FEATURES.md**: Created comprehensive feature roadmap:
+    - Completed features checklist
+    - Planned features roadmap
+    - Known limitations table
+    - Feature request process
+
 ## [0.8.0] - 2025-03-20
 
 ### Added

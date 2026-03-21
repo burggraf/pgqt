@@ -25,6 +25,9 @@
 - **Window Functions**: Full support for all PostgreSQL window functions (row_number, rank, lag, lead, etc.) with frame specifications
 - **LATERAL Joins**: Supported for table-valued functions (like `jsonb_each`). See [docs/LATERAL.md](./docs/LATERAL.md).
 - **COPY Command**: Full support for `COPY FROM STDIN` and `COPY TO STDOUT` in TEXT, CSV, and BINARY formats with character encoding support (UTF8, LATIN1, WINDOWS-1252, EUC_JP, etc.) for efficient data transfer. See [docs/COPY.md](./docs/COPY.md) and [docs/copy-encoding.md](./docs/copy-encoding.md).
+- **Enum Type Support**: PostgreSQL enum types via `CREATE TYPE ... AS ENUM`, stored as TEXT with CHECK constraints. See [docs/ENUMS.md](./docs/ENUMS.md).
+- **Session Configuration**: Support for `SET`, `SHOW`, `set_config()`, and `current_setting()` for per-session configuration. See [docs/SETTINGS.md](./docs/SETTINGS.md).
+- **COMMENT ON Support**: Metadata persistence for comments on tables, columns, and other database objects.
 - **Performance Tuning**: SQLite PRAGMA configuration, connection pooling, caching, and memory management. See [docs/performance-tuning.md](./docs/performance-tuning.md).
 
 ## Quick Start
