@@ -198,13 +198,28 @@ pub struct SessionContext {
 
 impl SessionContext {
     pub fn new(authenticated_user: String) -> Self {
+        let mut settings = std::collections::HashMap::new();
+        
+        // Default session settings
+        settings.insert("timezone".to_string(), "UTC".to_string());
+        settings.insert("TimeZone".to_string(), "UTC".to_string());
+        settings.insert("application_name".to_string(), "".to_string());
+        settings.insert("search_path".to_string(), "\"$user\", public".to_string());
+        settings.insert("DateStyle".to_string(), "ISO, MDY".to_string());
+        settings.insert("datestyle".to_string(), "ISO, MDY".to_string());
+        settings.insert("client_encoding".to_string(), "UTF8".to_string());
+        settings.insert("standard_conforming_strings".to_string(), "on".to_string());
+        settings.insert("default_transaction_read_only".to_string(), "off".to_string());
+        settings.insert("statement_timeout".to_string(), "0".to_string());
+        settings.insert("transaction_isolation".to_string(), "read committed".to_string());
+        
         Self {
             authenticated_user: authenticated_user.clone(),
             current_user: authenticated_user,
             search_path: SearchPath::default(),
             transaction_status: TransactionStatus::Idle,
             savepoints: Vec::new(),
-            settings: std::collections::HashMap::new(),
+            settings,
         }
     }
 }
