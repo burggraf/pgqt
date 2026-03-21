@@ -330,7 +330,7 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    
+
     conn.execute(
         "CREATE VIEW IF NOT EXISTS pg_proc AS
          SELECT
@@ -340,25 +340,25 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
             true as proisstrict, false as proretset, false as proisagg, false as proiswindow,
             's' as provolatile,
             0 as pronargs, 0 as pronargdefaults, 1184 as prorettype,
-            NULL as proargtypes, NULL as proallargtypes, NULL as proargmodes,
+            '' as proargtypes, NULL as proallargtypes, NULL as proargmodes,
             NULL as proargnames, NULL as proargdefaults, NULL as protrftypes,
-            'now' as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl,
+            'now' as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, '{}' as proacl,
             'timestamp with time zone' as proresult
          UNION ALL
          SELECT 10002, 'current_timestamp', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
                 false, true, false, false, false,
-                's', 0, 0, 1184, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'now', NULL, NULL, NULL, NULL, 'timestamp with time zone'
+                's', 0, 0, 1184, '', NULL, NULL, NULL, NULL,
+                NULL, 'now', NULL, NULL, NULL, '{}', 'timestamp with time zone'
          UNION ALL
          SELECT 10003, 'current_date', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
                 false, true, false, false, false,
-                's', 0, 0, 1082, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'current_date', NULL, NULL, NULL, NULL, 'date'
+                's', 0, 0, 1082, '', NULL, NULL, NULL, NULL,
+                NULL, 'current_date', NULL, NULL, NULL, '{}', 'date'
          UNION ALL
          SELECT 10004, 'current_time', 11, 10, 13, 1.0, 0.0, 0, 'f', false,
                 false, true, false, false, false,
-                's', 0, 0, 1266, NULL, NULL, NULL, NULL, NULL,
-                NULL, 'current_time', NULL, NULL, NULL, NULL, 'time with time zone'
+                's', 0, 0, 1266, '', NULL, NULL, NULL, NULL,
+                NULL, 'current_time', NULL, NULL, NULL, '{}', 'time with time zone'
          UNION ALL
          SELECT
             f.oid, f.funcname as proname, n.oid as pronamespace, f.owner_oid as proowner,
@@ -373,7 +373,8 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
              FROM json_each(f.arg_types) arg) as proargtypes,
             NULL as proallargtypes, f.arg_modes as proargmodes,
             f.arg_names as proargnames, NULL as proargdefaults, NULL as protrftypes,
-            f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, NULL as proacl,
+            f.function_body as prosrc, NULL as probin, NULL as prosqlbody, NULL as proconfig, 
+            COALESCE(facl.acl, '{}') as proacl,
             CASE 
                 WHEN f.return_type_kind = 'SETOF' THEN 'SETOF ' || f.return_type
                 WHEN f.return_type_kind = 'TABLE' THEN 'TABLE'
@@ -381,7 +382,8 @@ pub fn init_system_views(conn: &Connection) -> Result<()> {
                 ELSE f.return_type
             END as proresult
          FROM __pg_functions__ f
-         JOIN pg_namespace n ON f.schema_name = n.nspname",
+         JOIN pg_namespace n ON f.schema_name = n.nspname
+         LEFT JOIN __pg_formatted_acl facl ON facl.object_id = f.oid AND facl.object_type = 'function'",
         [],
     )?;
 
