@@ -4,6 +4,27 @@ All notable changes to PGQT will be documented in this file.
 
 ## [0.8.0] - 2025-03-20
 
+### Added
+- **Trigger Documentation (Phase 6)**: Comprehensive trigger documentation updates
+  - Updated `docs/TRIGGERS.md` with detailed trigger examples and patterns:
+    - Automatic timestamp triggers
+    - Data validation triggers
+    - Audit logging triggers
+    - Data normalization triggers
+    - Soft delete implementation
+    - Default value triggers with logic
+  - Documented all 18+ supported built-in functions for triggers:
+    - Date/Time: `NOW()`, `CURRENT_TIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME`, `DATE_TRUNC()`, `AGE()`
+    - String: `LOWER()`, `UPPER()`, `LENGTH()`, `TRIM()`, `SUBSTRING()`, `REPLACE()`
+    - Math: `ABS()`, `ROUND()`, `CEIL()`, `FLOOR()`, `GREATEST()`, `LEAST()`
+    - Logic: `COALESCE()`, `NULLIF()`
+  - Added trigger variable reference table (`NEW`, `OLD`, `TG_NAME`, `TG_WHEN`, `TG_OP`, etc.)
+  - Documented known limitations:
+    - `FOR EACH STATEMENT` triggers not supported
+    - Complex WHERE clause deparsing has limited support
+    - Recursive DML within triggers has limited support
+  - Added performance considerations and testing guidance
+
 ### Changed
 - **Default Features**: Observability features are now enabled by default
   - `cargo build --release` now includes: plpgsql + tls + observability
