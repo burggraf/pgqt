@@ -545,10 +545,8 @@ pub fn resolve_object_oid(conn: &Connection, obj_type: &str, obj_name: &str) -> 
 
 /// Store a comment in the shadow catalog
 pub fn store_comment(conn: &Connection, obj_type: &str, obj_name: &str, comment: &str) -> Result<()> {
-    eprintln!("PGQT_DEBUG: store_comment type={} name={} comment={}", obj_type, obj_name, comment);
     match resolve_object_oid(conn, obj_type, obj_name) {
         Ok((objoid, classoid, objsubid)) => {
-            eprintln!("PGQT_DEBUG: Resolved to oid={} class={} sub={}", objoid, classoid, objsubid);
             conn.execute(
                 "INSERT OR REPLACE INTO __pg_description__ (objoid, classoid, objsubid, description)
                  VALUES (?1, ?2, ?3, ?4)",
@@ -556,8 +554,9 @@ pub fn store_comment(conn: &Connection, obj_type: &str, obj_name: &str, comment:
             )?;
             Ok(())
         },
-        Err(e) => {
-            eprintln!("Warning: Could not resolve object for comment: {} {}. Error: {}", obj_type, obj_name, e);
+        Err(_) => {
+            // Object not found - this is not an error, just skip storing the comment
+            // This can happen if the object doesn't exist yet or is not tracked in the catalog
             Ok(())
         }
     }

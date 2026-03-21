@@ -1067,6 +1067,11 @@ pub trait HandlerUtils {
         
         let full_func_name = func_parts.join(".");
 
+        // Handle internal __pg_comment_on function specially
+        if func_name == "__pg_comment_on" {
+            return self.handle_comment_on(func_call, conn);
+        }
+
         // Look up function - use in-memory cache for schema-qualified names
         let metadata = if func_parts.len() > 1 {
             self.functions().get(&full_func_name).map(|m| m.clone())
@@ -1117,6 +1122,45 @@ pub trait HandlerUtils {
 
         // Convert result to Response
         self.convert_function_result_to_response(result)
+    }
+
+    /// Handle __pg_comment_on internal function
+    fn handle_comment_on(&self, func_call: &pg_query::protobuf::FuncCall, conn: &rusqlite::Connection) -> Result<Vec<Response>> {
+        use pg_query::protobuf::node::Node as NodeEnum;
+
+        // Extract arguments: (obj_type, obj_name, comment)
+        let mut args = Vec::new();
+        for arg_node in &func_call.args {
+            if let Some(ref inner) = arg_node.node {
+                if let NodeEnum::AConst(ref aconst) = inner {
+                    if let Some(ref val) = aconst.val {
+                        match val {
+                            pg_query::protobuf::a_const::Val::Sval(sv) => {
+                                args.push(sv.sval.clone());
+                            }
+                            pg_query::protobuf::a_const::Val::Ival(iv) => {
+                                args.push(iv.ival.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        if args.len() != 3 {
+            anyhow::bail!("__pg_comment_on requires exactly 3 arguments");
+        }
+
+        let obj_type = &args[0];
+        let obj_name = &args[1];
+        let comment = &args[2];
+
+        // Store the comment in the catalog
+        crate::catalog::store_comment(conn, obj_type, obj_name, comment)?;
+
+        // Return success response
+        Ok(vec![Response::Execution(Tag::new("COMMENT"))])
     }
 
     /// Convert function execution result to pgwire Response
